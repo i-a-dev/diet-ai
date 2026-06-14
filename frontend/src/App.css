@@ -1,0 +1,262 @@
+.app-root {
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 24px 16px;
+}
+
+.phone-shell {
+  width: min(390px, 100%);
+  height: min(820px, 92vh);
+  background: #fff;
+  border-radius: 28px;
+  border: 1px solid #e8e8e8;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.08);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.top-header {
+  height: 56px;
+  border-bottom: 1px solid #f0f0f0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 14px;
+}
+
+.top-header h1 {
+  font-size: 16px;
+  margin: 0;
+  font-weight: 700;
+}
+
+.icon-button {
+  border: 0;
+  background: transparent;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.screen-content {
+  flex: 1;
+  overflow: auto;
+  padding: 14px;
+  background: #fcfcfc;
+}
+
+.bottom-nav {
+  height: 70px;
+  border-top: 1px solid #f0f0f0;
+  background: #fff;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.nav-item {
+  border: 0;
+  background: transparent;
+  color: #7f7f7f;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.nav-icon {
+  font-size: 16px;
+}
+
+.nav-item.active {
+  color: #ff7e2f;
+  font-weight: 700;
+}
+
+.coach-card {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  border: 1px solid #ffe3cf;
+  background: #fff8f2;
+  border-radius: 12px;
+  padding: 10px;
+  margin-bottom: 12px;
+}
+
+.coach-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: #fff;
+  display: grid;
+  place-items: center;
+}
+
+.coach-title {
+  margin: 0;
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.coach-description {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: #666;
+}
+
+.chat-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.chat-bubble {
+  border-radius: 14px;
+  padding: 10px 12px;
+  max-width: 88%;
+  display: inline-flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.chat-bubble p,
+.chat-bubble time {
+  margin: 0;
+}
+
+.chat-bubble.assistant {
+  background: #fff;
+  border: 1px solid #ececec;
+  align-self: flex-start;
+}
+
+.chat-bubble.user {
+  background: #ff8f3d;
+  color: #fff;
+  align-self: flex-end;
+}
+
+.chat-bubble time {
+  font-size: 11px;
+  color: #949494;
+}
+
+.chat-bubble.user time {
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.chat-form {
+  display: flex;
+  gap: 8px;
+}
+
+.chat-form input {
+  flex: 1;
+  border: 1px solid #ddd;
+  border-radius: 10px;
+  padding: 10px;
+  font-size: 14px;
+}
+
+.chat-form button {
+  background: #ff8f3d;
+  color: #fff;
+  border: 0;
+  border-radius: 10px;
+  padding: 0 14px;
+}
+
+.date-label {
+  margin: 0 0 10px;
+  color: #555;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.metric-card {
+  background: #fff;
+  border: 1px solid #ededed;
+  border-radius: 12px;
+  padding: 12px;
+  margin-bottom: 10px;
+}
+
+.metric-card h2 {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+
+.main-value {
+  margin: 0;
+  font-size: 34px;
+  font-weight: 700;
+  color: #262626;
+}
+
+.sub-value {
+  margin: 0 0 6px;
+  font-size: 13px;
+  color: #666;
+}
+
+.simple-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.simple-list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 14px;
+}
+
+.memo-text {
+  margin: 0;
+}
+
+.loading-text {
+  margin: 16px 0;
+  text-align: center;
+  color: #696969;
+}
+
+.bar-chart {
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 8px;
+}
+
+.bar-item {
+  text-align: center;
+  font-size: 11px;
+  color: #666;
+}
+
+.bar-track {
+  height: 90px;
+  background: #f1f1f1;
+  border-radius: 8px;
+  display: flex;
+  align-items: flex-end;
+  overflow: hidden;
+  margin-bottom: 5px;
+}
+
+.bar-fill {
+  width: 100%;
+  background: linear-gradient(180deg, #7ad48f 0%, #2eb46a 100%);
+}
