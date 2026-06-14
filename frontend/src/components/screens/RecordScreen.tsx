@@ -5,15 +5,13 @@ import {
   Cookie,
   Footprints,
   Moon,
-  MoonStar,
-  Pencil,
   StickyNote,
   Sun,
   Sunset,
   UtensilsCrossed,
   Weight,
 } from "lucide-react";
-import { FoodRow } from "../FoodRow.tsx";
+import { MealSection } from "../MealSection.tsx";
 import { SecIcon } from "../SecIcon.tsx";
 import { TopNav } from "../TopNav.tsx";
 import { ORANGE } from "../../constants.ts";
@@ -39,6 +37,13 @@ export function RecordScreen() {
     fontWeight: 600,
     color: "#222",
   };
+  const plusBtn = (
+    <span
+      style={{ color: ORANGE, fontSize: 26, lineHeight: 1, cursor: "pointer" }}
+    >
+      +
+    </span>
+  );
 
   return (
     <div
@@ -47,7 +52,6 @@ export function RecordScreen() {
         display: "flex",
         flexDirection: "column",
         overflow: "hidden",
-        position: "relative",
         minHeight: 0,
       }}
     >
@@ -76,7 +80,6 @@ export function RecordScreen() {
           flex: 1,
           overflowY: "auto",
           background: "#F7F7F7",
-          paddingBottom: 80,
         }}
       >
         <div style={{ ...secStyle, marginTop: 12 }}>
@@ -87,6 +90,7 @@ export function RecordScreen() {
               </SecIcon>
               体重
             </div>
+            {plusBtn}
           </div>
           <div
             style={{
@@ -146,21 +150,42 @@ export function RecordScreen() {
               </SecIcon>
               食事
             </div>
-            <span style={{ fontSize: 13, color: ORANGE, fontWeight: 500 }}>
-              カロリー 1,582 / 1,800kcal
+            <span style={{ fontSize: 13, fontWeight: 700, color: ORANGE }}>
+              1,582 / 1,800kcal
             </span>
           </div>
-          <FoodRow icon={<Sun size={18} />} name="朝ごはん" kcal="412 kcal" />
-          <FoodRow
-            icon={<Sunset size={18} />}
-            name="昼ごはん"
-            kcal="618 kcal"
+          <MealSection
+            icon={<Sun size={14} />}
+            title="朝ごはん"
+            items={[
+              { label: "白米 150g", kcal: "234kcal" },
+              { label: "味噌汁", kcal: "45kcal" },
+              { label: "焼き鮭", kcal: "180kcal" },
+            ]}
           />
-          <FoodRow icon={<Moon size={18} />} name="夜ごはん" kcal="552 kcal" />
-          <FoodRow
-            icon={<Cookie size={18} />}
-            name="間食・おやつ"
-            kcal="0 kcal"
+          <MealSection
+            icon={<Sunset size={14} />}
+            title="昼ごはん"
+            items={[
+              { label: "鶏のから揚げ定食", kcal: "680kcal" },
+              { label: "ご飯 少なめ", kcal: "180kcal" },
+              { label: "サラダ", kcal: "35kcal" },
+            ]}
+          />
+          <MealSection
+            icon={<Moon size={14} />}
+            title="夜ごはん"
+            items={[
+              { label: "豆腐ハンバーグ", kcal: "320kcal" },
+              { label: "野菜スープ", kcal: "85kcal" },
+              { label: "ごはん 150g", kcal: "147kcal" },
+            ]}
+          />
+          <MealSection
+            icon={<Cookie size={14} />}
+            title="間食・おやつ"
+            items={[]}
+            isLast
           />
         </div>
 
@@ -172,6 +197,7 @@ export function RecordScreen() {
               </SecIcon>
               運動・歩数
             </div>
+            {plusBtn}
           </div>
           <div style={{ display: "flex", justifyContent: "space-between" }}>
             <div>
@@ -199,25 +225,6 @@ export function RecordScreen() {
           </div>
         </div>
 
-        <div style={secStyle}>
-          <div style={secHead}>
-            <div style={secTitle}>
-              <SecIcon bg="#EAE6FD" color="#7F6FD4">
-                <MoonStar size={16} />
-              </SecIcon>
-              睡眠
-            </div>
-          </div>
-          <div style={{ fontSize: 12, color: "#AAA", marginBottom: 3 }}>
-            睡眠時間
-          </div>
-          <div>
-            <span style={{ fontSize: 28, fontWeight: 700, color: "#111" }}>
-              6時間20分
-            </span>
-          </div>
-        </div>
-
         <div style={{ ...secStyle, marginBottom: 10 }}>
           <div style={secHead}>
             <div style={secTitle}>
@@ -226,34 +233,13 @@ export function RecordScreen() {
               </SecIcon>
               メモ
             </div>
+            {plusBtn}
           </div>
           <div style={{ fontSize: 14, color: "#AAA" }}>
             今日はケーキを食べちゃった
           </div>
         </div>
       </div>
-      <button
-        type="button"
-        aria-label="編集"
-        style={{
-          position: "absolute",
-          right: 20,
-          bottom: 10,
-          width: 64,
-          height: 64,
-          borderRadius: "50%",
-          background: ORANGE,
-          border: "none",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          boxShadow: "0 4px 14px rgba(232, 137, 43, 0.45)",
-          cursor: "pointer",
-          zIndex: 10,
-        }}
-      >
-        <Pencil size={26} color="#fff" />
-      </button>
     </div>
   );
 }
