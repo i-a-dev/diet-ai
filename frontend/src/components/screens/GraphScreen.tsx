@@ -1,176 +1,556 @@
-import { Calendar, ChevronLeft, ChevronRight, Flame, Footprints, Weight } from 'lucide-react'
+import { useState, type ReactNode } from 'react'
+import { Calendar, ChevronLeft, ChevronRight, Footprints, PersonStanding, UtensilsCrossed, Weight } from 'lucide-react'
 import { SecIcon } from '../SecIcon.tsx'
 import { TopNav } from '../TopNav.tsx'
-import { GREEN, ORANGE } from '../../constants.ts'
+import { ORANGE } from '../../constants.ts'
+
+const METRIC_TABS = ['体重', '食事', '運動', '歩数'] as const
+const PERIOD_TABS = ['週', '月', '3ヶ月', '半年'] as const
+
+const STEP_GREEN = '#2EAA72'
+const STEP_GREEN_BG = '#D6F5E8'
+const STEP_GREEN_LIGHT = '#EDF9F3'
+
+const days = ['4/18', '4/19', '4/20', '4/21', '4/22', '4/23', '4/24']
+const kcalH = [44, 60, 38, 52, 36, 66, 54]
+const exerciseH = [28, 42, 20, 36, 24, 48, 32]
+const stepH = [48, 64, 34, 56, 42, 68, 52]
+const BAR_WIDTH = 13
+const CHART_HEIGHT = 130
+const CHART_PLOT_WIDTH = 310
+const Y_AXIS_WIDTH = 40
+const CHART_BOTTOM_Y = CHART_HEIGHT
+const KCAL_AXIS_TICKS = [0, 43, 86, CHART_HEIGHT] as const
+const STEP_AXIS_TICKS = [0, 43, 86, CHART_HEIGHT] as const
+const WEIGHT_AXIS_LABELS = ['64', '63', '62'] as const
+const WEIGHT_AXIS_TICKS = [0, 65, CHART_HEIGHT] as const
+const WEIGHT_MIN = 62
+const WEIGHT_MAX = 64
+const weightData = [62.85, 62.75, 62.35, 62.55, 62.65, 62.8, 62.9]
+
+function valueToY(value: number, max: number) {
+  return CHART_HEIGHT - (value / max) * CHART_HEIGHT
+}
+
+function weightToY(weight: number) {
+  return ((WEIGHT_MAX - weight) / (WEIGHT_MAX - WEIGHT_MIN)) * CHART_HEIGHT
+}
+
+const xsBar = [22.5, 65.5, 108.5, 151.5, 194.5, 237.5, 280.5]
+const xsLine = [44, 87, 130, 173, 216, 259, 302]
+
+const plusBtn = (
+  <span style={{ color: ORANGE, fontSize: 26, lineHeight: 1, cursor: 'pointer' }}>+</span>
+)
 
 export function GraphScreen() {
-  const days = ['4/18', '4/19', '4/20', '4/21', '4/22', '4/23', '4/24']
-  const kcalH = [44, 60, 38, 52, 36, 66, 54]
-  const stepH = [48, 64, 34, 56, 42, 68, 52]
-  const xsBar = [16, 59, 102, 145, 188, 231, 274]
-  const xsLbl = [29, 72, 115, 158, 201, 244, 287]
-  const xsLine = [44, 87, 130, 173, 216, 259, 302]
-  const yLine = [38, 48, 62, 42, 34, 24, 16]
+  const [metricTab, setMetricTab] = useState(0)
+  const [periodTab, setPeriodTab] = useState(0)
+  const accent = metricTab >= 2 ? STEP_GREEN : ORANGE
 
   return (
-    <>
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0 }}>
       <TopNav title="記録を見る" rightIcon={<Calendar size={22} color="#C0C0C0" />} />
-      <div style={{ flex: 1, overflowY: 'auto', background: '#F7F7F7' }}>
-        <div style={{ display: 'flex', background: '#F0F0F0', borderRadius: 10, padding: 3, margin: '14px 16px 10px' }}>
-          {['週', '月', '3ヶ月'].map((text, index) => (
-            <div
-              key={text}
+
+      <div style={{ display: 'flex', background: '#fff', borderBottom: '1px solid #F0F0F0', flexShrink: 0 }}>
+        {METRIC_TABS.map((label, index) => {
+          const active = metricTab === index
+          const tabColor = index >= 2 ? STEP_GREEN : ORANGE
+          return (
+            <button
+              key={label}
+              type="button"
+              onClick={() => setMetricTab(index)}
               style={{
                 flex: 1,
-                padding: '7px 0',
+                padding: '10px 0',
+                fontSize: 14,
+                fontWeight: active ? 700 : 500,
+                color: active ? tabColor : '#888',
+                border: 'none',
+                borderBottom: active ? `2px solid ${tabColor}` : '2px solid transparent',
+                background: 'transparent',
+                cursor: 'pointer',
+              }}
+            >
+              {label}
+            </button>
+          )
+        })}
+      </div>
+
+      <div
+        style={{
+          flex: 1,
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
+          background: '#F7F7F7',
+          minHeight: 0,
+        }}
+      >
+        <div
+          style={{
+            display: 'flex',
+            background: '#F0F0F0',
+            borderRadius: 10,
+            padding: 3,
+            margin: '10px 16px 8px',
+            flexShrink: 0,
+          }}
+        >
+          {PERIOD_TABS.map((text, index) => (
+            <button
+              key={text}
+              type="button"
+              onClick={() => setPeriodTab(index)}
+              style={{
+                flex: 1,
+                padding: '6px 0',
                 fontSize: 13,
-                fontWeight: index === 0 ? 700 : 500,
+                fontWeight: periodTab === index ? 700 : 500,
                 textAlign: 'center',
-                color: index === 0 ? '#fff' : '#888',
+                color: periodTab === index ? '#fff' : '#888',
                 borderRadius: 8,
-                background: index === 0 ? ORANGE : 'transparent',
+                background: periodTab === index ? accent : 'transparent',
+                border: 'none',
                 cursor: 'pointer',
               }}
             >
               {text}
-            </div>
+            </button>
           ))}
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 20px 10px' }}>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '2px 20px 8px',
+            flexShrink: 0,
+          }}
+        >
           <ChevronLeft size={20} color="#C0C0C0" />
           <span style={{ fontSize: 13, color: '#666' }}>4/18（木）〜 4/24（水）</span>
           <ChevronRight size={20} color="#C0C0C0" />
         </div>
 
-        <div style={{ background: '#fff', margin: '0 16px 12px', borderRadius: 16, padding: '14px 16px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-            <SecIcon bg="#FDE8C8" color={ORANGE} size={26}>
-              <Weight size={14} />
-            </SecIcon>
-            <span style={{ fontSize: 15, fontWeight: 600, color: '#222' }}>体重</span>
-          </div>
-          <svg width="100%" height="100" viewBox="0 0 310 100" preserveAspectRatio="none">
-            {[15, 45, 75].map((y) => (
-              <line key={y} x1="20" y1={y} x2="310" y2={y} stroke="#F0F0F0" strokeWidth="1" />
-            ))}
-            {[
-              ['64', 15],
-              ['63', 45],
-              ['62', 75],
-            ].map(([label, y]) => (
-              <text key={label} x="0" y={Number(y) + 3} fontSize="8" fill="#C0C0C0" fontFamily="sans-serif">
-                {label}
-              </text>
-            ))}
-            <text x="0" y="96" fontSize="8" fill="#C0C0C0" fontFamily="sans-serif">
-              (kg)
-            </text>
-            <polyline points={xsLine.map((x, i) => `${x},${yLine[i]}`).join(' ')} fill="none" stroke={ORANGE} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
-            {xsLine.map((x, index) => (
-              <circle key={x} cx={x} cy={yLine[index]} r="3.5" fill="#fff" stroke={ORANGE} strokeWidth="2" />
-            ))}
-            <rect x="278" y="2" width="32" height="15" rx="4" fill={ORANGE} />
-            <text x="294" y="13" fontSize="9" fill="#fff" textAnchor="middle" fontWeight="700" fontFamily="sans-serif">
-              62.4
-            </text>
-            {days.map((day, index) => (
-              <text key={day} x={xsLine[index]} y="96" fontSize="8" fill="#C0C0C0" textAnchor="middle" fontFamily="sans-serif">
-                {day}
-              </text>
-            ))}
-          </svg>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 10, paddingTop: 10, borderTop: '1px solid #F5F5F5' }}>
-            {[
-              ['62.7 kg', '週の平均'],
-              ['-0.8 kg', '前週比'],
-              ['-5.4 kg', '目標まで'],
-            ].map(([value, label], index) => (
-              <div key={label} style={{ textAlign: 'center', flex: 1 }}>
-                <div style={{ fontSize: 15, fontWeight: 700, color: index > 0 ? ORANGE : '#111' }}>{value}</div>
-                <div style={{ fontSize: 11, color: '#AAA', marginTop: 3 }}>{label}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div style={{ background: '#fff', margin: '0 16px 12px', borderRadius: 16, padding: '14px 16px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <SecIcon bg="#FDE8E8" color="#E85B2B" size={26}>
-                <Flame size={14} />
-              </SecIcon>
-              <span style={{ fontSize: 15, fontWeight: 600, color: '#222' }}>カロリー</span>
-            </div>
-            <span style={{ fontSize: 12, color: '#888' }}>平均 1,684kcal</span>
-          </div>
-          <svg width="100%" height="90" viewBox="0 0 310 90" preserveAspectRatio="none">
-            {[20, 50].map((y) => (
-              <line key={y} x1="0" y1={y} x2="310" y2={y} stroke="#F5F5F5" strokeWidth="1" />
-            ))}
-            {[
-              ['3,000', 18],
-              ['1,000', 48],
-              ['0', 76],
-            ].map(([label, y]) => (
-              <text key={label} x="2" y={Number(y)} fontSize="7" fill="#DDD" fontFamily="sans-serif">
-                {label}
-              </text>
-            ))}
-            {kcalH.map((height, index) => (
-              <rect key={days[index]} x={xsBar[index]} y={82 - height} width="26" height={height} rx="4" fill={GREEN} />
-            ))}
-            {days.map((day, index) => (
-              <text key={day} x={xsLbl[index]} y="88" fontSize="8" fill="#C0C0C0" textAnchor="middle" fontFamily="sans-serif">
-                {day}
-              </text>
-            ))}
-          </svg>
-          <div style={{ marginTop: 10 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5 }}>
-              <span style={{ fontSize: 12, color: '#888' }}>目標 1,800kcal</span>
-              <span style={{ fontSize: 12, color: '#888' }}>達成率 94%</span>
-            </div>
-            <div style={{ height: 8, background: '#F0F0F0', borderRadius: 4 }}>
-              <div style={{ height: 8, background: ORANGE, borderRadius: 4, width: '94%' }} />
-            </div>
-          </div>
-        </div>
-
-        <div style={{ background: '#fff', margin: '0 16px 14px', borderRadius: 16, padding: '14px 16px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <SecIcon bg="#D6F5E8" color="#2EAA72" size={26}>
-                <Footprints size={14} />
-              </SecIcon>
-              <span style={{ fontSize: 15, fontWeight: 600, color: '#222' }}>歩数</span>
-            </div>
-            <span style={{ fontSize: 12, color: '#888' }}>平均 6,215歩</span>
-          </div>
-          <svg width="100%" height="90" viewBox="0 0 310 90" preserveAspectRatio="none">
-            {[20, 50].map((y) => (
-              <line key={y} x1="0" y1={y} x2="310" y2={y} stroke="#F5F5F5" strokeWidth="1" />
-            ))}
-            {[
-              ['10,000', 18],
-              ['5,000', 48],
-              ['0', 76],
-            ].map(([label, y]) => (
-              <text key={label} x="2" y={Number(y)} fontSize="7" fill="#DDD" fontFamily="sans-serif">
-                {label}
-              </text>
-            ))}
-            {stepH.map((height, index) => (
-              <rect key={days[index]} x={xsBar[index]} y={82 - height} width="26" height={height} rx="4" fill={GREEN} />
-            ))}
-            {days.map((day, index) => (
-              <text key={day} x={xsLbl[index]} y="88" fontSize="8" fill="#C0C0C0" textAnchor="middle" fontFamily="sans-serif">
-                {day}
-              </text>
-            ))}
-          </svg>
+        <div
+          style={{
+            flex: 1,
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+            padding: '0 16px 8px',
+            minHeight: 0,
+          }}
+        >
+          {metricTab === 0 && <WeightGraphCard />}
+          {metricTab === 1 && <MealGraphCard />}
+          {metricTab === 2 && <ExerciseGraphCard />}
+          {metricTab === 3 && <StepsGraphCard />}
         </div>
       </div>
+    </div>
+  )
+}
+
+function CardShell({ children }: { children: ReactNode }) {
+  return (
+    <div
+      style={{
+        flex: 1,
+        background: '#fff',
+        borderRadius: 16,
+        padding: '10px 12px',
+        display: 'flex',
+        flexDirection: 'column',
+        minHeight: 0,
+        overflow: 'hidden',
+      }}
+    >
+      {children}
+    </div>
+  )
+}
+
+function CardHeader({ icon, label }: { icon: ReactNode; label: string }) {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginBottom: 6,
+        flexShrink: 0,
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        {icon}
+        <span style={{ fontSize: 15, fontWeight: 600, color: '#222' }}>{label}</span>
+      </div>
+      {plusBtn}
+    </div>
+  )
+}
+
+function StatBoxes({
+  items,
+  accent,
+  boxBg,
+}: {
+  items: { value: string; label: string; highlight?: boolean }[]
+  accent: string
+  boxBg: string
+}) {
+  return (
+    <div style={{ display: 'flex', gap: 8, marginTop: 6, flexShrink: 0 }}>
+      {items.map((item) => (
+        <div
+          key={item.label}
+          style={{
+            flex: 1,
+            background: boxBg,
+            borderRadius: 10,
+            padding: '6px 4px',
+            textAlign: 'center',
+          }}
+        >
+          <div style={{ fontSize: 13, fontWeight: 700, color: item.highlight ? accent : '#111' }}>{item.value}</div>
+          <div style={{ fontSize: 11, color: '#AAA', marginTop: 3 }}>{item.label}</div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function GraphChart({
+  children,
+  yAxisLabels,
+  yAxisTicks,
+  goalOverlay,
+  plotMarkers,
+}: {
+  children: ReactNode
+  yAxisLabels?: string[]
+  yAxisTicks?: number[]
+  goalOverlay?: { label: string; color: string }
+  plotMarkers?: { x: number; y: number; color: string }[]
+}) {
+  const showYAxis = Boolean(yAxisLabels && yAxisTicks && yAxisLabels.length === yAxisTicks.length)
+
+  const dateRow = (
+    <div
+      style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        padding: `2px 4px 0 ${showYAxis ? `${Y_AXIS_WIDTH}px` : '4px'}`,
+        flexShrink: 0,
+      }}
+    >
+      {days.map((day) => (
+        <span key={day} style={{ fontSize: 11, color: '#888', flex: 1, textAlign: 'center', fontWeight: 500 }}>
+          {day}
+        </span>
+      ))}
+    </div>
+  )
+
+  if (!showYAxis) {
+    return (
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, width: '100%' }}>
+        <div style={{ flex: 1, minHeight: 0, width: '100%' }}>
+          <svg
+            width="100%"
+            height="100%"
+            viewBox={`0 0 ${CHART_PLOT_WIDTH} ${CHART_HEIGHT}`}
+            preserveAspectRatio="xMidYMid meet"
+            style={{ display: 'block', overflow: 'visible' }}
+          >
+            {children}
+          </svg>
+        </div>
+        {dateRow}
+      </div>
+    )
+  }
+
+  return (
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, width: '100%' }}>
+      <div style={{ flex: 1, minHeight: 0, width: '100%', display: 'flex', gap: 6 }}>
+        <div style={{ width: Y_AXIS_WIDTH, height: '100%', position: 'relative', flexShrink: 0 }}>
+          {yAxisLabels!.map((label, index) => (
+            <span
+              key={`${label}-${index}`}
+              style={{
+                position: 'absolute',
+                left: 0,
+                top: `${(yAxisTicks![index] / CHART_HEIGHT) * 100}%`,
+                transform: 'translateY(-50%)',
+                fontSize: 11,
+                color: '#7A7A7A',
+                fontWeight: 500,
+                lineHeight: 1,
+              }}
+            >
+              {label}
+            </span>
+          ))}
+        </div>
+        <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
+          {goalOverlay && (
+            <div
+              style={{
+                position: 'absolute',
+                top: 4,
+                right: 4,
+                textAlign: 'right',
+                zIndex: 1,
+                pointerEvents: 'none',
+                lineHeight: 1.3,
+              }}
+            >
+              <div style={{ fontSize: 9, color: goalOverlay.color }}>目標</div>
+              <div style={{ fontSize: 10, color: goalOverlay.color, fontWeight: 600 }}>{goalOverlay.label}</div>
+            </div>
+          )}
+          <svg
+            width="100%"
+            height="100%"
+            viewBox={`0 0 ${CHART_PLOT_WIDTH} ${CHART_HEIGHT}`}
+            preserveAspectRatio="none"
+            style={{ display: 'block' }}
+          >
+            {children}
+          </svg>
+          {plotMarkers?.map((marker, index) => (
+            <div
+              key={index}
+              style={{
+                position: 'absolute',
+                left: `${(marker.x / CHART_PLOT_WIDTH) * 100}%`,
+                top: `${(marker.y / CHART_HEIGHT) * 100}%`,
+                transform: 'translate(-50%, -50%)',
+                width: 7,
+                height: 7,
+                borderRadius: '50%',
+                background: '#fff',
+                border: `2px solid ${marker.color}`,
+                boxSizing: 'border-box',
+                pointerEvents: 'none',
+              }}
+            />
+          ))}
+        </div>
+      </div>
+      {dateRow}
+    </div>
+  )
+}
+
+function WeightGraphCard() {
+  return (
+    <CardShell>
+      <CardHeader
+        icon={
+          <SecIcon bg="#FDE8C8" color={ORANGE} size={26}>
+            <Weight size={14} />
+          </SecIcon>
+        }
+        label="体重"
+      />
+      <div style={{ flexShrink: 0 }}>
+        <span style={{ fontSize: 28, fontWeight: 700, color: '#111' }}>62.4</span>
+        <span style={{ fontSize: 15, color: '#888' }}> kg</span>
+      </div>
+      <div style={{ fontSize: 12, color: ORANGE, marginTop: 2, marginBottom: 4, flexShrink: 0 }}>前日比 -0.2kg</div>
+
+      <GraphChart
+        yAxisLabels={[...WEIGHT_AXIS_LABELS]}
+        yAxisTicks={[...WEIGHT_AXIS_TICKS]}
+        plotMarkers={xsLine.map((x, index) => ({ x, y: weightToY(weightData[index]), color: ORANGE }))}
+      >
+        {WEIGHT_AXIS_TICKS.map((y) => (
+          <line key={y} x1="0" y1={y} x2={CHART_PLOT_WIDTH} y2={y} stroke="#F0F0F0" strokeWidth="1" />
+        ))}
+        <polyline
+          points={xsLine.map((x, i) => `${x},${weightToY(weightData[i])}`).join(' ')}
+          fill="none"
+          stroke={ORANGE}
+          strokeWidth="2.5"
+          strokeLinejoin="round"
+          strokeLinecap="round"
+          vectorEffect="non-scaling-stroke"
+        />
+      </GraphChart>
+
+      <StatBoxes
+        accent={ORANGE}
+        boxBg="#FFF5EB"
+        items={[
+          { value: '62.7 kg', label: '平均' },
+          { value: '-0.8 kg', label: '変化量', highlight: true },
+          { value: '-5.4 kg', label: '目標まで', highlight: true },
+        ]}
+      />
+    </CardShell>
+  )
+}
+
+function GoalLineSvg({ y, color }: { y: number; color: string }) {
+  const connectorX = CHART_PLOT_WIDTH - 14
+
+  return (
+    <>
+      <line x1="0" y1={y} x2={CHART_PLOT_WIDTH} y2={y} stroke={color} strokeWidth="1" strokeDasharray="4 3" opacity="0.5" />
+      <line x1={connectorX} y1={y} x2={connectorX} y2={24} stroke={color} strokeWidth="1" opacity="0.7" />
     </>
+  )
+}
+
+function KcalBarGraphCard({
+  icon,
+  label,
+  average,
+  barHeights,
+  statItems,
+  accent = ORANGE,
+  boxBg = '#FFF5EB',
+  goalLine,
+}: {
+  icon: ReactNode
+  label: string
+  average: string
+  barHeights: number[]
+  statItems: { value: string; label: string; highlight?: boolean }[]
+  accent?: string
+  boxBg?: string
+  goalLine?: { value: number; max: number; label: string }
+}) {
+  const goalY = goalLine ? valueToY(goalLine.value, goalLine.max) : undefined
+
+  return (
+    <CardShell>
+      <CardHeader icon={icon} label={label} />
+      <div style={{ marginBottom: 4, flexShrink: 0 }}>
+        <span style={{ fontSize: 13, color: '#888' }}>平均 </span>
+        <span style={{ fontSize: 28, fontWeight: 700, color: accent }}>{average}</span>
+        <span style={{ fontSize: 15, color: '#888' }}> kcal</span>
+      </div>
+
+      <GraphChart
+        yAxisLabels={['3000', '2000', '1000', '0']}
+        yAxisTicks={[...KCAL_AXIS_TICKS]}
+        goalOverlay={goalLine ? { label: goalLine.label, color: accent } : undefined}
+      >
+        {KCAL_AXIS_TICKS.map((y) => (
+          <line key={y} x1="0" y1={y} x2={CHART_PLOT_WIDTH} y2={y} stroke="#F5F5F5" strokeWidth="1" />
+        ))}
+        {goalLine && goalY !== undefined && <GoalLineSvg y={goalY} color={accent} />}
+        {barHeights.map((height, index) => (
+          <rect
+            key={days[index]}
+            x={xsBar[index]}
+            y={CHART_BOTTOM_Y - height * 1.4}
+            width={BAR_WIDTH}
+            height={height * 1.4}
+            rx="2"
+            fill={accent}
+          />
+        ))}
+      </GraphChart>
+
+      <StatBoxes accent={accent} boxBg={boxBg} items={statItems} />
+    </CardShell>
+  )
+}
+
+function MealGraphCard() {
+  return (
+    <KcalBarGraphCard
+      icon={
+        <SecIcon bg="#FDE8C8" color={ORANGE} size={26}>
+          <UtensilsCrossed size={14} />
+        </SecIcon>
+      }
+      label="食事"
+      average="1,582"
+      goalLine={{ value: 1800, max: 3000, label: '1,800kcal' }}
+      barHeights={kcalH}
+      statItems={[
+        { value: '1,582 kcal', label: '平均' },
+        { value: '-218 kcal', label: '目標差', highlight: true },
+        { value: '85%', label: '達成率', highlight: true },
+      ]}
+    />
+  )
+}
+
+function ExerciseGraphCard() {
+  return (
+    <KcalBarGraphCard
+      icon={
+        <SecIcon bg={STEP_GREEN_BG} color={STEP_GREEN} size={26}>
+          <PersonStanding size={14} />
+        </SecIcon>
+      }
+      label="運動"
+      average="180"
+      barHeights={exerciseH}
+      accent={STEP_GREEN}
+      boxBg={STEP_GREEN_LIGHT}
+      statItems={[
+        { value: '180 kcal', label: '平均' },
+        { value: '-120 kcal', label: '目標差', highlight: true },
+        { value: '60%', label: '達成率', highlight: true },
+      ]}
+    />
+  )
+}
+
+function StepsGraphCard() {
+  return (
+    <CardShell>
+      <CardHeader
+        icon={
+          <SecIcon bg={STEP_GREEN_BG} color={STEP_GREEN} size={26}>
+            <Footprints size={14} />
+          </SecIcon>
+        }
+        label="歩数"
+      />
+      <div style={{ marginBottom: 4, flexShrink: 0 }}>
+        <span style={{ fontSize: 13, color: '#888' }}>平均 </span>
+        <span style={{ fontSize: 28, fontWeight: 700, color: STEP_GREEN }}>6,240</span>
+        <span style={{ fontSize: 15, color: '#888' }}> 歩</span>
+      </div>
+
+      <GraphChart yAxisLabels={['12000', '8000', '4000', '0']} yAxisTicks={[...STEP_AXIS_TICKS]}>
+        {STEP_AXIS_TICKS.map((y) => (
+          <line key={y} x1="0" y1={y} x2={CHART_PLOT_WIDTH} y2={y} stroke="#F5F5F5" strokeWidth="1" />
+        ))}
+        {stepH.map((height, index) => (
+          <rect
+            key={days[index]}
+            x={xsBar[index]}
+            y={CHART_BOTTOM_Y - height * 1.4}
+            width={BAR_WIDTH}
+            height={height * 1.4}
+            rx="2"
+            fill={STEP_GREEN}
+          />
+        ))}
+      </GraphChart>
+
+      <StatBoxes
+        accent={STEP_GREEN}
+        boxBg={STEP_GREEN_LIGHT}
+        items={[
+          { value: '6,240 歩', label: '平均' },
+          { value: '8,122 歩', label: '最高', highlight: true },
+        ]}
+      />
+    </CardShell>
   )
 }
