@@ -11,10 +11,22 @@ import {
   UtensilsCrossed,
   Weight,
 } from "lucide-react";
+import { ExerciseChip } from "../ExerciseChip.tsx";
 import { MealSection } from "../MealSection.tsx";
 import { SecIcon } from "../SecIcon.tsx";
 import { TopNav } from "../TopNav.tsx";
 import { ORANGE } from "../../constants.ts";
+
+function CalorieValue({ value }: { value: string }) {
+  return (
+    <>
+      <span style={{ fontSize: 14, color: "#888" }}>{value}</span>
+      <span style={{ fontSize: 14, color: "#888" }}> kcal</span>
+    </>
+  );
+}
+
+const calorieLabelStyle = { fontSize: 12, color: "#AAA", marginBottom: 3 };
 
 export function RecordScreen() {
   const secStyle = {
@@ -197,7 +209,12 @@ export function RecordScreen() {
               </SecIcon>
               運動・歩数
             </div>
-            {plusBtn}
+            <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+              <span style={{ fontSize: 14, color: "#2EAA72" }}>
+                <span style={{ fontWeight: 700 }}>-411</span> kcal
+              </span>
+              {plusBtn}
+            </div>
           </div>
           <div style={{ display: "flex", justifyContent: "space-between" }}>
             <div>
@@ -212,14 +229,50 @@ export function RecordScreen() {
               </div>
             </div>
             <div style={{ textAlign: "right" }}>
-              <div style={{ fontSize: 12, color: "#AAA", marginBottom: 3 }}>
-                消費カロリー
-              </div>
+              <div style={calorieLabelStyle}>消費カロリー</div>
               <div>
-                <span style={{ fontSize: 28, fontWeight: 700, color: "#111" }}>
-                  231
-                </span>
-                <span style={{ fontSize: 14, color: "#888" }}> kcal</span>
+                <CalorieValue value="231" />
+              </div>
+            </div>
+          </div>
+          <div
+            style={{
+              marginTop: 16,
+              paddingTop: 14,
+              borderTop: "1px solid #F0F0F0",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "flex-start",
+              }}
+            >
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 12, color: "#AAA", marginBottom: 8 }}>
+                  運動
+                </div>
+                <div
+                  style={{
+                    display: "flex",
+                    flexWrap: "wrap",
+                    gap: 6,
+                    alignItems: "center",
+                  }}
+                >
+                  <ExerciseChip text="スクワット　30回　60kcal" />
+                  <ExerciseChip text="腹筋　20回 × 2セット　30kcal" />
+                  <ExerciseChip text="ウォーキング　30分　90kcal" />
+                </div>
+              </div>
+              <div
+                style={{ textAlign: "right", flexShrink: 0, marginLeft: 16 }}
+              >
+                <div style={calorieLabelStyle}>消費カロリー</div>
+                <div>
+                  <CalorieValue value="180" />
+                </div>
               </div>
             </div>
           </div>
