@@ -5,28 +5,19 @@ import {
   Cookie,
   Footprints,
   Moon,
+  PersonStanding,
   StickyNote,
   Sun,
   Sunset,
   UtensilsCrossed,
   Weight,
 } from "lucide-react";
+import { ActivitySubSection } from "../ActivitySubSection.tsx";
 import { ExerciseChip } from "../ExerciseChip.tsx";
 import { MealSection } from "../MealSection.tsx";
 import { SecIcon } from "../SecIcon.tsx";
 import { TopNav } from "../TopNav.tsx";
 import { ORANGE } from "../../constants.ts";
-
-function CalorieValue({ value }: { value: string }) {
-  return (
-    <>
-      <span style={{ fontSize: 14, color: "#888" }}>{value}</span>
-      <span style={{ fontSize: 14, color: "#888" }}> kcal</span>
-    </>
-  );
-}
-
-const calorieLabelStyle = { fontSize: 12, color: "#AAA", marginBottom: 3 };
 
 export function RecordScreen() {
   const secStyle = {
@@ -169,6 +160,7 @@ export function RecordScreen() {
           <MealSection
             icon={<Sun size={14} />}
             title="朝ごはん"
+            totalKcal="459"
             items={[
               { label: "白米 150g", kcal: "234kcal" },
               { label: "味噌汁", kcal: "45kcal" },
@@ -178,6 +170,7 @@ export function RecordScreen() {
           <MealSection
             icon={<Sunset size={14} />}
             title="昼ごはん"
+            totalKcal="895"
             items={[
               { label: "鶏のから揚げ定食", kcal: "680kcal" },
               { label: "ご飯 少なめ", kcal: "180kcal" },
@@ -187,6 +180,7 @@ export function RecordScreen() {
           <MealSection
             icon={<Moon size={14} />}
             title="夜ごはん"
+            totalKcal="552"
             items={[
               { label: "豆腐ハンバーグ", kcal: "320kcal" },
               { label: "野菜スープ", kcal: "85kcal" },
@@ -196,6 +190,7 @@ export function RecordScreen() {
           <MealSection
             icon={<Cookie size={14} />}
             title="間食・おやつ"
+            totalKcal="0"
             items={[]}
             isLast
           />
@@ -211,71 +206,38 @@ export function RecordScreen() {
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
               <span style={{ fontSize: 14, color: "#2EAA72" }}>
-                <span style={{ fontWeight: 700 }}>-411</span> kcal
+                <span style={{ fontWeight: 700 }}>411</span> kcal
               </span>
               {plusBtn}
             </div>
           </div>
-          <div style={{ display: "flex", justifyContent: "space-between" }}>
+          <ActivitySubSection icon={<Sun size={14} />} title="歩数" totalKcal="231">
             <div>
-              <div style={{ fontSize: 12, color: "#AAA", marginBottom: 3 }}>
-                歩数
-              </div>
-              <div>
-                <span style={{ fontSize: 28, fontWeight: 700, color: "#111" }}>
-                  5,842
-                </span>
-                <span style={{ fontSize: 14, color: "#888" }}> 歩</span>
-              </div>
+              <span style={{ fontSize: 28, fontWeight: 700, color: "#111" }}>
+                5,842
+              </span>
+              <span style={{ fontSize: 14, color: "#888" }}> 歩</span>
             </div>
-            <div style={{ textAlign: "right" }}>
-              <div style={calorieLabelStyle}>消費カロリー</div>
-              <div>
-                <CalorieValue value="231" />
-              </div>
-            </div>
-          </div>
-          <div
-            style={{
-              marginTop: 16,
-              paddingTop: 14,
-              borderTop: "1px solid #F0F0F0",
-            }}
+          </ActivitySubSection>
+          <ActivitySubSection
+            icon={<PersonStanding size={14} />}
+            title="運動"
+            totalKcal="180"
+            isLast
           >
             <div
               style={{
                 display: "flex",
-                justifyContent: "space-between",
-                alignItems: "flex-start",
+                flexWrap: "wrap",
+                gap: 6,
+                alignItems: "center",
               }}
             >
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 12, color: "#AAA", marginBottom: 8 }}>
-                  運動
-                </div>
-                <div
-                  style={{
-                    display: "flex",
-                    flexWrap: "wrap",
-                    gap: 6,
-                    alignItems: "center",
-                  }}
-                >
-                  <ExerciseChip text="スクワット　30回　60kcal" />
-                  <ExerciseChip text="腹筋　20回 × 2セット　30kcal" />
-                  <ExerciseChip text="ウォーキング　30分　90kcal" />
-                </div>
-              </div>
-              <div
-                style={{ textAlign: "right", flexShrink: 0, marginLeft: 16 }}
-              >
-                <div style={calorieLabelStyle}>消費カロリー</div>
-                <div>
-                  <CalorieValue value="180" />
-                </div>
-              </div>
+              <ExerciseChip text="スクワット　30回　60kcal" />
+              <ExerciseChip text="腹筋　20回 × 2セット　30kcal" />
+              <ExerciseChip text="ウォーキング　30分　90kcal" />
             </div>
-          </div>
+          </ActivitySubSection>
         </div>
 
         <div style={{ ...secStyle, marginBottom: 10 }}>
