@@ -3,19 +3,21 @@
 declare(strict_types=1);
 
 /**
- * Claude Haiku 4.5 を使って食品名からカロリー（kcal）を推定するサービス。
- * 非食品は {"error":"not_food"} として弾き、食品のみカロリーを返す。
+ * Claude Haiku 4.5 で食品名からカロリー（kcal）を推定するサービス。
+ * ① Web検索なしで推定 → high なら終了、not_food ならエラー
+ * ② medium / low のときだけ Web検索で再推定する。
  */
 final class CalorieEstimateService
 {
     private const API_URL = 'https://api.anthropic.com/v1/messages';
     private const MODEL = 'claude-haiku-4-5-20251001';
     private const SYSTEM_PROMPT = 'あなたは日本の食品・料理全般に詳しいカロリー推定の専門家です。食べ物・飲み物として一般的に人が摂取するものだけを対象にしてください。食品でないものは推定せず、{"error":"not_food"} のみ返答してください。食品の場合はJSONのみ返答し、前置きや説明は不要です。';
+    private const WEB_SEARCH_SYSTEM_PROMPT = 'あなたは日本の食品・料理全般に詳しいカロリー推定の専門家です。食べ物・飲み物として一般的に人が摂取するものだけを対象にしてください。食品でないものは {"error":"not_food"} のみ返答してください。食品の場合は web_search で公式の栄養成分・カロリー情報を確認してから回答してください。最終回答はJSONのみ。前置きや説明は不要です。';
 
     /**
      * 食品名からカロリーを推定する（公開 API）。
-     * Claude にプロンプトを送り、返ってきた JSON を解析して結果を返す。
-     * 非食品・パース失敗時は例外を投げる。
+     * 初回は Web 検索なし。confidence が high ならそのまま返し、
+     * medium / low なら Web 検索付きで再推定する。非食品はエラー。
      *
      * @return array{kcal: int, assumed_weight_g: int, confidence: string}
      */
@@ -37,37 +39,100 @@ final class CalorieEstimateService
             throw new RuntimeException('ANTHROPIC_API_KEY が設定されていません。');
         }
 
-        $prompt = $this->buildPrompt($trimmed);
+        $initial = $this->requestEstimate($trimmed, $apiKey, false);
 
+        if ($initial === 'not_food' || $initial === null) {
+            throw new RuntimeException('カロリーを推定できませんでした。');
+        }
+
+        if ($initial['confidence'] === 'high') {
+            return $initial;
+        }
+
+        $refined = $this->requestEstimate($trimmed, $apiKey, true);
+
+        if ($refined === 'not_food' || $refined === null) {
+            return $initial;
+        }
+
+        return $refined;
+    }
+
+    /**
+     * Claude API を1回呼び出し、推定結果を返す。
+     *
+     * @return array{kcal: int, assumed_weight_g: int, confidence: string}|'not_food'|null
+     */
+    private function requestEstimate(string $foodName, string $apiKey, bool $withWebSearch): array|string|null
+    {
         $payload = [
             'model' => self::MODEL,
-            'max_tokens' => 128,
-            'system' => self::SYSTEM_PROMPT,
+            'max_tokens' => $withWebSearch ? 512 : 128,
+            'system' => $withWebSearch ? self::WEB_SEARCH_SYSTEM_PROMPT : self::SYSTEM_PROMPT,
             'messages' => [
                 [
                     'role' => 'user',
-                    'content' => $prompt,
+                    'content' => $this->buildPrompt($foodName, $withWebSearch),
                 ],
             ],
         ];
 
-        $decoded = $this->postToAnthropic($payload, $apiKey);
-        $text = $this->extractText($decoded);
-        $result = $this->parseEstimate($text);
-
-        if ($result === null) {
-            throw new RuntimeException('カロリーを推定できませんでした。');
+        if ($withWebSearch) {
+            $payload['tools'] = [
+                [
+                    'type' => 'web_search_20250305',
+                    'name' => 'web_search',
+                    'max_uses' => 3,
+                    'user_location' => [
+                        'type' => 'approximate',
+                        'country' => 'JP',
+                        'timezone' => 'Asia/Tokyo',
+                    ],
+                ],
+            ];
         }
 
-        return $result;
+        $decoded = $this->postToAnthropic($payload, $apiKey, $withWebSearch);
+        $text = $this->extractText($decoded);
+
+        return $this->parseResponse($text);
     }
 
     /**
      * Claude に送るユーザープロンプトを組み立てる。
-     * 非食品判定・重さ基準・confidence ルールなどを含める。
+     * $withWebSearch が true のときは Web 検索の指示を含める。
      */
-    private function buildPrompt(string $foodName): string
+    private function buildPrompt(string $foodName, bool $withWebSearch): string
     {
+        $webSearchSection = $withWebSearch
+            ? <<<'TEXT'
+
+【Web検索】
+- 必ずweb_searchで食品名・商品名の公式カロリー・栄養成分を検索してから回答する
+- 日本食品標準成分表、メーカー公式サイト、コンビニ・外食チェーンの公式栄養情報を優先する
+- 検索で公式値が見つかった場合はその値を使い、confidenceはhighにする
+- 検索しても特定できない場合のみ、下記の推定ルールを使う
+TEXT
+            : '';
+
+        $confidenceSection = $withWebSearch
+            ? <<<'TEXT'
+【confidenceの基準】
+- high: Web検索または公式情報で料理名・重さ・カロリーが特定できた場合
+- medium: 重さを仮定した、または調理法が不明な場合
+- low: 食品名が曖昧、または量が全く不明な場合
+- 揚げ物・中華料理など油の量が不明な場合は必ずmediumにする
+- Web検索しても正確なカロリーが不明な場合はlowにする
+TEXT
+            : <<<'TEXT'
+【confidenceの基準】
+- high: 料理名・重さ・カロリーすべて明確に特定できる場合のみ（量の表記がある、または一般的な単位で一意に決まる）
+- medium: 重さを仮定した、または調理法が不明な場合
+- low: 食品名が曖昧、市販品・外食・定食など公式確認が必要な場合
+- 揚げ物・中華料理など油の量が不明な場合は必ずmediumにする
+- コンビニ・外食チェーン・市販品・宅配弁当は公式カロリー確認が必要なためhighにしない
+TEXT;
+
         return <<<PROMPT
 以下の入力が食品（食べ物・飲み物）かどうかをまず判定し、食品の場合のみカロリーを推定してください。
 量の表記がなければ一般的な1食分を仮定してください。
@@ -79,7 +144,7 @@ final class CalorieEstimateService
 - 食品かどうか判断できない・曖昧な場合も非食品として扱う
 - 非食品の場合はカロリーを推定せず、次のJSONのみ返す: {"error":"not_food"}
 - 非食品の場合は説明文を付けない
-
+{$webSearchSection}
 【重さの基準】
 - 魚の一切れ: 100〜130g
 - 肉類の一人前: 100〜150g
@@ -91,12 +156,7 @@ final class CalorieEstimateService
 - 卵1個: 60g
 - 揚げ鶏・唐揚げ・油淋鶏など揚げ鶏1人前: 150〜200g
 
-【confidenceの基準】
-- high: 料理名・重さ・カロリーすべて明確に特定できる場合のみ
-- medium: 重さを仮定した、または調理法が不明な場合
-- low: 食品名が曖昧、または量が全く不明な場合
-- 揚げ物・中華料理など油の量が不明な場合は必ずmediumにする
-- 市販品・宅配弁当など正確なカロリーが不明な場合はlowにする
+{$confidenceSection}
 
 【ルール】
 - 「一切れ」「一人前」「1個」などの単位は日本の一般的な家庭料理の量を基準にする
@@ -111,7 +171,7 @@ final class CalorieEstimateService
 - 商品名が特定できない場合は同カテゴリの平均値で推定する
 - 市販品・宅配弁当など正確なカロリーが不明な場合はconfidenceをlowにする
 
-回答はJSONのみ。前置きや説明は不要。
+最終回答はJSONのみ。前置きや説明は不要。
 
 食品の場合の形式: {"kcal": 整数, "assumed_weight_g": 整数, "confidence": "high"|"medium"|"low"}
 非食品の場合の形式: {"error":"not_food"}
@@ -127,7 +187,7 @@ PROMPT;
      * @param array<string, mixed> $payload
      * @return array<string, mixed>
      */
-    private function postToAnthropic(array $payload, string $apiKey): array
+    private function postToAnthropic(array $payload, string $apiKey, bool $withWebSearch): array
     {
         if (!function_exists('curl_init')) {
             throw new RuntimeException('curl 拡張が有効になっていません。');
@@ -142,7 +202,7 @@ PROMPT;
         curl_setopt_array($ch, [
             CURLOPT_POST => true,
             CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_TIMEOUT => 30,
+            CURLOPT_TIMEOUT => $withWebSearch ? 90 : 30,
             CURLOPT_HTTPHEADER => [
                 'Content-Type: application/json',
                 'x-api-key: ' . $apiKey,
@@ -187,7 +247,7 @@ PROMPT;
 
     /**
      * API レスポンスからテキストブロックだけを取り出す。
-     * content 配列内の type=text の text を連結して返す。
+     * Web検索時は説明文と JSON が分かれることがあるため改行で連結する。
      *
      * @param array<string, mixed> $response
      */
@@ -211,16 +271,16 @@ PROMPT;
             }
         }
 
-        return trim(implode('', $parts));
+        return trim(implode("\n", $parts));
     }
 
     /**
-     * Claude のテキスト応答を解析し、推定結果を返す。
-     * 非食品（not_food）・不正 JSON・必須項目欠落の場合は null を返す。
+     * Claude のテキスト応答を解析する。
+     * 非食品は 'not_food'、食品推定成功は配列、パース失敗は null を返す。
      *
-     * @return array{kcal: int, assumed_weight_g: int, confidence: string}|null
+     * @return array{kcal: int, assumed_weight_g: int, confidence: string}|'not_food'|null
      */
-    private function parseEstimate(string $text): ?array
+    private function parseResponse(string $text): array|string|null
     {
         if ($text === '') {
             return null;
@@ -234,7 +294,7 @@ PROMPT;
             }
 
             if ($this->isNotFoodResponse($json)) {
-                return null;
+                return 'not_food';
             }
 
             $parsed = $this->normalizeEstimate($json);
