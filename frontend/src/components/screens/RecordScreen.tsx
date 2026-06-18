@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Calendar,
   ChevronLeft,
@@ -13,6 +13,7 @@ import {
   UtensilsCrossed,
   Weight,
 } from "lucide-react";
+import { fetchDailyRecord, saveWeight } from "../../api/client.ts";
 import { ActivitySubSection } from "../ActivitySubSection.tsx";
 import { ExerciseChip } from "../ExerciseChip.tsx";
 import type { MealItemInput } from "../MealRegisterSheet.tsx";
@@ -84,19 +85,54 @@ function formatKcal(value: number) {
   return value.toLocaleString();
 }
 
-function calcDiff(current: number, previous: number) {
-  const diff = Math.round((current - previous) * 10) / 10;
+function formatWeightDiff(diff: number | null) {
+  if (diff === null) return "前日比 --";
   if (diff === 0) return "前日比 ±0.0kg";
   return diff > 0 ? `前日比 +${diff.toFixed(1)}kg` : `前日比 ${diff.toFixed(1)}kg`;
 }
 
 export function RecordScreen() {
-  const [weight, setWeight] = useState(62.4);
-  const previousWeight = 62.6;
+  const [weight, setWeight] = useState<number | null>(null);
+  const [weightDiff, setWeightDiff] = useState<number | null>(null);
+  const [dateLabel, setDateLabel] = useState("読み込み中...");
+  const [recordedOn, setRecordedOn] = useState<string>();
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [meals, setMeals] = useState(INITIAL_MEALS);
   const [weightSheetOpen, setWeightSheetOpen] = useState(false);
   const [mealSheetOpen, setMealSheetOpen] = useState(false);
   const [activeMealKey, setActiveMealKey] = useState<MealKey | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadDailyRecord() {
+      try {
+        setIsLoading(true);
+        setError(null);
+        const data = await fetchDailyRecord();
+        if (cancelled) return;
+
+        setDateLabel(data.date);
+        setRecordedOn(data.recordedOn);
+        setWeight(data.weight.current);
+        setWeightDiff(data.weight.diffFromPreviousDay);
+      } catch (loadError) {
+        if (!cancelled) {
+          setError(loadError instanceof Error ? loadError.message : "読み込みに失敗しました");
+        }
+      } finally {
+        if (!cancelled) setIsLoading(false);
+      }
+    }
+
+    void loadDailyRecord();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const totalMealKcal = useMemo(
     () =>
@@ -123,6 +159,21 @@ export function RecordScreen() {
     }));
     setMealSheetOpen(false);
     setActiveMealKey(null);
+  };
+
+  const handleWeightSave = async (value: number) => {
+    try {
+      setIsSaving(true);
+      setError(null);
+      const data = await saveWeight(value, recordedOn);
+      setWeight(data.weight.current);
+      setWeightDiff(data.weight.diffFromPreviousDay);
+      setWeightSheetOpen(false);
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "保存に失敗しました");
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const secStyle = {
@@ -178,7 +229,7 @@ export function RecordScreen() {
         }}
       >
         <ChevronLeft size={22} color="#C0C0C0" />
-        <span style={{ fontSize: 15, fontWeight: 600, color: "#111" }}>今日 4/24（水）</span>
+        <span style={{ fontSize: 15, fontWeight: 600, color: "#111" }}>{dateLabel}</span>
         <ChevronRight size={22} color="#C0C0C0" />
       </div>
       <div
@@ -188,6 +239,20 @@ export function RecordScreen() {
           background: "#F7F7F7",
         }}
       >
+        {error && (
+          <div
+            style={{
+              margin: "12px 16px 0",
+              padding: "10px 12px",
+              borderRadius: 10,
+              background: "#FFF1F0",
+              color: "#C0392B",
+              fontSize: 13,
+            }}
+          >
+            {error}
+          </div>
+        )}
         <div style={{ ...secStyle, marginTop: 12 }}>
           <div style={secHead}>
             <div style={secTitle}>
@@ -200,7 +265,12 @@ export function RecordScreen() {
               type="button"
               aria-label="体重を記録"
               onClick={() => setWeightSheetOpen(true)}
-              style={plusBtnStyle}
+              disabled={isLoading || isSaving}
+              style={{
+                ...plusBtnStyle,
+                opacity: isLoading || isSaving ? 0.4 : 1,
+                cursor: isLoading || isSaving ? "not-allowed" : "pointer",
+              }}
             >
               +
             </button>
@@ -214,10 +284,12 @@ export function RecordScreen() {
           >
             <div>
               <div>
-                <span style={{ fontSize: 36, fontWeight: 700, color: "#111" }}>{weight.toFixed(1)}</span>
+                <span style={{ fontSize: 36, fontWeight: 700, color: "#111" }}>
+                  {weight === null ? "--" : weight.toFixed(1)}
+                </span>
                 <span style={{ fontSize: 18, color: "#888" }}> kg</span>
               </div>
-              <div style={{ fontSize: 13, color: ORANGE, marginTop: 5 }}>{calcDiff(weight, previousWeight)}</div>
+              <div style={{ fontSize: 13, color: ORANGE, marginTop: 5 }}>{formatWeightDiff(weightDiff)}</div>
             </div>
             <svg width="110" height="44" viewBox="0 0 110 44">
               <polyline
@@ -333,12 +405,11 @@ export function RecordScreen() {
 
       <WeightRegisterSheet
         open={weightSheetOpen}
-        initialValue={weight}
+        initialValue={weight ?? 62.4}
+        dateLabel={dateLabel}
+        isSaving={isSaving}
         onClose={() => setWeightSheetOpen(false)}
-        onSave={(value) => {
-          setWeight(value);
-          setWeightSheetOpen(false);
-        }}
+        onSave={handleWeightSave}
       />
 
       <MealRegisterSheet

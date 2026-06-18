@@ -5,15 +5,24 @@ import { ORANGE } from '../constants.ts'
 interface WeightRegisterSheetProps {
   open: boolean
   initialValue: number
+  dateLabel?: string
+  isSaving?: boolean
   onClose: () => void
-  onSave: (value: number) => void
+  onSave: (value: number) => void | Promise<void>
 }
 
 function roundWeight(value: number) {
   return Math.round(value * 10) / 10
 }
 
-export function WeightRegisterSheet({ open, initialValue, onClose, onSave }: WeightRegisterSheetProps) {
+export function WeightRegisterSheet({
+  open,
+  initialValue,
+  dateLabel,
+  isSaving = false,
+  onClose,
+  onSave,
+}: WeightRegisterSheetProps) {
   const [value, setValue] = useState(initialValue)
 
   useEffect(() => {
@@ -49,19 +58,26 @@ export function WeightRegisterSheet({ open, initialValue, onClose, onSave }: Wei
             ＋
           </button>
         </div>
-        <div style={{ fontSize: 13, color: '#AAA', marginTop: 12 }}>4/24（水）の記録</div>
+        <div style={{ fontSize: 13, color: '#AAA', marginTop: 12 }}>
+          {dateLabel ? `${dateLabel}の記録` : '今日の記録'}
+        </div>
       </div>
 
       <div style={{ display: 'flex', gap: 10 }}>
-        <button type="button" onClick={onClose} style={secondaryBtnStyle}>
+        <button type="button" onClick={onClose} disabled={isSaving} style={secondaryBtnStyle}>
           キャンセル
         </button>
         <button
           type="button"
-          onClick={() => onSave(value)}
-          style={primaryBtnStyle}
+          onClick={() => void onSave(value)}
+          disabled={isSaving}
+          style={{
+            ...primaryBtnStyle,
+            opacity: isSaving ? 0.7 : 1,
+            cursor: isSaving ? 'not-allowed' : 'pointer',
+          }}
         >
-          記録する
+          {isSaving ? '保存中...' : '記録する'}
         </button>
       </div>
     </BottomSheet>

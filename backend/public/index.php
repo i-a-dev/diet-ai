@@ -3,9 +3,12 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/../src/Http.php';
+require_once __DIR__ . '/../src/Database.php';
+require_once __DIR__ . '/../src/WeightRepository.php';
 require_once __DIR__ . '/../src/MockRepository.php';
 
 $repository = new MockRepository();
+$weightRepository = new WeightRepository();
 $requestMethod = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 $requestPath = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
 
@@ -45,11 +48,88 @@ if ($requestMethod === 'POST' && $requestPath === '/api/chat/messages') {
 }
 
 if ($requestMethod === 'GET' && $requestPath === '/api/records/daily') {
-    json_response($repository->getDailyRecord());
+    $date = trim((string) ($_GET['date'] ?? WeightRepository::todayDate()));
+
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+        json_response(['message' => 'date must be YYYY-MM-DD'], 422);
+    }
+
+    $record = $repository->getDailyRecord();
+    $weightSummary = $weightRepository->getSummaryForDate($date);
+
+    $record['date'] = $weightSummary['dateLabel'] ?? WeightRepository::formatDateLabel($date);
+    $record['recordedOn'] = $date;
+    $record['weight'] = $weightSummary ?? [
+        'current' => null,
+        'diffFromPreviousDay' => null,
+        'recordedOn' => $date,
+        'dateLabel' => WeightRepository::formatDateLabel($date),
+    ];
+
+    json_response($record);
+}
+
+if ($requestMethod === 'POST' && $requestPath === '/api/records/weight') {
+    $body = json_decode(file_get_contents('php://input') ?: '{}', true);
+    $weight = $body['weight'] ?? null;
+    $date = trim((string) ($body['date'] ?? WeightRepository::todayDate()));
+
+    if (!is_numeric($weight)) {
+        json_response(['message' => 'weight is required'], 422);
+    }
+
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+        json_response(['message' => 'date must be YYYY-MM-DD'], 422);
+    }
+
+    try {
+        $summary = $weightRepository->upsert($date, (float) $weight);
+    } catch (InvalidArgumentException $exception) {
+        json_response(['message' => $exception->getMessage()], 422);
+    }
+
+    json_response(['weight' => $summary]);
 }
 
 if ($requestMethod === 'GET' && $requestPath === '/api/reports/weekly') {
-    json_response($repository->getWeeklyReport());
+    $endDate = trim((string) ($_GET['endDate'] ?? WeightRepository::todayDate()));
+
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $endDate)) {
+        json_response(['message' => 'endDate must be YYYY-MM-DD'], 422);
+    }
+
+    $report = $repository->getWeeklyReport();
+    $points = $weightRepository->getPointsEndingOn($endDate, 7);
+
+    if ($points !== []) {
+        $values = array_column($points, 'value');
+        $first = $values[0];
+        $last = $values[count($values) - 1];
+        $average = round(array_sum($values) / count($values), 1);
+
+        $timezone = new DateTimeZone('Asia/Tokyo');
+        $start = (new DateTimeImmutable($points[0]['date'], $timezone))->format('n/j');
+        $end = (new DateTimeImmutable($points[count($points) - 1]['date'], $timezone))->format('n/j');
+        $weekdays = ['日', '月', '火', '水', '木', '金', '土'];
+        $startWeekday = $weekdays[(int) (new DateTimeImmutable($points[0]['date'], $timezone))->format('w')];
+        $endWeekday = $weekdays[(int) (new DateTimeImmutable($points[count($points) - 1]['date'], $timezone))->format('w')];
+
+        $report['rangeLabel'] = sprintf('%s（%s）〜 %s（%s）', $start, $startWeekday, $end, $endWeekday);
+        $report['weight'] = [
+            'points' => array_map(
+                static fn (array $point): array => [
+                    'label' => $point['label'],
+                    'value' => $point['value'],
+                ],
+                $points
+            ),
+            'weeklyAverage' => $average,
+            'weeklyDiff' => round($last - $first, 1),
+            'targetDiff' => round($last - 57.0, 1),
+        ];
+    }
+
+    json_response($report);
 }
 
 json_response(['message' => 'Not Found'], 404);

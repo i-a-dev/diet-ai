@@ -25,3 +25,6 @@ services:
       - "8000:8000"
     volumes:
       - ./backend:/var/www/html
+      - ./backend/data:/var/www/html/data
+    environment:
+      - DATABASE_PATH=/var/www/html/data/diet.db
