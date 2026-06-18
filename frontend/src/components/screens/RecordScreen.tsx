@@ -1,3 +1,4 @@
+import { useMemo, useState } from "react";
 import {
   Calendar,
   ChevronLeft,
@@ -14,12 +15,116 @@ import {
 } from "lucide-react";
 import { ActivitySubSection } from "../ActivitySubSection.tsx";
 import { ExerciseChip } from "../ExerciseChip.tsx";
+import type { MealItemInput } from "../MealRegisterSheet.tsx";
+import { MealRegisterSheet } from "../MealRegisterSheet.tsx";
 import { MealSection } from "../MealSection.tsx";
 import { SecIcon } from "../SecIcon.tsx";
 import { TopNav } from "../TopNav.tsx";
+import { WeightRegisterSheet } from "../WeightRegisterSheet.tsx";
 import { ORANGE } from "../../constants.ts";
 
+type MealKey = "breakfast" | "lunch" | "dinner" | "snack";
+
+interface MealSectionData {
+  title: string;
+  icon: React.ReactNode;
+  items: MealItemInput[];
+  isLast?: boolean;
+}
+
+const MEAL_SUGGESTIONS: MealItemInput[] = [
+  { label: "白米 150g", kcal: "234kcal" },
+  { label: "味噌汁", kcal: "45kcal" },
+  { label: "焼き鮭", kcal: "180kcal" },
+  { label: "サラダ", kcal: "35kcal" },
+  { label: "豆腐ハンバーグ", kcal: "320kcal" },
+  { label: "野菜スープ", kcal: "85kcal" },
+];
+
+const INITIAL_MEALS: Record<MealKey, MealSectionData> = {
+  breakfast: {
+    title: "朝ごはん",
+    icon: <Sun size={14} />,
+    items: [
+      { label: "白米 150g", kcal: "234kcal" },
+      { label: "味噌汁", kcal: "45kcal" },
+      { label: "焼き鮭", kcal: "180kcal" },
+    ],
+  },
+  lunch: {
+    title: "昼ごはん",
+    icon: <Sunset size={14} />,
+    items: [
+      { label: "鶏のから揚げ定食", kcal: "680kcal" },
+      { label: "ご飯 少なめ", kcal: "180kcal" },
+      { label: "サラダ", kcal: "35kcal" },
+    ],
+  },
+  dinner: {
+    title: "夜ごはん",
+    icon: <Moon size={14} />,
+    items: [
+      { label: "豆腐ハンバーグ", kcal: "320kcal" },
+      { label: "野菜スープ", kcal: "85kcal" },
+    ],
+  },
+  snack: {
+    title: "間食・おやつ",
+    icon: <Cookie size={14} />,
+    items: [],
+    isLast: true,
+  },
+};
+
+function parseKcal(kcal: string) {
+  return Number(kcal.replace(/[^\d]/g, "")) || 0;
+}
+
+function formatKcal(value: number) {
+  return value.toLocaleString();
+}
+
+function calcDiff(current: number, previous: number) {
+  const diff = Math.round((current - previous) * 10) / 10;
+  if (diff === 0) return "前日比 ±0.0kg";
+  return diff > 0 ? `前日比 +${diff.toFixed(1)}kg` : `前日比 ${diff.toFixed(1)}kg`;
+}
+
 export function RecordScreen() {
+  const [weight, setWeight] = useState(62.4);
+  const previousWeight = 62.6;
+  const [meals, setMeals] = useState(INITIAL_MEALS);
+  const [weightSheetOpen, setWeightSheetOpen] = useState(false);
+  const [mealSheetOpen, setMealSheetOpen] = useState(false);
+  const [activeMealKey, setActiveMealKey] = useState<MealKey | null>(null);
+
+  const totalMealKcal = useMemo(
+    () =>
+      Object.values(meals).reduce(
+        (sum, meal) => sum + meal.items.reduce((mealSum, item) => mealSum + parseKcal(item.kcal), 0),
+        0,
+      ),
+    [meals],
+  );
+
+  const openMealSheet = (key: MealKey) => {
+    setActiveMealKey(key);
+    setMealSheetOpen(true);
+  };
+
+  const handleMealSave = (item: MealItemInput) => {
+    if (!activeMealKey) return;
+    setMeals((prev) => ({
+      ...prev,
+      [activeMealKey]: {
+        ...prev[activeMealKey],
+        items: [...prev[activeMealKey].items, item],
+      },
+    }));
+    setMealSheetOpen(false);
+    setActiveMealKey(null);
+  };
+
   const secStyle = {
     background: "#fff",
     margin: "10px 16px 0",
@@ -40,17 +145,20 @@ export function RecordScreen() {
     fontWeight: 600,
     color: "#222",
   };
-  const plusBtn = (
-    <span
-      style={{ color: ORANGE, fontSize: 26, lineHeight: 1, cursor: "pointer" }}
-    >
-      +
-    </span>
-  );
+  const plusBtnStyle = {
+    border: "none",
+    background: "transparent",
+    color: ORANGE,
+    fontSize: 26,
+    lineHeight: 1,
+    cursor: "pointer",
+    padding: 0,
+  } as const;
 
   return (
     <div
       style={{
+        position: "relative",
         flex: 1,
         display: "flex",
         flexDirection: "column",
@@ -58,10 +166,7 @@ export function RecordScreen() {
         minHeight: 0,
       }}
     >
-      <TopNav
-        title="記録する"
-        rightIcon={<Calendar size={22} color="#C0C0C0" />}
-      />
+      <TopNav title="記録する" rightIcon={<Calendar size={22} color="#C0C0C0" />} />
       <div
         style={{
           display: "flex",
@@ -73,9 +178,7 @@ export function RecordScreen() {
         }}
       >
         <ChevronLeft size={22} color="#C0C0C0" />
-        <span style={{ fontSize: 15, fontWeight: 600, color: "#111" }}>
-          今日 4/24（水）
-        </span>
+        <span style={{ fontSize: 15, fontWeight: 600, color: "#111" }}>今日 4/24（水）</span>
         <ChevronRight size={22} color="#C0C0C0" />
       </div>
       <div
@@ -93,7 +196,14 @@ export function RecordScreen() {
               </SecIcon>
               体重
             </div>
-            {plusBtn}
+            <button
+              type="button"
+              aria-label="体重を記録"
+              onClick={() => setWeightSheetOpen(true)}
+              style={plusBtnStyle}
+            >
+              +
+            </button>
           </div>
           <div
             style={{
@@ -104,14 +214,10 @@ export function RecordScreen() {
           >
             <div>
               <div>
-                <span style={{ fontSize: 36, fontWeight: 700, color: "#111" }}>
-                  62.4
-                </span>
+                <span style={{ fontSize: 36, fontWeight: 700, color: "#111" }}>{weight.toFixed(1)}</span>
                 <span style={{ fontSize: 18, color: "#888" }}> kg</span>
               </div>
-              <div style={{ fontSize: 13, color: ORANGE, marginTop: 5 }}>
-                前日比 -0.2kg
-              </div>
+              <div style={{ fontSize: 13, color: ORANGE, marginTop: 5 }}>{calcDiff(weight, previousWeight)}</div>
             </div>
             <svg width="110" height="44" viewBox="0 0 110 44">
               <polyline
@@ -154,46 +260,20 @@ export function RecordScreen() {
               食事
             </div>
             <span style={{ fontSize: 13, fontWeight: 700, color: ORANGE }}>
-              1,582 / 1,800kcal
+              {formatKcal(totalMealKcal)} / 1,800kcal
             </span>
           </div>
-          <MealSection
-            icon={<Sun size={14} />}
-            title="朝ごはん"
-            totalKcal="459"
-            items={[
-              { label: "白米 150g", kcal: "234kcal" },
-              { label: "味噌汁", kcal: "45kcal" },
-              { label: "焼き鮭", kcal: "180kcal" },
-            ]}
-          />
-          <MealSection
-            icon={<Sunset size={14} />}
-            title="昼ごはん"
-            totalKcal="895"
-            items={[
-              { label: "鶏のから揚げ定食", kcal: "680kcal" },
-              { label: "ご飯 少なめ", kcal: "180kcal" },
-              { label: "サラダ", kcal: "35kcal" },
-            ]}
-          />
-          <MealSection
-            icon={<Moon size={14} />}
-            title="夜ごはん"
-            totalKcal="552"
-            items={[
-              { label: "豆腐ハンバーグ", kcal: "320kcal" },
-              { label: "野菜スープ", kcal: "85kcal" },
-              { label: "ごはん 150g", kcal: "147kcal" },
-            ]}
-          />
-          <MealSection
-            icon={<Cookie size={14} />}
-            title="間食・おやつ"
-            totalKcal="0"
-            items={[]}
-            isLast
-          />
+          {(Object.entries(meals) as [MealKey, MealSectionData][]).map(([key, meal]) => (
+            <MealSection
+              key={key}
+              icon={meal.icon}
+              title={meal.title}
+              totalKcal={formatKcal(meal.items.reduce((sum, item) => sum + parseKcal(item.kcal), 0))}
+              items={meal.items}
+              isLast={meal.isLast}
+              onAdd={() => openMealSheet(key)}
+            />
+          ))}
         </div>
 
         <div style={secStyle}>
@@ -208,23 +288,18 @@ export function RecordScreen() {
               <span style={{ fontSize: 14, color: "#2EAA72" }}>
                 <span style={{ fontWeight: 700 }}>411</span> kcal
               </span>
-              {plusBtn}
+              <button type="button" style={plusBtnStyle}>
+                +
+              </button>
             </div>
           </div>
           <ActivitySubSection icon={<Sun size={14} />} title="歩数" totalKcal="231">
             <div>
-              <span style={{ fontSize: 28, fontWeight: 700, color: "#111" }}>
-                5,842
-              </span>
+              <span style={{ fontSize: 28, fontWeight: 700, color: "#111" }}>5,842</span>
               <span style={{ fontSize: 14, color: "#888" }}> 歩</span>
             </div>
           </ActivitySubSection>
-          <ActivitySubSection
-            icon={<PersonStanding size={14} />}
-            title="運動"
-            totalKcal="180"
-            isLast
-          >
+          <ActivitySubSection icon={<PersonStanding size={14} />} title="運動" totalKcal="180" isLast>
             <div
               style={{
                 display: "flex",
@@ -248,13 +323,34 @@ export function RecordScreen() {
               </SecIcon>
               メモ
             </div>
-            {plusBtn}
+            <button type="button" style={plusBtnStyle}>
+              +
+            </button>
           </div>
-          <div style={{ fontSize: 14, color: "#AAA" }}>
-            今日はケーキを食べちゃった
-          </div>
+          <div style={{ fontSize: 14, color: "#AAA" }}>今日はケーキを食べちゃった</div>
         </div>
       </div>
+
+      <WeightRegisterSheet
+        open={weightSheetOpen}
+        initialValue={weight}
+        onClose={() => setWeightSheetOpen(false)}
+        onSave={(value) => {
+          setWeight(value);
+          setWeightSheetOpen(false);
+        }}
+      />
+
+      <MealRegisterSheet
+        open={mealSheetOpen}
+        mealTitle={activeMealKey ? meals[activeMealKey].title : ""}
+        suggestions={MEAL_SUGGESTIONS}
+        onClose={() => {
+          setMealSheetOpen(false);
+          setActiveMealKey(null);
+        }}
+        onSave={handleMealSave}
+      />
     </div>
   );
 }

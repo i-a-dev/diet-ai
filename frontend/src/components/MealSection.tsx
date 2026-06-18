@@ -18,9 +18,10 @@ interface MealSectionProps {
   totalKcal: string
   items: MealItem[]
   isLast?: boolean
+  onAdd?: () => void
 }
 
-export function MealSection({ icon, title, totalKcal, items, isLast = false }: MealSectionProps) {
+export function MealSection({ icon, title, totalKcal, items, isLast = false, onAdd }: MealSectionProps) {
   return (
     <div
       style={{
@@ -46,7 +47,22 @@ export function MealSection({ icon, title, totalKcal, items, isLast = false }: M
             <span style={{ fontWeight: 600 }}>{totalKcal}</span> kcal
           </span>
         </div>
-        <span style={{ color: ORANGE, fontSize: 26, lineHeight: 1, cursor: 'pointer' }}>+</span>
+        <button
+          type="button"
+          onClick={onAdd}
+          aria-label={`${title}を追加`}
+          style={{
+            border: 'none',
+            background: 'transparent',
+            color: ORANGE,
+            fontSize: 26,
+            lineHeight: 1,
+            cursor: 'pointer',
+            padding: 0,
+          }}
+        >
+          +
+        </button>
 
         {items.length > 0 && (
           <div
