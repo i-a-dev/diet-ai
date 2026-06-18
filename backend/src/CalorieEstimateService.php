@@ -29,6 +29,10 @@ final class CalorieEstimateService
             throw new InvalidArgumentException('食品名を入力してください。');
         }
 
+        if (mb_strlen($trimmed) < 3) {
+            throw new InvalidArgumentException('食品名は3文字以上で入力してください。');
+        }
+
         if (mb_strlen($trimmed) > 200) {
             throw new InvalidArgumentException('食品名が長すぎます。');
         }

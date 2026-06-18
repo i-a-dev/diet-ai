@@ -53,17 +53,19 @@ export function MealRegisterSheet({
     }
 
     const trimmed = label.trim();
-    if (trimmed.length < 2 || kcalTouchedRef.current) {
+    if (trimmed.length < 3 || kcalTouchedRef.current) {
       setIsEstimating(false);
+      setEstimateError(null);
+      setEstimateHint(null);
       return;
     }
 
-    const requestId = ++estimateRequestId.current;
-    setIsEstimating(true);
-    setEstimateError(null);
-    setEstimateHint(null);
-
     const timer = window.setTimeout(() => {
+      const requestId = ++estimateRequestId.current;
+      setIsEstimating(true);
+      setEstimateError(null);
+      setEstimateHint(null);
+
       estimateCalories(trimmed)
         .then((result) => {
           if (requestId !== estimateRequestId.current) return;
@@ -86,7 +88,7 @@ export function MealRegisterSheet({
           if (requestId !== estimateRequestId.current) return;
           setIsEstimating(false);
         });
-    }, 600);
+    }, 1500);
 
     return () => window.clearTimeout(timer);
   }, [label, open]);
@@ -125,7 +127,7 @@ export function MealRegisterSheet({
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <input
           type="number"
-          placeholder="234"
+          placeholder="例：234"
           value={kcal}
           onChange={(e) => {
             kcalTouchedRef.current = true;
