@@ -28,3 +28,4 @@ services:
       - ./backend/data:/var/www/html/data
     environment:
       - DATABASE_PATH=/var/www/html/data/diet.db
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}

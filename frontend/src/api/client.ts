@@ -47,3 +47,16 @@ export function saveWeight(weight: number, date?: string) {
     body: JSON.stringify({ weight, date }),
   });
 }
+
+export interface CalorieEstimateResponse {
+  kcal: number
+  assumed_weight_g: number
+  confidence: 'high' | 'medium' | 'low'
+}
+
+export function estimateCalories(foodName: string) {
+  return request<CalorieEstimateResponse>('/foods/estimate-calories', {
+    method: 'POST',
+    body: JSON.stringify({ foodName }),
+  })
+}

@@ -11,9 +11,11 @@ require_once __DIR__ . '/../src/Http.php';
 require_once __DIR__ . '/../src/Database.php';
 require_once __DIR__ . '/../src/WeightRepository.php';
 require_once __DIR__ . '/../src/MockRepository.php';
+require_once __DIR__ . '/../src/CalorieEstimateService.php';
 
 $repository = new MockRepository();
 $weightRepository = new WeightRepository();
+$calorieEstimateService = new CalorieEstimateService();
 $requestMethod = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 $requestPath = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
 
@@ -100,6 +102,22 @@ if ($requestMethod === 'POST' && $requestPath === '/api/records/weight') {
     }
 
     json_response(['weight' => $summary]);
+}
+
+// POST /api/foods/estimate-calories — Claude Haiku 4.5 で食品名からカロリーを推定
+if ($requestMethod === 'POST' && $requestPath === '/api/foods/estimate-calories') {
+    $body = json_decode(file_get_contents('php://input') ?: '{}', true);
+    $foodName = trim((string) ($body['foodName'] ?? ''));
+
+    try {
+        $result = $calorieEstimateService->estimate($foodName);
+    } catch (InvalidArgumentException $exception) {
+        json_response(['message' => $exception->getMessage()], 422);
+    } catch (RuntimeException $exception) {
+        json_response(['message' => $exception->getMessage()], 502);
+    }
+
+    json_response($result);
 }
 
 // GET /api/reports/weekly — グラフ画面用の週次レポート（体重は DB から取得）
