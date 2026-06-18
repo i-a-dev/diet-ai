@@ -2,10 +2,19 @@
 
 declare(strict_types=1);
 
+/**
+ * SQLite データベースへの接続と初期化を担当するクラス。
+ * 初回接続時にマイグレーション（テーブル作成）とサンプルデータ投入を行う。
+ */
 final class Database
 {
+    /** @var PDO|null 接続を使い回すためのシングルトン */
     private static ?PDO $pdo = null;
 
+    /**
+     * SQLite への PDO 接続を返す。
+     * 初回のみマイグレーションとシードを実行する。
+     */
     public static function connection(): PDO
     {
         if (self::$pdo instanceof PDO) {
@@ -29,6 +38,9 @@ final class Database
         return self::$pdo;
     }
 
+    /**
+     * migrations/ 配下の SQL を実行してテーブルを作成する。
+     */
     private static function migrate(): void
     {
         $migrationPath = dirname(__DIR__) . '/migrations/001_create_weight_entries.sql';
@@ -41,6 +53,9 @@ final class Database
         self::$pdo->exec($sql);
     }
 
+    /**
+     * weight_entries が空のとき、直近7日分のサンプル体重データを投入する。
+     */
     private static function seedIfEmpty(): void
     {
         $count = (int) self::$pdo->query('SELECT COUNT(*) FROM weight_entries')->fetchColumn();

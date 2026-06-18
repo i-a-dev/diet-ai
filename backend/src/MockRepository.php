@@ -2,9 +2,17 @@
 
 declare(strict_types=1);
 
+/**
+ * DB 未対応の機能向けモックデータを返すクラス。
+ * 食事・歩数・チャットなど、まだ SQLite 化していないデータはここから取得する。
+ * 体重は WeightRepository（DB）側で上書きされる。
+ */
 final class MockRepository
 {
     /**
+     * 記録画面用の日次データを返す（食事・歩数・メモなど）。
+     * weight は index.php 側で DB の値に差し替えられる。
+     *
      * @return array<string, mixed>
      */
     public function getDailyRecord(): array
@@ -34,6 +42,9 @@ final class MockRepository
     }
 
     /**
+     * グラフ画面用の週次レポートを返す（カロリー・歩数はモック）。
+     * weight は index.php 側で DB の値に差し替えられる。
+     *
      * @return array<string, mixed>
      */
     public function getWeeklyReport(): array
@@ -85,6 +96,8 @@ final class MockRepository
     }
 
     /**
+     * 相談画面用のチャット履歴（固定メッセージ）を返す。
+     *
      * @return array<int, array<string, string>>
      */
     public function getChatMessages(): array

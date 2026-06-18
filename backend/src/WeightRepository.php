@@ -2,17 +2,28 @@
 
 declare(strict_types=1);
 
+/**
+ * 体重データ（weight_entries テーブル）の読み書きを担当するクラス。
+ * API から呼ばれ、SQL の実行と画面用データの整形を行う。
+ */
 final class WeightRepository
 {
     private PDO $db;
 
+    /**
+     * DB 接続を用意する。
+     * $db を渡さない場合は Database::connection() で SQLite に接続する。
+     */
     public function __construct(?PDO $db = null)
     {
         $this->db = $db ?? Database::connection();
     }
 
     /**
-     * @return array{current: float, diffFromPreviousDay: float|null, recordedOn: string, dateLabel: string}
+     * 指定日の体重サマリーを取得する（記録画面の表示用）。
+     * 体重・前日比・日付ラベルをまとめて返す。データがなければ null。
+     *
+     * @return array{current: float, diffFromPreviousDay: float|null, recordedOn: string, dateLabel: string}|null
      */
     public function getSummaryForDate(string $date): ?array
     {
@@ -24,6 +35,7 @@ final class WeightRepository
 
         $previous = $this->findPreviousEntry($date);
         $current = (float) $entry['weight_kg'];
+        // 前日のデータがあれば差分を計算（なければ null）
         $diff = $previous === null
             ? null
             : round($current - (float) $previous['weight_kg'], 1);
@@ -37,6 +49,9 @@ final class WeightRepository
     }
 
     /**
+     * 体重を DB に保存する（新規登録 or 同日の上書き更新）。
+     * 保存後、getSummaryForDate と同じ形式で最新データを返す。
+     *
      * @return array{current: float, diffFromPreviousDay: float|null, recordedOn: string, dateLabel: string}
      */
     public function upsert(string $date, float $weightKg): array
@@ -48,6 +63,7 @@ final class WeightRepository
         $now = (new DateTimeImmutable('now', new DateTimeZone('Asia/Tokyo')))->format('Y-m-d H:i:s');
         $roundedWeight = round($weightKg, 1);
 
+        // 同じ recorded_on があれば UPDATE、なければ INSERT（upsert）
         $this->db->prepare(
             'INSERT INTO weight_entries (recorded_on, weight_kg, created_at, updated_at)
              VALUES (:recorded_on, :weight_kg, :created_at, :updated_at)
@@ -71,6 +87,9 @@ final class WeightRepository
     }
 
     /**
+     * グラフ用に、終了日から遡った N 日分の体重データを配列で返す。
+     * 例: [{ label: "6/12", value: 62.7, date: "2026-06-12" }, ...]
+     *
      * @return array<int, array{label: string, value: float, date: string}>
      */
     public function getPointsEndingOn(string $endDate, int $days = 7): array
@@ -90,7 +109,7 @@ final class WeightRepository
             'end' => $endDate,
         ]);
 
-        /** @var array<string, float> $byDate */
+        /** @var array<string, float> $byDate 日付をキーにした体重の連想配列 */
         $byDate = [];
 
         foreach ($statement->fetchAll() as $row) {
@@ -117,6 +136,8 @@ final class WeightRepository
     }
 
     /**
+     * 指定日の体重を1件だけ DB から取得する（内部用）。
+     *
      * @return array<string, mixed>|null
      */
     private function findByDate(string $date): ?array
@@ -131,6 +152,8 @@ final class WeightRepository
     }
 
     /**
+     * 指定日より前の、最も新しい体重を1件取得する（前日比計算用・内部用）。
+     *
      * @return array<string, mixed>|null
      */
     private function findPreviousEntry(string $date): ?array
@@ -148,11 +171,18 @@ final class WeightRepository
         return $row === false ? null : $row;
     }
 
+    /**
+     * 今日の日付を YYYY-MM-DD 形式で返す（日本時間）。
+     */
     public static function todayDate(): string
     {
         return (new DateTimeImmutable('now', new DateTimeZone('Asia/Tokyo')))->format('Y-m-d');
     }
 
+    /**
+     * 日付を画面表示用に整形する。
+     * 今日なら「今日 6/18（木）」、それ以外は「6/17（水）」の形式。
+     */
     public static function formatDateLabel(string $date): string
     {
         $timezone = new DateTimeZone('Asia/Tokyo');
@@ -169,6 +199,9 @@ final class WeightRepository
         return $formatted;
     }
 
+    /**
+     * グラフの横軸用に短い日付ラベルを返す（例: "6/18"）。
+     */
     public static function formatShortLabel(string $date): string
     {
         return (new DateTimeImmutable($date, new DateTimeZone('Asia/Tokyo')))->format('n/j');
