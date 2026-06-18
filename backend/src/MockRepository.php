@@ -11,18 +11,13 @@ final class MockRepository
 {
     /**
      * 記録画面用の日次データを返す（食事・歩数・メモなど）。
-     * weight は index.php 側で DB の値に差し替えられる。
+     * date / weight は index.php 側で DB の値をセットする。
      *
      * @return array<string, mixed>
      */
     public function getDailyRecord(): array
     {
         return [
-            'date' => '今日 6/14 (日)',
-            'weight' => [
-                'current' => 62.4,
-                'diffFromPreviousDay' => -0.2,
-            ],
             'meals' => [
                 ['id' => 'breakfast', 'name' => '朝ごはん', 'calories' => 412],
                 ['id' => 'lunch', 'name' => '昼ごはん', 'calories' => 618],

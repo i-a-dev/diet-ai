@@ -1,5 +1,4 @@
 import { useEffect, useState, type CSSProperties } from 'react'
-import { Search } from 'lucide-react'
 import { BottomSheet } from './BottomSheet.tsx'
 import { ORANGE } from '../constants.ts'
 
@@ -16,22 +15,22 @@ interface MealRegisterSheetProps {
   onSave: (item: MealItemInput) => void
 }
 
-export function MealRegisterSheet({ open, mealTitle, suggestions, onClose, onSave }: MealRegisterSheetProps) {
-  const [search, setSearch] = useState('')
+export function MealRegisterSheet({
+  open,
+  mealTitle,
+  suggestions,
+  onClose,
+  onSave,
+}: MealRegisterSheetProps) {
   const [label, setLabel] = useState('')
   const [kcal, setKcal] = useState('')
 
   useEffect(() => {
     if (open) {
-      setSearch('')
       setLabel('')
       setKcal('')
     }
   }, [open])
-
-  const filtered = suggestions.filter((item) =>
-    item.label.toLowerCase().includes(search.toLowerCase()),
-  )
 
   const applySuggestion = (item: MealItemInput) => {
     setLabel(item.label)
@@ -50,34 +49,6 @@ export function MealRegisterSheet({ open, mealTitle, suggestions, onClose, onSav
 
   return (
     <BottomSheet open={open} title={`${mealTitle}を記録`} onClose={onClose}>
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          background: '#F5F5F5',
-          borderRadius: 10,
-          padding: '10px 12px',
-          marginBottom: 16,
-        }}
-      >
-        <Search size={18} color="#AAA" />
-        <input
-          type="text"
-          placeholder="食品名で検索"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          style={{
-            flex: 1,
-            border: 'none',
-            background: 'transparent',
-            fontSize: 14,
-            outline: 'none',
-            color: '#333',
-          }}
-        />
-      </div>
-
       <label style={fieldLabelStyle}>食品名</label>
       <input
         type="text"
@@ -99,9 +70,11 @@ export function MealRegisterSheet({ open, mealTitle, suggestions, onClose, onSav
         <span style={{ fontSize: 14, color: '#888', paddingBottom: 12 }}>kcal</span>
       </div>
 
-      <div style={{ fontSize: 13, fontWeight: 600, color: '#888', margin: '18px 0 10px' }}>よく使う食品</div>
+      <div style={{ fontSize: 13, fontWeight: 600, color: '#888', margin: '18px 0 10px' }}>
+        よく使う食品
+      </div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 24 }}>
-        {(search ? filtered : suggestions).map((item) => (
+        {suggestions.map((item) => (
           <button
             key={item.label}
             type="button"
