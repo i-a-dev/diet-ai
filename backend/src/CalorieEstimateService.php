@@ -12,7 +12,7 @@ final class CalorieEstimateService
     private const API_URL = 'https://api.anthropic.com/v1/messages';
     private const MODEL = 'claude-haiku-4-5-20251001';
     private const SYSTEM_PROMPT = 'あなたは日本の食品・料理全般に詳しいカロリー推定の専門家です。食べ物・飲み物として一般的に人が摂取するものだけを対象にしてください。食品でないものは推定せず、{"error":"not_food"} のみ返答してください。食品の場合はJSONのみ返答し、前置きや説明は不要です。';
-    private const WEB_SEARCH_SYSTEM_PROMPT = 'あなたは日本の食品・料理全般に詳しいカロリー推定の専門家です。食べ物・飲み物として一般的に人が摂取するものだけを対象にしてください。食品でないものは {"error":"not_food"} のみ返答してください。食品の場合は web_search で公式の栄養成分・カロリー情報を確認してから回答してください。最終回答はJSONのみ。前置きや説明は不要です。';
+    private const WEB_SEARCH_SYSTEM_PROMPT = 'あなたは日本の食品・料理全般に詳しいカロリー推定の専門家です。食べ物・飲み物として一般的に人が摂取するものだけを対象にしてください。食品でないものは {"error":"not_food"} のみ返答してください。食品の場合は web_search で公式の栄養成分・カロリー情報を確認してから回答してください。検索結果は要点のみ抽出し、カロリーと重量の数値だけを使ってください。検索結果の文章をそのまま処理しないでください。最終回答はJSONのみ。前置きや説明は不要です。';
 
     /**
      * 食品名からカロリーを推定する（公開 API）。
