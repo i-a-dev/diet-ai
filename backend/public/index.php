@@ -12,10 +12,12 @@ require_once __DIR__ . '/../src/Database.php';
 require_once __DIR__ . '/../src/WeightRepository.php';
 require_once __DIR__ . '/../src/MockRepository.php';
 require_once __DIR__ . '/../src/CalorieEstimateService.php';
+require_once __DIR__ . '/../src/FoodNormalizeService.php';
 
 $repository = new MockRepository();
 $weightRepository = new WeightRepository();
 $calorieEstimateService = new CalorieEstimateService();
+$foodNormalizeService = new FoodNormalizeService();
 $requestMethod = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 $requestPath = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
 
@@ -108,9 +110,27 @@ if ($requestMethod === 'POST' && $requestPath === '/api/records/weight') {
 if ($requestMethod === 'POST' && $requestPath === '/api/foods/estimate-calories') {
     $body = json_decode(file_get_contents('php://input') ?: '{}', true);
     $foodName = trim((string) ($body['foodName'] ?? ''));
+    $mode = trim((string) ($body['mode'] ?? 'auto'));
 
     try {
-        $result = $calorieEstimateService->estimate($foodName);
+        // 変更: no_web / web を切り替え可能にして検索フローに対応。
+        $result = $calorieEstimateService->estimate($foodName, $mode);
+    } catch (InvalidArgumentException $exception) {
+        json_response(['message' => $exception->getMessage()], 422);
+    } catch (RuntimeException $exception) {
+        json_response(['message' => $exception->getMessage()], 502);
+    }
+
+    json_response($result);
+}
+
+// POST /api/foods/normalize — Claude Haiku で食品入力を正規化
+if ($requestMethod === 'POST' && $requestPath === '/api/foods/normalize') {
+    $body = json_decode(file_get_contents('php://input') ?: '{}', true);
+    $foodName = trim((string) ($body['foodName'] ?? ''));
+
+    try {
+        $result = $foodNormalizeService->normalize($foodName);
     } catch (InvalidArgumentException $exception) {
         json_response(['message' => $exception->getMessage()], 422);
     } catch (RuntimeException $exception) {

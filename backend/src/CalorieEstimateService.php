@@ -16,12 +16,14 @@ final class CalorieEstimateService
 
     /**
      * 食品名からカロリーを推定する（公開 API）。
-     * 初回は Web 検索なし。confidence が high ならそのまま返し、
-     * medium / low なら Web 検索付きで再推定する。非食品はエラー。
+     * mode:
+     * - auto: 従来どおり high 以外で Web 検索を試行
+     * - no_web: Web 検索を使わず 1 回のみ推定
+     * - web: Web 検索付きで推定
      *
      * @return array{kcal: int, assumed_weight_g: int, confidence: string}
      */
-    public function estimate(string $foodName): array
+    public function estimate(string $foodName, string $mode = 'auto'): array
     {
         $trimmed = trim($foodName);
 
@@ -43,10 +45,26 @@ final class CalorieEstimateService
             throw new RuntimeException('ANTHROPIC_API_KEY が設定されていません。');
         }
 
+        if (!in_array($mode, ['auto', 'no_web', 'web'], true)) {
+            throw new InvalidArgumentException('mode must be one of auto, no_web, web.');
+        }
+
+        if ($mode === 'web') {
+            $webOnly = $this->requestEstimate($trimmed, $apiKey, true);
+            if ($webOnly === 'not_food' || $webOnly === null) {
+                throw new RuntimeException('カロリーを推定できませんでした。');
+            }
+            return $webOnly;
+        }
+
         $initial = $this->requestEstimate($trimmed, $apiKey, false);
 
         if ($initial === 'not_food' || $initial === null) {
             throw new RuntimeException('カロリーを推定できませんでした。');
+        }
+
+        if ($mode === 'no_web') {
+            return $initial;
         }
 
         if ($initial['confidence'] === 'high') {

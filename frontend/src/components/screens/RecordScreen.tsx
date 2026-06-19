@@ -16,8 +16,8 @@ import {
 import { fetchDailyRecord, saveWeight } from "../../api/client.ts";
 import { ActivitySubSection } from "../ActivitySubSection.tsx";
 import { ExerciseChip } from "../ExerciseChip.tsx";
-import type { MealItemInput } from "../MealRegisterSheet.tsx";
-import { MealRegisterSheet } from "../MealRegisterSheet.tsx";
+import type { MealItemInput } from "../AddFoodModal.tsx";
+import { AddFoodModal } from "../AddFoodModal.tsx";
 import { MealSection } from "../MealSection.tsx";
 import { SecIcon } from "../SecIcon.tsx";
 import { TopNav } from "../TopNav.tsx";
@@ -160,6 +160,18 @@ export function RecordScreen() {
     setMealSheetOpen(false);
     setActiveMealKey(null);
   };
+
+  const mealTotals = useMemo(
+    () =>
+      (Object.entries(meals) as [MealKey, MealSectionData][]).reduce(
+        (acc, [key, meal]) => {
+          acc[key] = meal.items.reduce((sum, item) => sum + parseKcal(item.kcal), 0);
+          return acc;
+        },
+        {} as Record<MealKey, number>,
+      ),
+    [meals],
+  );
 
   const handleWeightSave = async (value: number) => {
     try {
@@ -412,10 +424,14 @@ export function RecordScreen() {
         onSave={handleWeightSave}
       />
 
-      <MealRegisterSheet
+      {/* 変更: 食事追加UIを新しい検索フロー対応モーダルへ差し替え。 */}
+      <AddFoodModal
         open={mealSheetOpen}
         mealTitle={activeMealKey ? meals[activeMealKey].title : ""}
         suggestions={MEAL_SUGGESTIONS}
+        currentMealKcal={activeMealKey ? mealTotals[activeMealKey] : 0}
+        currentTotalKcal={totalMealKcal}
+        dailyGoalKcal={1800}
         onClose={() => {
           setMealSheetOpen(false);
           setActiveMealKey(null);

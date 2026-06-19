@@ -49,14 +49,33 @@ export function saveWeight(weight: number, date?: string) {
 }
 
 export interface CalorieEstimateResponse {
-  kcal: number
-  assumed_weight_g: number
-  confidence: 'high' | 'medium' | 'low'
+  kcal: number;
+  assumed_weight_g: number;
+  confidence: "high" | "medium" | "low";
 }
 
-export function estimateCalories(foodName: string) {
-  return request<CalorieEstimateResponse>('/foods/estimate-calories', {
-    method: 'POST',
+export type CalorieEstimateMode = "auto" | "no_web" | "web";
+
+export function estimateCalories(foodName: string, mode: CalorieEstimateMode = "auto") {
+  return request<CalorieEstimateResponse>("/foods/estimate-calories", {
+    method: "POST",
+    body: JSON.stringify({ foodName, mode }),
+  });
+}
+
+export interface FoodNormalizeItem {
+  name: string;
+  amount: number;
+  unit: string;
+}
+
+export interface FoodNormalizeResponse {
+  items: FoodNormalizeItem[];
+}
+
+export function normalizeFoodInput(foodName: string) {
+  return request<FoodNormalizeResponse>("/foods/normalize", {
+    method: "POST",
     body: JSON.stringify({ foodName }),
-  })
+  });
 }
