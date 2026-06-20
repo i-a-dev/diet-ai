@@ -21,7 +21,7 @@ final class CalorieEstimateService
      * - no_web: Web 検索を使わず 1 回のみ推定
      * - web: Web 検索付きで推定
      *
-     * @return array{kcal: int, assumed_weight_g: int, confidence: string}
+     * @return array{kcal: int, assumed_weight_g: int, confidence: string, product_name?: string}
      */
     public function estimate(string $foodName, string $mode = 'auto'): array
     {
@@ -83,7 +83,7 @@ final class CalorieEstimateService
     /**
      * Claude API を1回呼び出し、推定結果を返す。
      *
-     * @return array{kcal: int, assumed_weight_g: int, confidence: string}|'not_food'|null
+     * @return array{kcal: int, assumed_weight_g: int, confidence: string, product_name?: string}|'not_food'|null
      */
     private function requestEstimate(string $foodName, string $apiKey, bool $withWebSearch): array|string|null
     {
@@ -133,6 +133,7 @@ final class CalorieEstimateService
 - 必ずweb_searchで食品名・商品名の公式カロリー・栄養成分を検索してから回答する
 - 日本食品標準成分表、メーカー公式サイト、コンビニ・外食チェーンの公式栄養情報を優先する
 - 検索で公式値が見つかった場合はその値を使い、confidenceはhighにする
+- 検索で商品名まで特定できた場合は、正式な商品名を product_name に入れる
 - 検索しても特定できない場合のみ、下記の推定ルールを使う
 TEXT
             : '';
@@ -195,7 +196,9 @@ TEXT;
 
 最終回答はJSONのみ。前置きや説明は不要。
 
-食品の場合の形式: {"kcal": 整数, "assumed_weight_g": 整数, "confidence": "high"|"medium"|"low"}
+食品の場合の形式:
+- 通常: {"kcal": 整数, "assumed_weight_g": 整数, "confidence": "high"|"medium"|"low"}
+- 商品名が特定できた場合: {"kcal": 整数, "assumed_weight_g": 整数, "confidence": "high"|"medium"|"low", "product_name": "正式な商品名"}
 非食品の場合の形式: {"error":"not_food"}
 
 食品名: {$foodName}
@@ -300,7 +303,7 @@ PROMPT;
      * Claude のテキスト応答を解析する。
      * 非食品は 'not_food'、食品推定成功は配列、パース失敗は null を返す。
      *
-     * @return array{kcal: int, assumed_weight_g: int, confidence: string}|'not_food'|null
+     * @return array{kcal: int, assumed_weight_g: int, confidence: string, product_name?: string}|'not_food'|null
      */
     private function parseResponse(string $text): array|string|null
     {
@@ -366,7 +369,7 @@ PROMPT;
      * kcal・assumed_weight_g・confidence のバリデーションと型変換を行う。
      *
      * @param array<string, mixed> $json
-     * @return array{kcal: int, assumed_weight_g: int, confidence: string}|null
+     * @return array{kcal: int, assumed_weight_g: int, confidence: string, product_name?: string}|null
      */
     private function normalizeEstimate(array $json): ?array
     {
@@ -391,10 +394,17 @@ PROMPT;
             return null;
         }
 
-        return [
+        $normalized = [
             'kcal' => $kcal,
             'assumed_weight_g' => $assumedWeightG,
             'confidence' => $confidence,
         ];
+
+        $productName = trim((string) ($json['product_name'] ?? ''));
+        if ($productName !== '') {
+            $normalized['product_name'] = $productName;
+        }
+
+        return $normalized;
     }
 }

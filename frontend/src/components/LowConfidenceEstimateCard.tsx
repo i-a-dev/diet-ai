@@ -7,6 +7,8 @@ interface LowConfidenceEstimateCardProps {
   onSearchWeb: () => void;
   onUseAiEstimate: () => void;
   onEdit: () => void;
+  showSearchButton?: boolean;
+  warningMessage?: string;
 }
 
 export function LowConfidenceEstimateCard({
@@ -14,6 +16,8 @@ export function LowConfidenceEstimateCard({
   onSearchWeb,
   onUseAiEstimate,
   onEdit,
+  showSearchButton = true,
+  warningMessage,
 }: LowConfidenceEstimateCardProps) {
   return (
     <div style={cardStyle}>
@@ -21,11 +25,13 @@ export function LowConfidenceEstimateCard({
       <div style={subTitleStyle}>{result.displayName}</div>
       <div style={calorieStyle}>{result.calories} kcal</div>
       <div style={warnStyle}>
-        商品名や量が曖昧なため、実際のカロリーと異なる可能性があります
+        {warningMessage ?? "商品名や量が曖昧なため、実際のカロリーと異なる可能性があります"}
       </div>
-      <button type="button" onClick={onSearchWeb} style={primaryButtonStyle}>
-        商品情報を検索する
-      </button>
+      {showSearchButton && (
+        <button type="button" onClick={onSearchWeb} style={primaryButtonStyle}>
+          商品情報を検索する
+        </button>
+      )}
       <button type="button" onClick={onUseAiEstimate} style={secondaryButtonStyle}>
         AI推定で追加する
       </button>

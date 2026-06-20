@@ -90,6 +90,7 @@ export interface CalorieEstimateResponse {
   kcal: number;
   assumed_weight_g: number;
   confidence: "high" | "medium" | "low";
+  product_name?: string;
 }
 
 export type CalorieEstimateMode = "auto" | "no_web" | "web";

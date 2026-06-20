@@ -94,6 +94,9 @@ export function AddFoodModal({
     const remaining = Math.max(dailyGoalKcal - nextTotal, 0);
     return { nextMealTotal, nextTotal, remaining };
   }, [completedResult, currentMealKcal, currentTotalKcal, dailyGoalKcal]);
+  const isWebSearchFallback =
+    progress.state === "low_confidence_estimate" &&
+    progress.steps.some((step) => step.key === "ai_web_searching" && step.status === "done");
 
   async function handleSearch() {
     if (!canSearch || isSearching) return;
@@ -254,6 +257,12 @@ export function AddFoodModal({
           onSearchWeb={() => void handleWebSearch()}
           onUseAiEstimate={handleAiOnly}
           onEdit={() => setShowManualEdit(true)}
+          showSearchButton={!isWebSearchFallback}
+          warningMessage={
+            isWebSearchFallback
+              ? progress.message ?? "Web検索しましたが、うまくヒットしませんでした。AI推定カロリーを表示しています。"
+              : undefined
+          }
         />
       );
     }

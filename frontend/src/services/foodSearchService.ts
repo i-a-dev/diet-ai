@@ -132,12 +132,20 @@ function storeResult(result: FoodSearchResult): void {
 function resultFromEstimate(
   input: string,
   source: "claude_estimate" | "ai_web_search",
-  estimate: { kcal: number; assumed_weight_g: number; confidence: SearchConfidence },
+  estimate: {
+    kcal: number;
+    assumed_weight_g: number;
+    confidence: SearchConfidence;
+    product_name?: string;
+  },
 ): FoodSearchResult {
+  const productName = estimate.product_name?.trim();
+  const displayBaseName = productName && productName.length > 0 ? productName : input;
+
   return {
     id: `${source}-${Date.now()}`,
-    name: input,
-    displayName: `${input}（${estimate.assumed_weight_g}g 想定）`,
+    name: displayBaseName,
+    displayName: `${displayBaseName}（${estimate.assumed_weight_g}g 想定）`,
     amount: estimate.assumed_weight_g,
     unit: "g",
     calories: estimate.kcal,
@@ -424,7 +432,7 @@ export async function runAiWebSearch(
     steps: updateStep(steps, "ai_web_searching", "done"),
     result: fallbackEstimate,
     quota: getWebSearchQuota(),
-    canUseAiWebSearch: true,
-    message: "商品情報が特定できなかったため、AI推定結果を表示します",
+    canUseAiWebSearch: false,
+    message: "Web検索しましたが、うまくヒットしませんでした。AI推定カロリーを表示しています。",
   });
 }
