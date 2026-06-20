@@ -13,7 +13,12 @@ import {
   UtensilsCrossed,
   Weight,
 } from "lucide-react";
-import { fetchDailyRecord, saveWeight } from "../../api/client.ts";
+import {
+  type MealSectionSummary,
+  fetchDailyRecord,
+  saveMeal,
+  saveWeight,
+} from "../../api/client.ts";
 import { ActivitySubSection } from "../ActivitySubSection.tsx";
 import { ExerciseChip } from "../ExerciseChip.tsx";
 import type { MealItemInput } from "../AddFoodModal.tsx";
@@ -42,37 +47,22 @@ const MEAL_SUGGESTIONS: MealItemInput[] = [
   { label: "野菜スープ", kcal: "85kcal" },
 ];
 
-const INITIAL_MEALS: Record<MealKey, MealSectionData> = {
+const BASE_MEALS: Record<MealKey, Omit<MealSectionData, "items">> = {
   breakfast: {
     title: "朝ごはん",
     icon: <Sun size={14} />,
-    items: [
-      { label: "白米 150g", kcal: "234kcal" },
-      { label: "味噌汁", kcal: "45kcal" },
-      { label: "焼き鮭", kcal: "180kcal" },
-    ],
   },
   lunch: {
     title: "昼ごはん",
     icon: <Sunset size={14} />,
-    items: [
-      { label: "鶏のから揚げ定食", kcal: "680kcal" },
-      { label: "ご飯 少なめ", kcal: "180kcal" },
-      { label: "サラダ", kcal: "35kcal" },
-    ],
   },
   dinner: {
     title: "夜ごはん",
     icon: <Moon size={14} />,
-    items: [
-      { label: "豆腐ハンバーグ", kcal: "320kcal" },
-      { label: "野菜スープ", kcal: "85kcal" },
-    ],
   },
   snack: {
     title: "間食・おやつ",
     icon: <Cookie size={14} />,
-    items: [],
     isLast: true,
   },
 };
@@ -108,6 +98,34 @@ function formatCurrentDate() {
   return `${year}-${month}-${day}`;
 }
 
+function createInitialMeals(): Record<MealKey, MealSectionData> {
+  return {
+    breakfast: { ...BASE_MEALS.breakfast, items: [] },
+    lunch: { ...BASE_MEALS.lunch, items: [] },
+    dinner: { ...BASE_MEALS.dinner, items: [] },
+    snack: { ...BASE_MEALS.snack, items: [] },
+  };
+}
+
+function mapMealSectionsToState(sections: MealSectionSummary[] = []): Record<MealKey, MealSectionData> {
+  const nextMeals = createInitialMeals();
+
+  sections.forEach((section) => {
+    const key = section.id;
+    if (!nextMeals[key]) return;
+
+    nextMeals[key] = {
+      ...nextMeals[key],
+      items: section.items.map((item) => ({
+        label: item.label,
+        kcal: `${item.calories}kcal`,
+      })),
+    };
+  });
+
+  return nextMeals;
+}
+
 export function RecordScreen() {
   const [weight, setWeight] = useState<number | null>(null);
   const [weightDiff, setWeightDiff] = useState<number | null>(null);
@@ -117,7 +135,7 @@ export function RecordScreen() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [meals, setMeals] = useState(INITIAL_MEALS);
+  const [meals, setMeals] = useState<Record<MealKey, MealSectionData>>(createInitialMeals);
   const [weightSheetOpen, setWeightSheetOpen] = useState(false);
   const [mealSheetOpen, setMealSheetOpen] = useState(false);
   const [activeMealKey, setActiveMealKey] = useState<MealKey | null>(null);
@@ -136,6 +154,7 @@ export function RecordScreen() {
         setRecordedOn(data.recordedOn);
         setWeight(data.weight.current);
         setWeightDiff(data.weight.diffFromPreviousDay);
+        setMeals(mapMealSectionsToState(data.meals));
       } catch (loadError) {
         if (!cancelled) {
           setError(loadError instanceof Error ? loadError.message : "読み込みに失敗しました");
@@ -166,17 +185,27 @@ export function RecordScreen() {
     setMealSheetOpen(true);
   };
 
-  const handleMealSave = (item: MealItemInput) => {
+  const handleMealSave = async (item: MealItemInput) => {
     if (!activeMealKey) return;
-    setMeals((prev) => ({
-      ...prev,
-      [activeMealKey]: {
-        ...prev[activeMealKey],
-        items: [...prev[activeMealKey].items, item],
-      },
-    }));
-    setMealSheetOpen(false);
-    setActiveMealKey(null);
+
+    const calories = parseKcal(item.kcal);
+    if (calories <= 0) {
+      setError("カロリーは1以上で入力してください");
+      return;
+    }
+
+    try {
+      setIsSaving(true);
+      setError(null);
+      const data = await saveMeal(activeMealKey, item.label, calories, recordedOn ?? selectedDate);
+      setMeals(mapMealSectionsToState(data.meals));
+      setMealSheetOpen(false);
+      setActiveMealKey(null);
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "食事の保存に失敗しました");
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const mealTotals = useMemo(

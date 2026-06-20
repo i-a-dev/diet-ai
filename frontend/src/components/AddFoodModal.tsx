@@ -28,7 +28,7 @@ interface AddFoodModalProps {
   currentTotalKcal: number;
   dailyGoalKcal: number;
   onClose: () => void;
-  onSave: (item: MealItemInput) => void;
+  onSave: (item: MealItemInput) => Promise<void> | void;
 }
 
 const INITIAL_STEPS = [
@@ -125,46 +125,58 @@ export function AddFoodModal({
 
   function handleAiOnly() {
     if (!selectedResult) return;
-    saveItem(selectedResult);
+    void saveItem(selectedResult);
   }
 
-  function saveItem(result: FoodSearchResult | null) {
+  async function saveItem(result: FoodSearchResult | null) {
     const label = inputValue.trim();
     if (label === "") return;
 
-    if (result) {
-      const item = {
-        label: result.name,
-        kcal: `${result.calories}kcal`,
-      };
-      onSave(item);
-      setCompletedResult(result);
-      setProgress({ ...progress, state: "completed" });
-      return;
-    }
+    setIsSubmitting(true);
+    try {
+      if (result) {
+        const item = {
+          label: result.name,
+          kcal: `${result.calories}kcal`,
+        };
+        await onSave(item);
+        setCompletedResult(result);
+        setProgress({ ...progress, state: "completed" });
+        return;
+      }
 
-    const parsedKcal = Number(manualKcal);
-    if (!Number.isFinite(parsedKcal) || parsedKcal <= 0) return;
-    const item = { label, kcal: `${Math.round(parsedKcal)}kcal` };
-    onSave(item);
-    setCompletedResult({
-      id: `user-${Date.now()}`,
-      name: label,
-      displayName: label,
-      amount: 1,
-      unit: "食",
-      calories: Math.round(parsedKcal),
-      protein: null,
-      fat: null,
-      carbs: null,
-      source: "user_registered",
-      confidence: "low",
-      isEstimated: true,
-      barcode: null,
-      brandName: null,
-      rawInput: label,
-    });
-    setProgress({ ...progress, state: "completed" });
+      const parsedKcal = Number(manualKcal);
+      if (!Number.isFinite(parsedKcal) || parsedKcal <= 0) return;
+      const item = { label, kcal: `${Math.round(parsedKcal)}kcal` };
+      await onSave(item);
+      setCompletedResult({
+        id: `user-${Date.now()}`,
+        name: label,
+        displayName: label,
+        amount: 1,
+        unit: "食",
+        calories: Math.round(parsedKcal),
+        protein: null,
+        fat: null,
+        carbs: null,
+        source: "user_registered",
+        confidence: "low",
+        isEstimated: true,
+        barcode: null,
+        brandName: null,
+        rawInput: label,
+      });
+      setProgress({ ...progress, state: "completed" });
+    } catch (saveError) {
+      setProgress({
+        ...makeInitialProgress(),
+        state: "error",
+        message: saveError instanceof Error ? saveError.message : "保存に失敗しました",
+      });
+      setShowManualEdit(true);
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
   function renderIdleSection() {
@@ -192,8 +204,8 @@ export function AddFoodModal({
         <button
           type="button"
           onClick={() => void handleSearch()}
-          disabled={!canSearch}
-          style={{ ...primaryBtnStyle, opacity: canSearch ? 1 : 0.45 }}
+          disabled={!canSearch || isSubmitting}
+          style={{ ...primaryBtnStyle, opacity: canSearch && !isSubmitting ? 1 : 0.45 }}
         >
           検索する
         </button>
@@ -212,7 +224,7 @@ export function AddFoodModal({
     }
 
     if ((state === "found" || state === "web_found") && selectedResult) {
-      return <FoodSearchResultCard result={selectedResult} onAdd={() => saveItem(selectedResult)} />;
+      return <FoodSearchResultCard result={selectedResult} onAdd={() => void saveItem(selectedResult)} />;
     }
 
     if (state === "estimated" && selectedResult) {
@@ -223,7 +235,7 @@ export function AddFoodModal({
             setShowManualEdit(true);
             setManualKcal(String(selectedResult.calories));
           }}
-          onAdd={() => saveItem(selectedResult)}
+          onAdd={() => void saveItem(selectedResult)}
         />
       );
     }
@@ -301,7 +313,7 @@ export function AddFoodModal({
           <button
             type="button"
             disabled={!inputValue.trim() || !manualKcal.trim() || isSubmitting}
-            onClick={() => saveItem(null)}
+            onClick={() => void saveItem(null)}
             style={{
               ...primaryBtnStyle,
               marginTop: 10,

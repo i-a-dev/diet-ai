@@ -43,14 +43,23 @@ final class Database
      */
     private static function migrate(): void
     {
-        $migrationPath = dirname(__DIR__) . '/migrations/001_create_weight_entries.sql';
-        $sql = file_get_contents($migrationPath);
+        $migrationPaths = glob(dirname(__DIR__) . '/migrations/*.sql');
 
-        if ($sql === false) {
-            throw new RuntimeException('Migration file not found.');
+        if ($migrationPaths === false || $migrationPaths === []) {
+            throw new RuntimeException('Migration files not found.');
         }
 
-        self::$pdo->exec($sql);
+        sort($migrationPaths, SORT_STRING);
+
+        foreach ($migrationPaths as $migrationPath) {
+            $sql = file_get_contents($migrationPath);
+
+            if ($sql === false) {
+                throw new RuntimeException(sprintf('Migration file not found: %s', $migrationPath));
+            }
+
+            self::$pdo->exec($sql);
+        }
     }
 
     /**

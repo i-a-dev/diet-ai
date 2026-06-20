@@ -26,14 +26,40 @@ interface WeightSummary {
   dateLabel: string;
 }
 
+export type MealType = "breakfast" | "lunch" | "dinner" | "snack";
+
+export interface MealEntrySummary {
+  id: number;
+  label: string;
+  calories: number;
+}
+
+export interface MealSectionSummary {
+  id: MealType;
+  name: string;
+  calories: number;
+  items: MealEntrySummary[];
+}
+
 interface DailyRecordResponse {
   date: string;
   recordedOn: string;
   weight: WeightSummary;
+  meals: MealSectionSummary[];
 }
 
 interface SaveWeightResponse {
   weight: WeightSummary;
+}
+
+interface SaveMealResponse {
+  entry: {
+    id: number;
+    mealType: MealType;
+    label: string;
+    calories: number;
+  };
+  meals: MealSectionSummary[];
 }
 
 export function fetchDailyRecord(date?: string) {
@@ -45,6 +71,18 @@ export function saveWeight(weight: number, date?: string) {
   return request<SaveWeightResponse>("/records/weight", {
     method: "POST",
     body: JSON.stringify({ weight, date }),
+  });
+}
+
+export function saveMeal(
+  mealType: MealType,
+  foodName: string,
+  calories: number,
+  date?: string,
+) {
+  return request<SaveMealResponse>("/records/meals", {
+    method: "POST",
+    body: JSON.stringify({ mealType, foodName, calories, date }),
   });
 }
 

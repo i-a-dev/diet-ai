@@ -74,8 +74,8 @@ export function MealSection({ icon, title, totalKcal, items, isLast = false, onA
               alignItems: 'center',
             }}
           >
-            {items.map((item) => (
-              <FoodChip key={item.label} label={item.label} kcal={item.kcal} />
+            {items.map((item, index) => (
+              <FoodChip key={`${item.label}-${index}`} label={item.label} kcal={item.kcal} />
             ))}
           </div>
         )}

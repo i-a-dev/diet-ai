@@ -10,12 +10,14 @@ declare(strict_types=1);
 require_once __DIR__ . '/../src/Http.php';
 require_once __DIR__ . '/../src/Database.php';
 require_once __DIR__ . '/../src/WeightRepository.php';
+require_once __DIR__ . '/../src/MealEntryRepository.php';
 require_once __DIR__ . '/../src/MockRepository.php';
 require_once __DIR__ . '/../src/CalorieEstimateService.php';
 require_once __DIR__ . '/../src/FoodNormalizeService.php';
 
 $repository = new MockRepository();
 $weightRepository = new WeightRepository();
+$mealEntryRepository = new MealEntryRepository();
 $calorieEstimateService = new CalorieEstimateService();
 $foodNormalizeService = new FoodNormalizeService();
 $requestMethod = $_SERVER['REQUEST_METHOD'] ?? 'GET';
@@ -69,6 +71,7 @@ if ($requestMethod === 'GET' && $requestPath === '/api/records/daily') {
 
     $record = $repository->getDailyRecord();
     $weightSummary = $weightRepository->getSummaryForDate($date);
+    $mealSections = $mealEntryRepository->getSectionsForDate($date);
 
     // モックの weight を DB の値で上書き
     $record['date'] = $weightSummary['dateLabel'] ?? WeightRepository::formatDateLabel($date);
@@ -79,6 +82,7 @@ if ($requestMethod === 'GET' && $requestPath === '/api/records/daily') {
         'recordedOn' => $date,
         'dateLabel' => WeightRepository::formatDateLabel($date),
     ];
+    $record['meals'] = $mealSections;
 
     json_response($record);
 }
@@ -104,6 +108,35 @@ if ($requestMethod === 'POST' && $requestPath === '/api/records/weight') {
     }
 
     json_response(['weight' => $summary]);
+}
+
+// POST /api/records/meals — 食事を登録
+if ($requestMethod === 'POST' && $requestPath === '/api/records/meals') {
+    $body = json_decode(file_get_contents('php://input') ?: '{}', true);
+    $date = trim((string) ($body['date'] ?? WeightRepository::todayDate()));
+    $mealType = trim((string) ($body['mealType'] ?? ''));
+    $foodName = trim((string) ($body['foodName'] ?? ''));
+    $calories = $body['calories'] ?? null;
+
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+        json_response(['message' => 'date must be YYYY-MM-DD'], 422);
+    }
+
+    if (!is_numeric($calories)) {
+        json_response(['message' => 'calories is required'], 422);
+    }
+
+    try {
+        $entry = $mealEntryRepository->addEntry($date, $mealType, $foodName, (int) round((float) $calories));
+        $sections = $mealEntryRepository->getSectionsForDate($date);
+    } catch (InvalidArgumentException $exception) {
+        json_response(['message' => $exception->getMessage()], 422);
+    }
+
+    json_response([
+        'entry' => $entry,
+        'meals' => $sections,
+    ]);
 }
 
 // POST /api/foods/estimate-calories — Claude Haiku 4.5 で食品名からカロリーを推定
