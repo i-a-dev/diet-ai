@@ -91,10 +91,28 @@ function formatWeightDiff(diff: number | null) {
   return diff > 0 ? `前日比 +${diff.toFixed(1)}kg` : `前日比 ${diff.toFixed(1)}kg`;
 }
 
+function shiftDate(baseDate: string, dayOffset: number) {
+  const [year, month, day] = baseDate.split("-").map(Number);
+  const shifted = new Date(year, month - 1, day + dayOffset);
+  const shiftedYear = shifted.getFullYear();
+  const shiftedMonth = `${shifted.getMonth() + 1}`.padStart(2, "0");
+  const shiftedDay = `${shifted.getDate()}`.padStart(2, "0");
+  return `${shiftedYear}-${shiftedMonth}-${shiftedDay}`;
+}
+
+function formatCurrentDate() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = `${now.getMonth() + 1}`.padStart(2, "0");
+  const day = `${now.getDate()}`.padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 export function RecordScreen() {
   const [weight, setWeight] = useState<number | null>(null);
   const [weightDiff, setWeightDiff] = useState<number | null>(null);
   const [dateLabel, setDateLabel] = useState("読み込み中...");
+  const [selectedDate, setSelectedDate] = useState<string>(formatCurrentDate);
   const [recordedOn, setRecordedOn] = useState<string>();
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -111,7 +129,7 @@ export function RecordScreen() {
       try {
         setIsLoading(true);
         setError(null);
-        const data = await fetchDailyRecord();
+        const data = await fetchDailyRecord(selectedDate);
         if (cancelled) return;
 
         setDateLabel(data.date);
@@ -132,7 +150,7 @@ export function RecordScreen() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [selectedDate]);
 
   const totalMealKcal = useMemo(
     () =>
@@ -188,6 +206,12 @@ export function RecordScreen() {
     }
   };
 
+  const handleMoveDate = (offset: number) => {
+    const baseDate = selectedDate ?? recordedOn;
+    if (!baseDate) return;
+    setSelectedDate(shiftDate(baseDate, offset));
+  };
+
   const secStyle = {
     background: "#fff",
     margin: "10px 16px 0",
@@ -240,9 +264,43 @@ export function RecordScreen() {
           background: "#fff",
         }}
       >
-        <ChevronLeft size={22} color="#C0C0C0" />
+        <button
+          type="button"
+          aria-label="前日を表示"
+          onClick={() => handleMoveDate(-1)}
+          disabled={isLoading || isSaving || !selectedDate}
+          style={{
+            border: "none",
+            background: "transparent",
+            padding: 0,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            cursor: isLoading || isSaving || !selectedDate ? "not-allowed" : "pointer",
+            opacity: isLoading || isSaving || !selectedDate ? 0.4 : 1,
+          }}
+        >
+          <ChevronLeft size={22} color="#C0C0C0" />
+        </button>
         <span style={{ fontSize: 15, fontWeight: 600, color: "#111" }}>{dateLabel}</span>
-        <ChevronRight size={22} color="#C0C0C0" />
+        <button
+          type="button"
+          aria-label="翌日を表示"
+          onClick={() => handleMoveDate(1)}
+          disabled={isLoading || isSaving || !selectedDate}
+          style={{
+            border: "none",
+            background: "transparent",
+            padding: 0,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            cursor: isLoading || isSaving || !selectedDate ? "not-allowed" : "pointer",
+            opacity: isLoading || isSaving || !selectedDate ? 0.4 : 1,
+          }}
+        >
+          <ChevronRight size={22} color="#C0C0C0" />
+        </button>
       </div>
       <div
         style={{
