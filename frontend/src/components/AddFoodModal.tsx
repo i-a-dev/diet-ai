@@ -80,6 +80,12 @@ export function AddFoodModal({
   const canSearch = inputValue.trim().length >= 2;
   const selectedResult = progress.result;
   const isSearching = progress.state === "searching" || progress.state === "web_searching";
+  const isFoodNameLocked =
+    progress.state === "estimated" ||
+    progress.state === "low_confidence_estimate" ||
+    progress.state === "web_searching" ||
+    progress.state === "web_found" ||
+    progress.state === "completed";
 
   const completedSummary = useMemo(() => {
     if (!completedResult) return null;
@@ -290,7 +296,14 @@ export function AddFoodModal({
         placeholder="例：白米150g / 焼き鮭定食"
         value={inputValue}
         onChange={(e) => setInputValue(e.target.value)}
-        style={inputStyle}
+        readOnly={isFoodNameLocked}
+        aria-readonly={isFoodNameLocked}
+        style={{
+          ...inputStyle,
+          background: isFoodNameLocked ? "#F3F4F6" : "#fff",
+          color: isFoodNameLocked ? "#6B7280" : "#111",
+          cursor: isFoodNameLocked ? "not-allowed" : "text",
+        }}
       />
 
       {renderSearchResult(progress.state)}
