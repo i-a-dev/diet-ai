@@ -103,4 +103,54 @@ final class MealEntryRepository
             'calories' => $caloriesKcal,
         ];
     }
+
+    /**
+     * 食事履歴を新しい順で取得する。
+     * mealType を指定すると、その区分の履歴のみ返す。
+     *
+     * @return array<int, array{id: int, mealType: string, label: string, calories: int, recordedOn: string}>
+     */
+    public function getHistory(?string $mealType = null, int $limit = 30): array
+    {
+        $safeLimit = max(1, min(200, $limit));
+
+        if ($mealType !== null && !isset(self::MEAL_LABELS[$mealType])) {
+            throw new InvalidArgumentException('mealType must be breakfast|lunch|dinner|snack');
+        }
+
+        if ($mealType === null) {
+            $statement = $this->db->prepare(
+                'SELECT id, meal_type, food_name, calories_kcal, recorded_on
+                 FROM meal_entries
+                 ORDER BY id DESC
+                 LIMIT :limit'
+            );
+            $statement->bindValue(':limit', $safeLimit, PDO::PARAM_INT);
+            $statement->execute();
+        } else {
+            $statement = $this->db->prepare(
+                'SELECT id, meal_type, food_name, calories_kcal, recorded_on
+                 FROM meal_entries
+                 WHERE meal_type = :meal_type
+                 ORDER BY id DESC
+                 LIMIT :limit'
+            );
+            $statement->bindValue(':meal_type', $mealType, PDO::PARAM_STR);
+            $statement->bindValue(':limit', $safeLimit, PDO::PARAM_INT);
+            $statement->execute();
+        }
+
+        $history = [];
+        foreach ($statement->fetchAll() as $row) {
+            $history[] = [
+                'id' => (int) $row['id'],
+                'mealType' => (string) $row['meal_type'],
+                'label' => (string) $row['food_name'],
+                'calories' => (int) $row['calories_kcal'],
+                'recordedOn' => (string) $row['recorded_on'],
+            ];
+        }
+
+        return $history;
+    }
 }

@@ -527,6 +527,7 @@ export function RecordScreen() {
       {/* 変更: 食事追加UIを新しい検索フロー対応モーダルへ差し替え。 */}
       <AddFoodModal
         open={mealSheetOpen}
+        mealType={activeMealKey ?? "breakfast"}
         mealTitle={activeMealKey ? meals[activeMealKey].title : ""}
         suggestions={MEAL_SUGGESTIONS}
         currentMealKcal={activeMealKey ? mealTotals[activeMealKey] : 0}

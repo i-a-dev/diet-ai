@@ -64,6 +64,18 @@ interface SaveMealResponse {
   meals: MealSectionSummary[];
 }
 
+export interface MealHistoryEntry {
+  id: number;
+  mealType: MealType;
+  label: string;
+  calories: number;
+  recordedOn: string;
+}
+
+interface MealHistoryResponse {
+  history: MealHistoryEntry[];
+}
+
 export function fetchDailyRecord(date?: string) {
   const query = date ? `?date=${encodeURIComponent(date)}` : "";
   return request<DailyRecordResponse>(`/records/daily${query}`);
@@ -86,6 +98,18 @@ export function saveMeal(
     method: "POST",
     body: JSON.stringify({ mealType, foodName, calories, date }),
   });
+}
+
+export function fetchMealHistory(options?: { mealType?: MealType; limit?: number }) {
+  const params = new URLSearchParams();
+  if (options?.mealType) {
+    params.set("mealType", options.mealType);
+  }
+  if (options?.limit) {
+    params.set("limit", String(options.limit));
+  }
+  const query = params.toString();
+  return request<MealHistoryResponse>(`/records/meals/history${query ? `?${query}` : ""}`);
 }
 
 export interface CalorieEstimateResponse {

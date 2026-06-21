@@ -134,6 +134,23 @@ if ($requestMethod === 'POST' && $requestPath === '/api/records/meals') {
     ]);
 }
 
+// GET /api/records/meals/history — 食事履歴を取得
+if ($requestMethod === 'GET' && $requestPath === '/api/records/meals/history') {
+    $mealType = trim((string) ($_GET['mealType'] ?? ''));
+    $limit = (int) ($_GET['limit'] ?? 30);
+    $mealTypeOrNull = $mealType === '' ? null : $mealType;
+
+    try {
+        $history = $mealEntryRepository->getHistory($mealTypeOrNull, $limit);
+    } catch (InvalidArgumentException $exception) {
+        json_response(['message' => $exception->getMessage()], 422);
+    }
+
+    json_response([
+        'history' => $history,
+    ]);
+}
+
 // POST /api/foods/estimate-calories — Claude Haiku 4.5 で食品名からカロリーを推定
 if ($requestMethod === 'POST' && $requestPath === '/api/foods/estimate-calories') {
     $body = json_decode(file_get_contents('php://input') ?: '{}', true);

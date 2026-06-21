@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { BottomSheet } from "./BottomSheet.tsx";
 import { ORANGE } from "../constants.ts";
 import { FoodSearchStatus } from "./FoodSearchStatus.tsx";
@@ -14,6 +14,7 @@ import type {
   FoodSearchResult,
   SearchState,
 } from "../types/foodSearch.ts";
+import { fetchMealHistory, type MealType } from "../api/client.ts";
 
 export interface MealItemInput {
   label: string;
@@ -22,6 +23,7 @@ export interface MealItemInput {
 
 interface AddFoodModalProps {
   open: boolean;
+  mealType: MealType;
   mealTitle: string;
   suggestions: MealItemInput[];
   currentMealKcal: number;
@@ -51,6 +53,7 @@ function makeInitialProgress(): FoodSearchProgress {
 
 export function AddFoodModal({
   open,
+  mealType,
   mealTitle,
   suggestions,
   currentMealKcal,
@@ -66,19 +69,50 @@ export function AddFoodModal({
   const [showManualEdit, setShowManualEdit] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [completedResult, setCompletedResult] = useState<FoodSearchResult | null>(null);
+  const [historyTab, setHistoryTab] = useState<"recent" | "meal">("recent");
+  const [recentHistory, setRecentHistory] = useState<MealItemInput[]>([]);
+  const [mealHistory, setMealHistory] = useState<MealItemInput[]>([]);
   const activeSearchTokenRef = useRef(0);
+  const historyRequestTokenRef = useRef(0);
   const showSearchApiDebug = import.meta.env.VITE_FOOD_SEARCH_DEBUG_MODE === "true";
 
-  useEffect(() => {
-    if (!open) return;
+  useLayoutEffect(() => {
+    if (!open) {
+      // 次回オープン時の初回描画で前回タブが見えないよう、閉じる時点で戻す。
+      setHistoryTab("recent");
+      activeSearchTokenRef.current = 0;
+      return;
+    }
     setInputValue("");
     setManualKcal("");
     setProgress(makeInitialProgress());
     setShowManualEdit(false);
     setIsSubmitting(false);
     setCompletedResult(null);
+    setHistoryTab("recent");
     activeSearchTokenRef.current = 0;
   }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const token = Date.now();
+    historyRequestTokenRef.current = token;
+    void (async () => {
+      try {
+        const [recent, byMeal] = await Promise.all([
+          fetchMealHistory({ limit: 40 }),
+          fetchMealHistory({ mealType, limit: 40 }),
+        ]);
+        if (historyRequestTokenRef.current !== token) return;
+        setRecentHistory(toUniqueMealInputs(recent.history));
+        setMealHistory(toUniqueMealInputs(byMeal.history));
+      } catch {
+        if (historyRequestTokenRef.current !== token) return;
+        setRecentHistory([]);
+        setMealHistory([]);
+      }
+    })();
+  }, [open, mealType]);
 
   const canSearch = inputValue.trim().length >= 2;
   const selectedResult = progress.result;
@@ -208,23 +242,52 @@ export function AddFoodModal({
   }
 
   function renderIdleSection() {
+    const activeHistory = historyTab === "recent" ? recentHistory : mealHistory;
+    const chipItems = activeHistory.length > 0 ? activeHistory : suggestions;
     return (
       <>
-        <div style={hintTitleStyle}>よく使う食品</div>
-        <div style={chipWrapStyle}>
-          {suggestions.map((item) => (
-            <button
-              key={item.label}
-              type="button"
-              onClick={() => {
-                setInputValue(item.label);
-                setManualKcal(item.kcal.replace("kcal", ""));
-              }}
-              style={chipStyle}
-            >
-              {item.label}
-            </button>
-          ))}
+        <div style={hintTitleStyle}>履歴から選ぶ</div>
+        <div style={tabWrapStyle}>
+          <button
+            type="button"
+            onClick={() => setHistoryTab("recent")}
+            aria-pressed={historyTab === "recent"}
+            style={{
+              ...tabButtonStyle,
+              ...(historyTab === "recent" ? activeTabButtonStyle : inactiveTabButtonStyle),
+            }}
+          >
+            最近の履歴
+          </button>
+          <button
+            type="button"
+            onClick={() => setHistoryTab("meal")}
+            aria-pressed={historyTab === "meal"}
+            style={{
+              ...tabButtonStyle,
+              ...(historyTab === "meal" ? activeTabButtonStyle : inactiveTabButtonStyle),
+            }}
+          >
+            {mealTitle}の履歴
+          </button>
+        </div>
+        <div style={historyScrollAreaStyle}>
+          <div style={chipWrapStyle}>
+            {chipItems.map((item) => (
+              <button
+                key={`${item.label}-${item.kcal}`}
+                type="button"
+                onClick={() => {
+                  setInputValue(item.label);
+                  setManualKcal(item.kcal.replace("kcal", ""));
+                }}
+                style={chipStyle}
+              >
+                {item.label}
+              </button>
+            ))}
+            {chipItems.length === 0 && <span style={emptyHistoryStyle}>履歴がありません</span>}
+          </div>
         </div>
         <button type="button" style={secondaryBtnStyle}>
           バーコードで読み取る
@@ -376,6 +439,26 @@ export function AddFoodModal({
   );
 }
 
+function toUniqueMealInputs(
+  history: Array<{ label: string; calories: number }>,
+): MealItemInput[] {
+  const seen = new Set<string>();
+  const unique: MealItemInput[] = [];
+
+  for (const entry of history) {
+    const key = entry.label.trim().toLowerCase();
+    if (key === "" || seen.has(key)) continue;
+    seen.add(key);
+    unique.push({
+      label: entry.label,
+      kcal: `${entry.calories}kcal`,
+    });
+    if (unique.length >= 12) break;
+  }
+
+  return unique;
+}
+
 const fieldLabelStyle: CSSProperties = {
   display: "block",
   fontSize: 13,
@@ -407,7 +490,49 @@ const chipWrapStyle: CSSProperties = {
   display: "flex",
   flexWrap: "wrap",
   gap: 8,
+};
+
+const historyScrollAreaStyle: CSSProperties = {
+  maxHeight: 180,
+  overflowY: "auto",
+  border: "1px solid #F1F5F9",
+  borderRadius: 10,
+  padding: "10px 8px",
   marginBottom: 12,
+  background: "#fff",
+};
+
+const tabWrapStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "1fr 1fr",
+  gap: 8,
+  marginBottom: 10,
+  padding: 4,
+  borderRadius: 12,
+  background: "#F3F4F6",
+};
+
+const tabButtonStyle: CSSProperties = {
+  border: "1px solid transparent",
+  borderRadius: 8,
+  fontSize: 13,
+  fontWeight: 700,
+  padding: "9px 10px",
+  cursor: "pointer",
+  transition: "all 160ms ease",
+};
+
+const activeTabButtonStyle: CSSProperties = {
+  borderColor: "#F97316",
+  color: "#fff",
+  background: "#F97316",
+  boxShadow: "0 1px 2px rgba(0,0,0,0.12)",
+};
+
+const inactiveTabButtonStyle: CSSProperties = {
+  borderColor: "#E5E7EB",
+  color: "#6B7280",
+  background: "#fff",
 };
 
 const chipStyle: CSSProperties = {
@@ -418,6 +543,11 @@ const chipStyle: CSSProperties = {
   fontSize: 13,
   color: "#8B5E3C",
   cursor: "pointer",
+};
+
+const emptyHistoryStyle: CSSProperties = {
+  fontSize: 12,
+  color: "#9CA3AF",
 };
 
 const secondaryBtnStyle: CSSProperties = {
