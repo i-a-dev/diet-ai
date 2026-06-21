@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { BottomSheet } from "./BottomSheet.tsx";
 import { ORANGE } from "../constants.ts";
 import { FoodSearchStatus } from "./FoodSearchStatus.tsx";
@@ -66,6 +66,8 @@ export function AddFoodModal({
   const [showManualEdit, setShowManualEdit] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [completedResult, setCompletedResult] = useState<FoodSearchResult | null>(null);
+  const activeSearchTokenRef = useRef(0);
+  const showSearchApiDebug = import.meta.env.VITE_FOOD_SEARCH_DEBUG_MODE === "true";
 
   useEffect(() => {
     if (!open) return;
@@ -75,12 +77,14 @@ export function AddFoodModal({
     setShowManualEdit(false);
     setIsSubmitting(false);
     setCompletedResult(null);
+    activeSearchTokenRef.current = 0;
   }, [open]);
 
   const canSearch = inputValue.trim().length >= 2;
   const selectedResult = progress.result;
   const isSearching = progress.state === "searching" || progress.state === "web_searching";
   const isFoodNameLocked =
+    isSearching ||
     progress.state === "estimated" ||
     progress.state === "low_confidence_estimate" ||
     progress.state === "web_searching" ||
@@ -100,13 +104,20 @@ export function AddFoodModal({
 
   async function handleSearch() {
     if (!canSearch || isSearching) return;
+    const token = Date.now();
+    activeSearchTokenRef.current = token;
     setShowManualEdit(false);
     setManualKcal("");
     try {
       // 変更: Regex → FatSecret → Open Food Facts → Claude 推定の順で検索。
-      const next = await searchFoodByText(inputValue, setProgress);
+      const next = await searchFoodByText(inputValue, (nextProgress) => {
+        if (activeSearchTokenRef.current !== token) return;
+        setProgress(nextProgress);
+      });
+      if (activeSearchTokenRef.current !== token) return;
       setProgress(next);
     } catch (error) {
+      if (activeSearchTokenRef.current !== token) return;
       setProgress({
         ...makeInitialProgress(),
         state: "error",
@@ -118,11 +129,18 @@ export function AddFoodModal({
 
   async function handleWebSearch() {
     if (isSearching) return;
+    const token = Date.now();
+    activeSearchTokenRef.current = token;
     try {
       // 変更: 低信頼度時のみ、ユーザー操作で AI Web検索を実行する。
-      const next = await runAiWebSearch(inputValue, setProgress);
+      const next = await runAiWebSearch(inputValue, (nextProgress) => {
+        if (activeSearchTokenRef.current !== token) return;
+        setProgress(nextProgress);
+      });
+      if (activeSearchTokenRef.current !== token) return;
       setProgress(next);
     } catch (error) {
+      if (activeSearchTokenRef.current !== token) return;
       setProgress({
         ...progress,
         state: "error",
@@ -226,8 +244,15 @@ export function AddFoodModal({
     if (state === "searching" || state === "web_searching") {
       return (
         <FoodSearchStatus
-          title={state === "web_searching" ? "商品情報を検索中..." : "食品データを検索中..."}
+          title={state === "web_searching" ? "商品情報を検索しています" : "食品情報を探しています"}
+          query={inputValue.trim()}
+          mode={state === "web_searching" ? "web" : "food"}
           steps={progress.steps}
+          showApiDebug={showSearchApiDebug}
+          onCancel={() => {
+            activeSearchTokenRef.current = 0;
+            setProgress(makeInitialProgress());
+          }}
         />
       );
     }

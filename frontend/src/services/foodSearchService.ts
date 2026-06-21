@@ -186,8 +186,12 @@ function resultFromOpenFoodFacts(
     code?: string;
     product_name?: string;
     brands?: string;
+    serving_size?: string;
+    serving_quantity?: number;
+    serving_quantity_unit?: string;
     nutriments?: {
       "energy-kcal_100g"?: number;
+      "energy-kcal_serving"?: number;
       proteins_100g?: number;
       fat_100g?: number;
       carbohydrates_100g?: number;
@@ -197,26 +201,76 @@ function resultFromOpenFoodFacts(
   rawInput: string,
 ): FoodSearchResult | null {
   const kcal100 = product.nutriments?.["energy-kcal_100g"];
-  if (!kcal100 || !Number.isFinite(kcal100)) return null;
-  const ratio = parsed.unit.toLowerCase() === "g" ? parsed.amount / 100 : 1;
+  const kcalServing = product.nutriments?.["energy-kcal_serving"];
+  const servingQuantity = Number(product.serving_quantity);
+  const servingUnit = product.serving_quantity_unit?.trim();
+  const hasKcal100 = Number.isFinite(kcal100) && (kcal100 ?? 0) > 0;
+  const hasKcalServing = Number.isFinite(kcalServing) && (kcalServing ?? 0) > 0;
+  const hasServingQuantity = Number.isFinite(servingQuantity) && servingQuantity > 0;
+
+  if (!hasKcal100 && !hasKcalServing) return null;
+
+  // 優先順位:
+  // 1) energy-kcal_serving
+  // 2) serving_quantity (+ energy-kcal_100g) で換算
+  // 3) energy-kcal_100g（100g基準として表示）
+  let calories = 0;
+  let amount = 100;
+  let unit = "g";
+  let ratio = 1;
+  let canScaleMacroBy100g = false;
+  let displaySuffix = "100g（100g基準）";
+
+  if (hasKcalServing) {
+    calories = Math.round(kcalServing ?? 0);
+    if (hasServingQuantity && servingUnit) {
+      amount = servingQuantity;
+      unit = servingUnit;
+      ratio = servingUnit.toLowerCase() === "g" && hasKcal100 ? servingQuantity / 100 : 1;
+      canScaleMacroBy100g = servingUnit.toLowerCase() === "g" && hasKcal100;
+      displaySuffix = product.serving_size?.trim() || `${servingQuantity}${servingUnit}`;
+    } else {
+      amount = 1;
+      unit = "食";
+      ratio = 1;
+      canScaleMacroBy100g = false;
+      displaySuffix = product.serving_size?.trim() || "1食";
+    }
+  } else if (hasKcal100 && hasServingQuantity && servingUnit && servingUnit.toLowerCase() === "g") {
+    ratio = servingQuantity / 100;
+    canScaleMacroBy100g = true;
+    calories = Math.round((kcal100 ?? 0) * ratio);
+    amount = servingQuantity;
+    unit = servingUnit;
+    displaySuffix = product.serving_size?.trim() || `${servingQuantity}${servingUnit}`;
+  } else if (hasKcal100) {
+    calories = Math.round(kcal100 ?? 0);
+    amount = 100;
+    unit = "g";
+    ratio = 1;
+    canScaleMacroBy100g = true;
+    displaySuffix = "100g（100g基準）";
+  } else {
+    return null;
+  }
 
   return {
     id: `off-${product.code ?? Date.now().toString()}`,
     name: product.product_name ?? parsed.name,
-    displayName: `${product.product_name ?? parsed.name} ${parsed.amount}${parsed.unit}`,
-    amount: parsed.amount,
-    unit: parsed.unit,
-    calories: Math.round(kcal100 * ratio),
+    displayName: `${product.product_name ?? parsed.name} ${displaySuffix}`,
+    amount,
+    unit,
+    calories,
     protein:
-      product.nutriments?.proteins_100g == null
+      product.nutriments?.proteins_100g == null || !canScaleMacroBy100g
         ? null
         : Number((product.nutriments.proteins_100g * ratio).toFixed(1)),
     fat:
-      product.nutriments?.fat_100g == null
+      product.nutriments?.fat_100g == null || !canScaleMacroBy100g
         ? null
         : Number((product.nutriments.fat_100g * ratio).toFixed(1)),
     carbs:
-      product.nutriments?.carbohydrates_100g == null
+      product.nutriments?.carbohydrates_100g == null || !canScaleMacroBy100g
         ? null
         : Number((product.nutriments.carbohydrates_100g * ratio).toFixed(1)),
     source: "open_food_facts",
@@ -253,7 +307,7 @@ async function searchOpenFoodFacts(
 ): Promise<FoodSearchResult | null> {
   const url = `https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(
     query,
-  )}&search_simple=1&action=process&json=1&page_size=1`;
+  )}&search_simple=1&action=process&json=1&page_size=10`;
   const response = await fetch(url);
   if (!response.ok) {
     throw new Error("Open Food Facts request failed");
@@ -272,9 +326,13 @@ async function searchOpenFoodFacts(
       };
     }>;
   };
-  const product = json.products?.[0];
-  if (!product) return null;
-  return resultFromOpenFoodFacts(product, parsed, rawInput);
+  const products = json.products ?? [];
+  for (const product of products) {
+    const candidate = resultFromOpenFoodFacts(product, parsed, rawInput);
+    if (candidate) return candidate;
+  }
+
+  return null;
 }
 
 async function estimateWithClaude(rawInput: string, parsed: ParsedFoodInput): Promise<FoodSearchResult> {

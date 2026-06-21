@@ -23,11 +23,6 @@ export function FoodSearchResultCard({ result, onAdd }: FoodSearchResultCardProp
       {sourceLabel && <div style={sourceStyle}>{sourceLabel}</div>}
       <div style={nameStyle}>{result.displayName}</div>
       <div style={calorieStyle}>{result.calories} kcal</div>
-      {(result.protein !== null || result.fat !== null || result.carbs !== null) && (
-        <div style={macroStyle}>
-          P {result.protein ?? "-"} / F {result.fat ?? "-"} / C {result.carbs ?? "-"}
-        </div>
-      )}
       <button type="button" onClick={onAdd} style={primaryButtonStyle}>
         この内容で追加する
       </button>
@@ -61,12 +56,6 @@ const calorieStyle: CSSProperties = {
   fontSize: 24,
   fontWeight: 800,
   color: "#111827",
-};
-
-const macroStyle: CSSProperties = {
-  marginTop: 4,
-  color: "#4B5563",
-  fontSize: 12,
 };
 
 const sourceStyle: CSSProperties = {
