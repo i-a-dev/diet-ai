@@ -85,6 +85,7 @@ export function AddFoodModal({
   const isSearching = progress.state === "searching" || progress.state === "web_searching";
   const isFoodNameLocked =
     isSearching ||
+    progress.state === "found" ||
     progress.state === "estimated" ||
     progress.state === "low_confidence_estimate" ||
     progress.state === "web_searching" ||
