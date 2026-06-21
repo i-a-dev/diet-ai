@@ -67,17 +67,8 @@ final class CalorieEstimateService
             return $initial;
         }
 
-        if ($initial['confidence'] === 'high') {
-            return $initial;
-        }
-
-        $refined = $this->requestEstimate($trimmed, $apiKey, true);
-
-        if ($refined === 'not_food' || $refined === null) {
-            return $initial;
-        }
-
-        return $refined;
+        // autoモードはWeb検索しない・推定結果をそのまま返す
+        return $initial;
     }
 
     /**
@@ -104,7 +95,7 @@ final class CalorieEstimateService
                 [
                     'type' => 'web_search_20250305',
                     'name' => 'web_search',
-                    'max_uses' => 3,
+                    'max_uses' => 1,
                     'user_location' => [
                         'type' => 'approximate',
                         'country' => 'JP',
