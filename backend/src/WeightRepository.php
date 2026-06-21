@@ -21,16 +21,33 @@ final class WeightRepository
 
     /**
      * 指定日の体重サマリーを取得する（記録画面の表示用）。
-     * 体重・前日比・日付ラベルをまとめて返す。データがなければ null。
+     * 体重・前日比・日付ラベルをまとめて返す。
+     * 当日の記録がない場合は current を null とし、直近の参考体重を referenceWeight に入れる。
      *
-     * @return array{current: float, diffFromPreviousDay: float|null, recordedOn: string, dateLabel: string}|null
+     * @return array{
+     *   current: float|null,
+     *   diffFromPreviousDay: float|null,
+     *   recordedOn: string,
+     *   dateLabel: string,
+     *   referenceWeight: float|null,
+     *   referenceRecordedOn: string|null
+     * }
      */
-    public function getSummaryForDate(string $date): ?array
+    public function getSummaryForDate(string $date): array
     {
         $entry = $this->findByDate($date);
 
         if ($entry === null) {
-            return null;
+            $latest = $this->findLatestEntryOnOrBefore($date);
+
+            return [
+                'current' => null,
+                'diffFromPreviousDay' => null,
+                'recordedOn' => $date,
+                'dateLabel' => self::formatDateLabel($date),
+                'referenceWeight' => $latest === null ? null : (float) $latest['weight_kg'],
+                'referenceRecordedOn' => $latest === null ? null : (string) $latest['recorded_on'],
+            ];
         }
 
         $previous = $this->findPreviousEntry($date);
@@ -45,6 +62,8 @@ final class WeightRepository
             'diffFromPreviousDay' => $diff,
             'recordedOn' => $date,
             'dateLabel' => self::formatDateLabel($date),
+            'referenceWeight' => $current,
+            'referenceRecordedOn' => $date,
         ];
     }
 
@@ -78,10 +97,6 @@ final class WeightRepository
         ]);
 
         $summary = $this->getSummaryForDate($date);
-
-        if ($summary === null) {
-            throw new RuntimeException('Failed to load saved weight entry.');
-        }
 
         return $summary;
     }
@@ -162,6 +177,26 @@ final class WeightRepository
             'SELECT recorded_on, weight_kg
              FROM weight_entries
              WHERE recorded_on < :recorded_on
+             ORDER BY recorded_on DESC
+             LIMIT 1'
+        );
+        $statement->execute(['recorded_on' => $date]);
+        $row = $statement->fetch();
+
+        return $row === false ? null : $row;
+    }
+
+    /**
+     * 指定日以前で最も新しい体重を1件取得する（当日未記録時の初期値表示用）。
+     *
+     * @return array<string, mixed>|null
+     */
+    private function findLatestEntryOnOrBefore(string $date): ?array
+    {
+        $statement = $this->db->prepare(
+            'SELECT recorded_on, weight_kg
+             FROM weight_entries
+             WHERE recorded_on <= :recorded_on
              ORDER BY recorded_on DESC
              LIMIT 1'
         );

@@ -76,12 +76,7 @@ if ($requestMethod === 'GET' && $requestPath === '/api/records/daily') {
     // モックの weight を DB の値で上書き
     $record['date'] = $weightSummary['dateLabel'] ?? WeightRepository::formatDateLabel($date);
     $record['recordedOn'] = $date;
-    $record['weight'] = $weightSummary ?? [
-        'current' => null,
-        'diffFromPreviousDay' => null,
-        'recordedOn' => $date,
-        'dateLabel' => WeightRepository::formatDateLabel($date),
-    ];
+    $record['weight'] = $weightSummary;
     $record['meals'] = $mealSections;
 
     json_response($record);

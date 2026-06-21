@@ -128,6 +128,8 @@ function mapMealSectionsToState(sections: MealSectionSummary[] = []): Record<Mea
 
 export function RecordScreen() {
   const [weight, setWeight] = useState<number | null>(null);
+  const [referenceWeight, setReferenceWeight] = useState<number | null>(null);
+  const [referenceRecordedOn, setReferenceRecordedOn] = useState<string | null>(null);
   const [weightDiff, setWeightDiff] = useState<number | null>(null);
   const [dateLabel, setDateLabel] = useState("読み込み中...");
   const [selectedDate, setSelectedDate] = useState<string>(formatCurrentDate);
@@ -153,6 +155,8 @@ export function RecordScreen() {
         setDateLabel(data.date);
         setRecordedOn(data.recordedOn);
         setWeight(data.weight.current);
+        setReferenceWeight(data.weight.referenceWeight ?? null);
+        setReferenceRecordedOn(data.weight.referenceRecordedOn ?? null);
         setWeightDiff(data.weight.diffFromPreviousDay);
         setMeals(mapMealSectionsToState(data.meals));
       } catch (loadError) {
@@ -226,6 +230,8 @@ export function RecordScreen() {
       setError(null);
       const data = await saveWeight(value, recordedOn);
       setWeight(data.weight.current);
+      setReferenceWeight(data.weight.referenceWeight ?? data.weight.current);
+      setReferenceRecordedOn(data.weight.referenceRecordedOn ?? data.weight.recordedOn);
       setWeightDiff(data.weight.diffFromPreviousDay);
       setWeightSheetOpen(false);
     } catch (saveError) {
@@ -240,6 +246,12 @@ export function RecordScreen() {
     if (!baseDate) return;
     setSelectedDate(shiftDate(baseDate, offset));
   };
+  const hasTodayWeight = weight !== null;
+  const referenceDateLabel = referenceRecordedOn
+    ? referenceRecordedOn === recordedOn
+      ? undefined
+      : referenceRecordedOn.replace(/^\d{4}-/, "").replace("-", "/")
+    : undefined;
 
   const secStyle = {
     background: "#fff",
@@ -384,7 +396,7 @@ export function RecordScreen() {
             <div>
               <div>
                 <span style={{ fontSize: 36, fontWeight: 700, color: "#111" }}>
-                  {weight === null ? "--" : weight.toFixed(1)}
+                  {weight === null ? "--.-" : weight.toFixed(1)}
                 </span>
                 <span style={{ fontSize: 18, color: "#888" }}> kg</span>
               </div>
@@ -504,8 +516,9 @@ export function RecordScreen() {
 
       <WeightRegisterSheet
         open={weightSheetOpen}
-        initialValue={weight ?? 62.4}
+        initialValue={weight ?? referenceWeight ?? 62.4}
         dateLabel={dateLabel}
+        referenceDateLabel={!hasTodayWeight ? referenceDateLabel : undefined}
         isSaving={isSaving}
         onClose={() => setWeightSheetOpen(false)}
         onSave={handleWeightSave}

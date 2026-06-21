@@ -24,6 +24,8 @@ interface WeightSummary {
   diffFromPreviousDay: number | null;
   recordedOn: string;
   dateLabel: string;
+  referenceWeight?: number | null;
+  referenceRecordedOn?: string | null;
 }
 
 export type MealType = "breakfast" | "lunch" | "dinner" | "snack";
