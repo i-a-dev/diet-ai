@@ -15,6 +15,7 @@ require_once __DIR__ . '/../src/ActivityRepository.php';
 require_once __DIR__ . '/../src/MockRepository.php';
 require_once __DIR__ . '/../src/CalorieEstimateService.php';
 require_once __DIR__ . '/../src/FoodNormalizeService.php';
+require_once __DIR__ . '/../src/ExerciseMetEstimateService.php';
 
 $repository = new MockRepository();
 $weightRepository = new WeightRepository();
@@ -22,6 +23,7 @@ $mealEntryRepository = new MealEntryRepository();
 $activityRepository = new ActivityRepository();
 $calorieEstimateService = new CalorieEstimateService();
 $foodNormalizeService = new FoodNormalizeService();
+$exerciseMetEstimateService = new ExerciseMetEstimateService();
 $requestMethod = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 $requestPath = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
 
@@ -128,7 +130,29 @@ if ($requestMethod === 'POST' && $requestPath === '/api/records/exercises') {
     }
 
     try {
-        $entry = $activityRepository->addExercise($date, $exerciseName, (int) round((float) $amount), $unit);
+        $weightSummary = $weightRepository->getSummaryForDate($date);
+        $resolvedWeight = $weightSummary['current'] ?? $weightSummary['referenceWeight'] ?? 60.0;
+        $usedDefaultWeight = !is_numeric($weightSummary['current']) && !is_numeric($weightSummary['referenceWeight']);
+
+        $estimated = $exerciseMetEstimateService->estimate(
+            $exerciseName,
+            (int) round((float) $amount),
+            $unit,
+            (float) $resolvedWeight
+        );
+        $entry = $activityRepository->addExercise(
+            $date,
+            $estimated['exercise'],
+            (int) round((float) $amount),
+            $unit,
+            $estimated['minutes'],
+            $estimated['mets'],
+            $estimated['calories'],
+            $estimated['source'],
+            $estimated['confidence'],
+            $estimated['isEstimated'],
+            $estimated['note'] !== '' ? $estimated['note'] : null
+        );
         $exercises = $activityRepository->getExercisesForDate($date);
     } catch (InvalidArgumentException $exception) {
         json_response(['message' => $exception->getMessage()], 422);
@@ -137,6 +161,11 @@ if ($requestMethod === 'POST' && $requestPath === '/api/records/exercises') {
     json_response([
         'entry' => $entry,
         'exercises' => $exercises,
+        'meta' => [
+            'weightKg' => (float) $resolvedWeight,
+            'usedDefaultWeight' => $usedDefaultWeight,
+            'weightHint' => $usedDefaultWeight ? '体重を登録するとより正確になります' : null,
+        ],
     ]);
 }
 

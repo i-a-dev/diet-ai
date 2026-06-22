@@ -51,14 +51,51 @@ final class Database
 
         sort($migrationPaths, SORT_STRING);
 
+        self::$pdo->exec(
+            'CREATE TABLE IF NOT EXISTS schema_migrations (
+                version TEXT PRIMARY KEY,
+                applied_at TEXT NOT NULL DEFAULT (datetime(\'now\'))
+            )'
+        );
+
+        $appliedRows = self::$pdo->query('SELECT version FROM schema_migrations');
+        $appliedVersions = [];
+        if ($appliedRows !== false) {
+            foreach ($appliedRows->fetchAll() as $row) {
+                $appliedVersions[(string) $row['version']] = true;
+            }
+        }
+
         foreach ($migrationPaths as $migrationPath) {
+            $version = basename($migrationPath);
+            if (isset($appliedVersions[$version])) {
+                continue;
+            }
+
             $sql = file_get_contents($migrationPath);
 
             if ($sql === false) {
                 throw new RuntimeException(sprintf('Migration file not found: %s', $migrationPath));
             }
 
-            self::$pdo->exec($sql);
+            self::$pdo->beginTransaction();
+            try {
+                self::$pdo->exec($sql);
+                $statement = self::$pdo->prepare(
+                    'INSERT INTO schema_migrations (version, applied_at) VALUES (:version, :applied_at)'
+                );
+                $statement->execute([
+                    'version' => $version,
+                    'applied_at' => (new DateTimeImmutable('now', new DateTimeZone('Asia/Tokyo')))
+                        ->format('Y-m-d H:i:s'),
+                ]);
+                self::$pdo->commit();
+            } catch (Throwable $exception) {
+                if (self::$pdo->inTransaction()) {
+                    self::$pdo->rollBack();
+                }
+                throw $exception;
+            }
         }
     }
 
@@ -124,14 +161,20 @@ final class Database
         ]);
 
         $exerciseStatement = self::$pdo->prepare(
-            'INSERT INTO exercise_entries (recorded_on, exercise_name, amount, unit, burned_calories_kcal, created_at, updated_at)
-             VALUES (:recorded_on, :exercise_name, :amount, :unit, :burned_calories_kcal, :created_at, :updated_at)'
+            'INSERT INTO exercise_entries (
+                recorded_on, exercise_name, amount, unit, minutes, mets, source, confidence, is_estimated, estimate_note,
+                burned_calories_kcal, created_at, updated_at
+             )
+             VALUES (
+                :recorded_on, :exercise_name, :amount, :unit, :minutes, :mets, :source, :confidence, :is_estimated, :estimate_note,
+                :burned_calories_kcal, :created_at, :updated_at
+             )'
         );
 
         $seedExercises = [
-            ['name' => 'スクワット', 'amount' => 30, 'unit' => 'rep', 'burned' => 60],
-            ['name' => '腹筋', 'amount' => 40, 'unit' => 'rep', 'burned' => 60],
-            ['name' => 'ウォーキング', 'amount' => 30, 'unit' => 'min', 'burned' => 90],
+            ['name' => 'スクワット', 'amount' => 30, 'unit' => 'rep', 'minutes' => 4, 'mets' => 5.0, 'burned' => 21],
+            ['name' => '腹筋', 'amount' => 40, 'unit' => 'rep', 'minutes' => 5, 'mets' => 3.8, 'burned' => 20],
+            ['name' => 'ウォーキング', 'amount' => 30, 'unit' => 'min', 'minutes' => 30, 'mets' => 3.5, 'burned' => 110],
         ];
 
         foreach ($seedExercises as $exercise) {
@@ -140,6 +183,12 @@ final class Database
                 'exercise_name' => $exercise['name'],
                 'amount' => $exercise['amount'],
                 'unit' => $exercise['unit'],
+                'minutes' => $exercise['minutes'],
+                'mets' => $exercise['mets'],
+                'source' => 'local_db',
+                'confidence' => 'high',
+                'is_estimated' => 0,
+                'estimate_note' => 'シードデータ',
                 'burned_calories_kcal' => $exercise['burned'],
                 'created_at' => $now,
                 'updated_at' => $now,

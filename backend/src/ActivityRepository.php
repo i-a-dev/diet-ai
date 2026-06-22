@@ -76,12 +76,24 @@ final class ActivityRepository
     }
 
     /**
-     * @return array{entries: array<int, array{id: int, name: string, amount: int, unit: string, burnedCalories: int}>, burnedCalories: int}
+     * @return array{entries: array<int, array{
+     *   id: int,
+     *   name: string,
+     *   amount: int,
+     *   unit: string,
+     *   minutes: int,
+     *   mets: float,
+     *   source: string,
+     *   confidence: string,
+     *   isEstimated: bool,
+     *   note: string|null,
+     *   burnedCalories: int
+     * }>, burnedCalories: int}
      */
     public function getExercisesForDate(string $date): array
     {
         $statement = $this->db->prepare(
-            'SELECT id, exercise_name, amount, unit, burned_calories_kcal
+            'SELECT id, exercise_name, amount, unit, minutes, mets, source, confidence, is_estimated, estimate_note, burned_calories_kcal
              FROM exercise_entries
              WHERE recorded_on = :recorded_on
              ORDER BY id ASC'
@@ -97,6 +109,12 @@ final class ActivityRepository
                 'name' => (string) $row['exercise_name'],
                 'amount' => (int) $row['amount'],
                 'unit' => (string) $row['unit'],
+                'minutes' => (int) $row['minutes'],
+                'mets' => round((float) $row['mets'], 1),
+                'source' => (string) $row['source'],
+                'confidence' => (string) $row['confidence'],
+                'isEstimated' => ((int) $row['is_estimated']) === 1,
+                'note' => $row['estimate_note'] === null ? null : (string) $row['estimate_note'],
                 'burnedCalories' => $burnedCalories,
             ];
             $totalCalories += $burnedCalories;
@@ -109,9 +127,33 @@ final class ActivityRepository
     }
 
     /**
-     * @return array{id: int, name: string, amount: int, unit: string, burnedCalories: int}
+     * @return array{
+     *   id: int,
+     *   name: string,
+     *   amount: int,
+     *   unit: string,
+     *   minutes: int,
+     *   mets: float,
+     *   source: string,
+     *   confidence: string,
+     *   isEstimated: bool,
+     *   note: string|null,
+     *   burnedCalories: int
+     * }
      */
-    public function addExercise(string $date, string $name, int $amount, string $unit): array
+    public function addExercise(
+        string $date,
+        string $name,
+        int $amount,
+        string $unit,
+        int $minutes,
+        float $mets,
+        int $burnedCalories,
+        string $source,
+        string $confidence,
+        bool $isEstimated,
+        ?string $note = null
+    ): array
     {
         $exerciseName = trim($name);
         if ($exerciseName === '') {
@@ -126,18 +168,45 @@ final class ActivityRepository
             throw new InvalidArgumentException('unit must be min|rep');
         }
 
-        $burnedCalories = $this->estimateExerciseCalories($exerciseName, $amount, $unit);
+        if ($minutes <= 0 || $minutes > 600) {
+            throw new InvalidArgumentException('minutes must be between 1 and 600');
+        }
+        if ($mets <= 0 || $mets > 25) {
+            throw new InvalidArgumentException('mets must be between 0 and 25');
+        }
+        if ($burnedCalories <= 0 || $burnedCalories > 5000) {
+            throw new InvalidArgumentException('burnedCalories must be between 1 and 5000');
+        }
+        if ($source !== 'local_db' && $source !== 'llm_estimate') {
+            throw new InvalidArgumentException('source must be local_db|llm_estimate');
+        }
+        if (!in_array($confidence, ['high', 'medium', 'low'], true)) {
+            throw new InvalidArgumentException('confidence must be high|medium|low');
+        }
+
         $now = (new DateTimeImmutable('now', new DateTimeZone('Asia/Tokyo')))->format('Y-m-d H:i:s');
 
         $statement = $this->db->prepare(
-            'INSERT INTO exercise_entries (recorded_on, exercise_name, amount, unit, burned_calories_kcal, created_at, updated_at)
-             VALUES (:recorded_on, :exercise_name, :amount, :unit, :burned_calories_kcal, :created_at, :updated_at)'
+            'INSERT INTO exercise_entries (
+                recorded_on, exercise_name, amount, unit, minutes, mets, source, confidence, is_estimated, estimate_note,
+                burned_calories_kcal, created_at, updated_at
+             )
+             VALUES (
+                :recorded_on, :exercise_name, :amount, :unit, :minutes, :mets, :source, :confidence, :is_estimated, :estimate_note,
+                :burned_calories_kcal, :created_at, :updated_at
+             )'
         );
         $statement->execute([
             'recorded_on' => $date,
             'exercise_name' => $exerciseName,
             'amount' => $amount,
             'unit' => $unit,
+            'minutes' => $minutes,
+            'mets' => round($mets, 1),
+            'source' => $source,
+            'confidence' => $confidence,
+            'is_estimated' => $isEstimated ? 1 : 0,
+            'estimate_note' => $note,
             'burned_calories_kcal' => $burnedCalories,
             'created_at' => $now,
             'updated_at' => $now,
@@ -148,19 +217,38 @@ final class ActivityRepository
             'name' => $exerciseName,
             'amount' => $amount,
             'unit' => $unit,
+            'minutes' => $minutes,
+            'mets' => round($mets, 1),
+            'source' => $source,
+            'confidence' => $confidence,
+            'isEstimated' => $isEstimated,
+            'note' => $note,
             'burnedCalories' => $burnedCalories,
         ];
     }
 
     /**
-     * @return array<int, array{id: int, name: string, amount: int, unit: string, burnedCalories: int, recordedOn: string}>
+     * @return array<int, array{
+     *   id: int,
+     *   name: string,
+     *   amount: int,
+     *   unit: string,
+     *   minutes: int,
+     *   mets: float,
+     *   source: string,
+     *   confidence: string,
+     *   isEstimated: bool,
+     *   note: string|null,
+     *   burnedCalories: int,
+     *   recordedOn: string
+     * }>
      */
     public function getExerciseHistory(int $limit = 30): array
     {
         $safeLimit = max(1, min(200, $limit));
 
         $statement = $this->db->prepare(
-            'SELECT id, exercise_name, amount, unit, burned_calories_kcal, recorded_on
+            'SELECT id, exercise_name, amount, unit, minutes, mets, source, confidence, is_estimated, estimate_note, burned_calories_kcal, recorded_on
              FROM exercise_entries
              ORDER BY id DESC
              LIMIT :limit'
@@ -175,6 +263,12 @@ final class ActivityRepository
                 'name' => (string) $row['exercise_name'],
                 'amount' => (int) $row['amount'],
                 'unit' => (string) $row['unit'],
+                'minutes' => (int) $row['minutes'],
+                'mets' => round((float) $row['mets'], 1),
+                'source' => (string) $row['source'],
+                'confidence' => (string) $row['confidence'],
+                'isEstimated' => ((int) $row['is_estimated']) === 1,
+                'note' => $row['estimate_note'] === null ? null : (string) $row['estimate_note'],
                 'burnedCalories' => (int) $row['burned_calories_kcal'],
                 'recordedOn' => (string) $row['recorded_on'],
             ];
@@ -188,28 +282,4 @@ final class ActivityRepository
         return (int) round($count * 0.04);
     }
 
-    private function estimateExerciseCalories(string $name, int $amount, string $unit): int
-    {
-        if ($unit === 'min') {
-            $coefficient = 4.0;
-            if (str_contains($name, 'ウォーキング')) {
-                $coefficient = 3.0;
-            } elseif (str_contains($name, 'ランニング')) {
-                $coefficient = 10.0;
-            } elseif (str_contains($name, 'ストレッチ')) {
-                $coefficient = 2.0;
-            }
-
-            return max(1, (int) round($amount * $coefficient));
-        }
-
-        $coefficient = 1.0;
-        if (str_contains($name, 'スクワット')) {
-            $coefficient = 2.0;
-        } elseif (str_contains($name, '腹筋')) {
-            $coefficient = 1.5;
-        }
-
-        return max(1, (int) round($amount * $coefficient));
-    }
 }

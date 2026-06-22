@@ -148,13 +148,6 @@ export function ExerciseRegisterSheet({
             </div>
           </div>
 
-          <div style={previewStyle}>
-            推定消費カロリー:{" "}
-            <span style={{ color: "#2EAA72", fontWeight: 700 }}>
-              {previewCalories} kcal
-            </span>
-          </div>
-
           <div style={hintTitleStyle}>運動の履歴</div>
           <div style={historyScrollAreaStyle}>
             <div style={chipWrapStyle}>

@@ -82,6 +82,12 @@ export interface ExerciseEntrySummary {
   name: string;
   amount: number;
   unit: "min" | "rep";
+  minutes: number;
+  mets: number;
+  source: "local_db" | "llm_estimate";
+  confidence: "high" | "medium" | "low";
+  isEstimated: boolean;
+  note: string | null;
   burnedCalories: number;
 }
 
@@ -94,6 +100,11 @@ interface SaveExerciseResponse {
   exercises: {
     entries: ExerciseEntrySummary[];
     burnedCalories: number;
+  };
+  meta?: {
+    weightKg: number;
+    usedDefaultWeight: boolean;
+    weightHint: string | null;
   };
 }
 

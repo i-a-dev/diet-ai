@@ -150,6 +150,7 @@ export function RecordScreen() {
   const [activeMealKey, setActiveMealKey] = useState<MealKey | null>(null);
   const [steps, setSteps] = useState({ count: 0, burnedCalories: 0 });
   const [exercises, setExercises] = useState<ExerciseEntrySummary[]>([]);
+  const [exerciseNotice, setExerciseNotice] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -173,6 +174,7 @@ export function RecordScreen() {
           burnedCalories: data.steps?.burnedCalories ?? 0,
         });
         setExercises(data.exercises?.entries ?? []);
+        setExerciseNotice(null);
       } catch (loadError) {
         if (!cancelled) {
           setError(loadError instanceof Error ? loadError.message : "読み込みに失敗しました");
@@ -265,6 +267,7 @@ export function RecordScreen() {
     [exercises],
   );
   const totalActivityKcal = steps.burnedCalories + exerciseTotalKcal;
+  const hasLowConfidenceExercise = exercises.some((item) => item.confidence === "low");
 
   const handleStepsSave = async (value: number) => {
     try {
@@ -291,6 +294,11 @@ export function RecordScreen() {
         recordedOn ?? selectedDate,
       );
       setExercises(data.exercises.entries);
+      if (data.meta?.usedDefaultWeight && data.meta.weightHint) {
+        setExerciseNotice(data.meta.weightHint);
+      } else {
+        setExerciseNotice(null);
+      }
       setExerciseSheetOpen(false);
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : "運動の保存に失敗しました");
@@ -574,11 +582,21 @@ export function RecordScreen() {
                 exercises.map((item) => (
                   <ExerciseChip
                     key={item.id}
-                    text={`${item.name}　${item.amount}${item.unit === "min" ? "分" : "回"}　${item.burnedCalories}kcal`}
+                    text={`${item.name}　${item.amount}${item.unit === "min" ? "分" : "回"}　${item.burnedCalories}kcal${
+                      item.confidence === "high" ? "" : "　推定"
+                    }`}
                   />
                 ))
               )}
             </div>
+            {hasLowConfidenceExercise && (
+              <div style={{ marginTop: 8, fontSize: 12, color: "#9CA3AF" }}>
+                実際と異なる場合があります
+              </div>
+            )}
+            {exerciseNotice && (
+              <div style={{ marginTop: 6, fontSize: 12, color: "#9CA3AF" }}>{exerciseNotice}</div>
+            )}
           </ActivitySubSection>
         </div>
 
