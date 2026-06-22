@@ -87,13 +87,15 @@ final class ActivityRepository
      *   confidence: string,
      *   isEstimated: bool,
      *   note: string|null,
+     *   weightKg: float,
+     *   weightSource: string,
      *   burnedCalories: int
      * }>, burnedCalories: int}
      */
     public function getExercisesForDate(string $date): array
     {
         $statement = $this->db->prepare(
-            'SELECT id, exercise_name, amount, unit, minutes, mets, source, confidence, is_estimated, estimate_note, burned_calories_kcal
+            'SELECT id, exercise_name, amount, unit, minutes, mets, source, confidence, is_estimated, estimate_note, weight_kg, weight_source, burned_calories_kcal
              FROM exercise_entries
              WHERE recorded_on = :recorded_on
              ORDER BY id ASC'
@@ -115,6 +117,8 @@ final class ActivityRepository
                 'confidence' => (string) $row['confidence'],
                 'isEstimated' => ((int) $row['is_estimated']) === 1,
                 'note' => $row['estimate_note'] === null ? null : (string) $row['estimate_note'],
+                'weightKg' => round((float) $row['weight_kg'], 1),
+                'weightSource' => (string) $row['weight_source'],
                 'burnedCalories' => $burnedCalories,
             ];
             $totalCalories += $burnedCalories;
@@ -138,6 +142,8 @@ final class ActivityRepository
      *   confidence: string,
      *   isEstimated: bool,
      *   note: string|null,
+     *   weightKg: float,
+     *   weightSource: string,
      *   burnedCalories: int
      * }
      */
@@ -152,6 +158,8 @@ final class ActivityRepository
         string $source,
         string $confidence,
         bool $isEstimated,
+        float $weightKg,
+        string $weightSource,
         ?string $note = null
     ): array
     {
@@ -183,17 +191,23 @@ final class ActivityRepository
         if (!in_array($confidence, ['high', 'medium', 'low'], true)) {
             throw new InvalidArgumentException('confidence must be high|medium|low');
         }
+        if ($weightKg <= 0 || $weightKg > 300) {
+            throw new InvalidArgumentException('weightKg must be between 0 and 300');
+        }
+        if (!in_array($weightSource, ['current', 'reference', 'default'], true)) {
+            throw new InvalidArgumentException('weightSource must be current|reference|default');
+        }
 
         $now = (new DateTimeImmutable('now', new DateTimeZone('Asia/Tokyo')))->format('Y-m-d H:i:s');
 
         $statement = $this->db->prepare(
             'INSERT INTO exercise_entries (
                 recorded_on, exercise_name, amount, unit, minutes, mets, source, confidence, is_estimated, estimate_note,
-                burned_calories_kcal, created_at, updated_at
+                weight_kg, weight_source, burned_calories_kcal, created_at, updated_at
              )
              VALUES (
                 :recorded_on, :exercise_name, :amount, :unit, :minutes, :mets, :source, :confidence, :is_estimated, :estimate_note,
-                :burned_calories_kcal, :created_at, :updated_at
+                :weight_kg, :weight_source, :burned_calories_kcal, :created_at, :updated_at
              )'
         );
         $statement->execute([
@@ -207,6 +221,8 @@ final class ActivityRepository
             'confidence' => $confidence,
             'is_estimated' => $isEstimated ? 1 : 0,
             'estimate_note' => $note,
+            'weight_kg' => round($weightKg, 1),
+            'weight_source' => $weightSource,
             'burned_calories_kcal' => $burnedCalories,
             'created_at' => $now,
             'updated_at' => $now,
@@ -223,6 +239,8 @@ final class ActivityRepository
             'confidence' => $confidence,
             'isEstimated' => $isEstimated,
             'note' => $note,
+            'weightKg' => round($weightKg, 1),
+            'weightSource' => $weightSource,
             'burnedCalories' => $burnedCalories,
         ];
     }
@@ -239,6 +257,8 @@ final class ActivityRepository
      *   confidence: string,
      *   isEstimated: bool,
      *   note: string|null,
+     *   weightKg: float,
+     *   weightSource: string,
      *   burnedCalories: int,
      *   recordedOn: string
      * }>
@@ -248,7 +268,7 @@ final class ActivityRepository
         $safeLimit = max(1, min(200, $limit));
 
         $statement = $this->db->prepare(
-            'SELECT id, exercise_name, amount, unit, minutes, mets, source, confidence, is_estimated, estimate_note, burned_calories_kcal, recorded_on
+            'SELECT id, exercise_name, amount, unit, minutes, mets, source, confidence, is_estimated, estimate_note, weight_kg, weight_source, burned_calories_kcal, recorded_on
              FROM exercise_entries
              ORDER BY id DESC
              LIMIT :limit'
@@ -269,6 +289,8 @@ final class ActivityRepository
                 'confidence' => (string) $row['confidence'],
                 'isEstimated' => ((int) $row['is_estimated']) === 1,
                 'note' => $row['estimate_note'] === null ? null : (string) $row['estimate_note'],
+                'weightKg' => round((float) $row['weight_kg'], 1),
+                'weightSource' => (string) $row['weight_source'],
                 'burnedCalories' => (int) $row['burned_calories_kcal'],
                 'recordedOn' => (string) $row['recorded_on'],
             ];

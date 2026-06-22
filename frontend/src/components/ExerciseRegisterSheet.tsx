@@ -1,12 +1,8 @@
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import {
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type CSSProperties,
-} from "react";
-import {
+  estimateExercisePreview,
   fetchExerciseHistory,
+  type ExercisePreviewResponse,
   type ExerciseHistoryEntry,
 } from "../api/client.ts";
 import { BottomSheet } from "./BottomSheet.tsx";
@@ -22,31 +18,18 @@ export interface ExerciseInput {
 interface ExerciseRegisterSheetProps {
   open: boolean;
   isSaving?: boolean;
+  recordDate?: string;
   onClose: () => void;
+  onOpenWeightRegister?: () => void;
   onSave: (input: ExerciseInput) => void | Promise<void>;
-}
-
-function calcPreviewCalories(
-  name: string,
-  amount: number,
-  unit: ExerciseUnit,
-): number {
-  if (amount <= 0) return 0;
-  if (unit === "min") {
-    if (name.includes("ウォーキング")) return Math.round(amount * 3);
-    if (name.includes("ランニング")) return Math.round(amount * 10);
-    if (name.includes("ストレッチ")) return Math.round(amount * 2);
-    return Math.round(amount * 4);
-  }
-  if (name.includes("スクワット")) return Math.round(amount * 2);
-  if (name.includes("腹筋")) return Math.round(amount * 1.5);
-  return Math.round(amount);
 }
 
 export function ExerciseRegisterSheet({
   open,
   isSaving = false,
+  recordDate,
   onClose,
+  onOpenWeightRegister,
   onSave,
 }: ExerciseRegisterSheetProps) {
   const [name, setName] = useState("");
@@ -55,6 +38,11 @@ export function ExerciseRegisterSheet({
   const [history, setHistory] = useState<ExerciseInput[]>([]);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const historyRequestTokenRef = useRef(0);
+  const previewRequestTokenRef = useRef(0);
+  const nameInputRef = useRef<HTMLInputElement | null>(null);
+  const [isPreviewLoading, setIsPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const [preview, setPreview] = useState<ExercisePreviewResponse | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -62,6 +50,9 @@ export function ExerciseRegisterSheet({
     setAmount(30);
     setUnit("min");
     setHistoryError(null);
+    setIsPreviewLoading(false);
+    setPreviewError(null);
+    setPreview(null);
   }, [open]);
 
   useEffect(() => {
@@ -84,10 +75,54 @@ export function ExerciseRegisterSheet({
 
   const trimmedName = name.trim();
   const isValid = trimmedName.length > 0 && amount > 0 && amount <= 10000;
-  const previewCalories = useMemo(
-    () => calcPreviewCalories(trimmedName, amount, unit),
-    [trimmedName, amount, unit],
-  );
+  const previewReady =
+    preview !== null && !isPreviewLoading && previewError === null;
+
+  // 変更: 入力変更時は前回の推定結果を破棄し、手動再計算を必須にする。
+  useEffect(() => {
+    if (!open) return;
+    setPreview(null);
+    setPreviewError(null);
+    setIsPreviewLoading(false);
+  }, [open, trimmedName, amount, unit]);
+
+  const handleCalculatePreview = () => {
+    if (!isValid || isPreviewLoading || isSaving) return;
+    const token = Date.now();
+    previewRequestTokenRef.current = token;
+    setIsPreviewLoading(true);
+    setPreviewError(null);
+    setPreview(null);
+
+    // 変更: ユーザーが「カロリーを計算する」を押した時だけ推定APIを呼ぶ。
+    void (async () => {
+      try {
+        const nextPreview = await estimateExercisePreview(
+          trimmedName,
+          amount,
+          unit,
+          recordDate,
+        );
+        if (previewRequestTokenRef.current !== token) return;
+        setPreview(nextPreview);
+      } catch (error) {
+        if (previewRequestTokenRef.current !== token) return;
+        setPreview(null);
+        setPreviewError(
+          error instanceof Error ? error.message : "カロリー計算に失敗しました",
+        );
+      } finally {
+        if (previewRequestTokenRef.current !== token) return;
+        setIsPreviewLoading(false);
+      }
+    })();
+  };
+
+  const handleSave = () => {
+    if (!previewReady || isSaving) return;
+    // 変更: 保存時はプレビューで正規化された運動名を利用する。
+    void onSave({ name: preview.preview.exercise, amount, unit });
+  };
 
   return (
     <BottomSheet open={open} title="運動を記録" onClose={onClose}>
@@ -95,6 +130,7 @@ export function ExerciseRegisterSheet({
         <div>
           <label style={labelStyle}>運動名</label>
           <input
+            ref={nameInputRef}
             type="text"
             value={name}
             onChange={(event) => setName(event.target.value)}
@@ -148,46 +184,127 @@ export function ExerciseRegisterSheet({
             </div>
           </div>
 
-          <div style={hintTitleStyle}>運動の履歴</div>
-          <div style={historyScrollAreaStyle}>
-            <div style={chipWrapStyle}>
-              {history.map((item) => (
-                <button
-                  key={`${item.name}-${item.amount}-${item.unit}`}
-                  type="button"
-                  onClick={() => {
-                    setName(item.name);
-                    setAmount(item.amount);
-                    setUnit(item.unit);
-                  }}
-                  style={historyChipStyle}
-                >
-                  {item.name} {item.amount}
-                  {item.unit === "min" ? "分" : "回"}
-                </button>
-              ))}
-              {history.length === 0 && (
-                <span style={emptyHistoryStyle}>
-                  {historyError ?? "履歴がありません"}
-                </span>
+          <div style={previewAreaStyle}>
+            {trimmedName.length === 0 ? (
+              <div style={previewHintStyle}>
+                運動名を入力すると消費カロリーを表示します
+              </div>
+            ) : previewError ? (
+              <div style={previewErrorStyle}>{previewError}</div>
+            ) : previewReady && preview.preview.confidence === "low" ? (
+              <div style={lowPreviewCardStyle}>
+                <div style={previewTopRowStyle}>
+                  <span style={previewKcalTextStyle}>
+                    {preview.preview.caloriesBurned} kcal
+                  </span>
+                  <span style={lowBadgeStyle}>低精度</span>
+                </div>
+                <div style={previewSubTextStyle}>
+                  {preview.preview.exercise} / {preview.preview.minutes}分 /
+                  METs {preview.preview.mets}
+                </div>
+                {preview.preview.note !== "" && (
+                  <div style={previewNoteStyle}>
+                    推定根拠: {preview.preview.note}
+                  </div>
+                )}
+                <div style={lowWarningTextStyle}>
+                  実際のカロリーと異なる場合があります
+                </div>
+              </div>
+            ) : previewReady ? (
+              <div style={previewCardStyle}>
+                <div style={previewTopRowStyle}>
+                  <span style={previewKcalTextStyle}>
+                    {preview.preview.caloriesBurned} kcal
+                  </span>
+                  <span style={estimateBadgeStyle}>推定</span>
+                </div>
+                <div style={previewSubTextStyle}>
+                  {preview.preview.mets} METs × {preview.weight.kg}kg ×{" "}
+                  {preview.preview.minutes}h/60
+                </div>
+              </div>
+            ) : null}
+
+            {previewReady &&
+              preview.weight.source === "reference" &&
+              preview.weight.recordedOn && (
+                <div style={weightInfoStyle}>
+                  {formatShortDate(preview.weight.recordedOn)}の体重{" "}
+                  {preview.weight.kg}kg をもとに計算しました
+                </div>
               )}
-            </div>
+            {previewReady && preview.weight.source === "default" && (
+              <div style={weightWarningStyle}>
+                体重が未登録のため60kgで計算しています{" "}
+              </div>
+            )}
           </div>
+
+          {!previewReady && (
+            <>
+              <div style={hintTitleStyle}>運動の履歴</div>
+              <div style={historyScrollAreaStyle}>
+                <div style={chipWrapStyle}>
+                  {history.map((item) => (
+                    <button
+                      key={`${item.name}-${item.amount}-${item.unit}`}
+                      type="button"
+                      onClick={() => {
+                        setName(item.name);
+                        setAmount(item.amount);
+                        setUnit(item.unit);
+                      }}
+                      style={historyChipStyle}
+                    >
+                      {item.name} {item.amount}
+                      {item.unit === "min" ? "分" : "回"}
+                    </button>
+                  ))}
+                  {history.length === 0 && (
+                    <span style={emptyHistoryStyle}>
+                      {historyError ?? "履歴がありません"}
+                    </span>
+                  )}
+                </div>
+              </div>
+            </>
+          )}
         </div>
 
         <div style={footerStyle}>
-          <button
-            type="button"
-            disabled={!isValid || isSaving}
-            onClick={() => void onSave({ name: trimmedName, amount, unit })}
-            style={{
-              ...submitButtonStyle,
-              opacity: !isValid || isSaving ? 0.5 : 1,
-              cursor: !isValid || isSaving ? "not-allowed" : "pointer",
-            }}
-          >
-            {isSaving ? "保存中..." : "登録する"}
-          </button>
+          {previewReady ? (
+            <button
+              type="button"
+              disabled={isSaving}
+              onClick={handleSave}
+              style={{
+                ...submitButtonStyle,
+                background: "#2EAA72",
+                opacity: isSaving ? 0.5 : 1,
+                cursor: isSaving ? "not-allowed" : "pointer",
+              }}
+            >
+              {isSaving ? "保存中..." : "登録する"}
+            </button>
+          ) : (
+            <button
+              type="button"
+              disabled={!isValid || isPreviewLoading || isSaving}
+              onClick={handleCalculatePreview}
+              style={{
+                ...submitButtonStyle,
+                opacity: !isValid || isPreviewLoading || isSaving ? 0.5 : 1,
+                cursor:
+                  !isValid || isPreviewLoading || isSaving
+                    ? "not-allowed"
+                    : "pointer",
+              }}
+            >
+              {isPreviewLoading ? "計算中..." : "カロリーを計算する"}
+            </button>
+          )}
         </div>
       </div>
     </BottomSheet>
@@ -215,6 +332,12 @@ function toUniqueExerciseHistory(
   return unique;
 }
 
+function formatShortDate(date: string): string {
+  const [year, month, day] = date.split("-");
+  if (!year || !month || !day) return date;
+  return `${Number(month)}/${Number(day)}`;
+}
+
 const sheetLayoutStyle: CSSProperties = {
   display: "flex",
   flexDirection: "column",
@@ -240,11 +363,113 @@ const inputStyle: CSSProperties = {
   outline: "none",
 };
 
+const previewAreaStyle: CSSProperties = {
+  marginTop: 10,
+  marginBottom: 14,
+};
+
 const previewStyle: CSSProperties = {
   fontSize: 12,
   color: "#6B7280",
+};
+
+const previewHintStyle: CSSProperties = {
+  ...previewStyle,
+};
+
+const previewCardStyle: CSSProperties = {
+  borderRadius: 12,
+  border: "1px solid #BFE6D0",
+  background: "#EDF9F3",
+  padding: "10px 12px",
+};
+
+const lowPreviewCardStyle: CSSProperties = {
+  borderRadius: 12,
+  border: "1px solid #F7CFA3",
+  background: "#FFF6EC",
+  padding: "10px 12px",
+};
+
+const previewTopRowStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+};
+
+const previewKcalTextStyle: CSSProperties = {
+  color: "#2EAA72",
+  fontSize: 22,
+  fontWeight: 800,
+};
+
+const previewSubTextStyle: CSSProperties = {
   marginTop: 6,
-  marginBottom: 14,
+  color: "#4B5563",
+  fontSize: 12,
+};
+
+const estimateBadgeStyle: CSSProperties = {
+  fontSize: 11,
+  color: "#2E7D5A",
+  background: "#D6F5E8",
+  borderRadius: 999,
+  padding: "2px 8px",
+  fontWeight: 700,
+};
+
+const lowBadgeStyle: CSSProperties = {
+  fontSize: 11,
+  color: "#9A5515",
+  background: "#FDE8D2",
+  borderRadius: 999,
+  padding: "2px 8px",
+  fontWeight: 700,
+};
+
+const previewNoteStyle: CSSProperties = {
+  marginTop: 6,
+  fontSize: 12,
+  color: "#7C5A3D",
+};
+
+const lowWarningTextStyle: CSSProperties = {
+  marginTop: 6,
+  fontSize: 12,
+  color: "#B45309",
+  fontWeight: 600,
+};
+
+const previewErrorStyle: CSSProperties = {
+  fontSize: 12,
+  color: "#C0392B",
+  background: "#FFF1F0",
+  border: "1px solid #FFD4D1",
+  borderRadius: 10,
+  padding: "8px 10px",
+};
+
+const weightInfoStyle: CSSProperties = {
+  fontSize: 12,
+  color: "#4B5563",
+  marginTop: 6,
+};
+
+const weightWarningStyle: CSSProperties = {
+  fontSize: 12,
+  color: "#B45309",
+  marginTop: 6,
+};
+
+const weightLinkButtonStyle: CSSProperties = {
+  border: "none",
+  background: "transparent",
+  color: "#2EAA72",
+  textDecoration: "underline",
+  padding: 0,
+  fontSize: 12,
+  fontWeight: 700,
+  cursor: "pointer",
 };
 
 const hintTitleStyle: CSSProperties = {

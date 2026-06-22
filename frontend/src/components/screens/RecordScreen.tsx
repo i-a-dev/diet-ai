@@ -637,7 +637,9 @@ export function RecordScreen() {
       <ExerciseRegisterSheet
         open={exerciseSheetOpen}
         isSaving={isSaving}
+        recordDate={recordedOn ?? selectedDate}
         onClose={() => setExerciseSheetOpen(false)}
+        onOpenWeightRegister={() => setWeightSheetOpen(true)}
         onSave={handleExerciseSave}
       />
 

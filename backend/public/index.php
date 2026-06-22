@@ -27,6 +27,35 @@ $exerciseMetEstimateService = new ExerciseMetEstimateService();
 $requestMethod = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 $requestPath = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
 
+/**
+ * 変更: 運動カロリープレビュー/保存で共通利用する体重解決ロジック。
+ *
+ * @return array{weightKg: float, weightSource: string, referenceRecordedOn: string|null}
+ */
+$resolveWeightContext = static function (array $weightSummary): array {
+    if (is_numeric($weightSummary['current'] ?? null)) {
+        return [
+            'weightKg' => round((float) $weightSummary['current'], 1),
+            'weightSource' => 'current',
+            'referenceRecordedOn' => $weightSummary['recordedOn'] ?? null,
+        ];
+    }
+
+    if (is_numeric($weightSummary['referenceWeight'] ?? null)) {
+        return [
+            'weightKg' => round((float) $weightSummary['referenceWeight'], 1),
+            'weightSource' => 'reference',
+            'referenceRecordedOn' => $weightSummary['referenceRecordedOn'] ?? null,
+        ];
+    }
+
+    return [
+        'weightKg' => 60.0,
+        'weightSource' => 'default',
+        'referenceRecordedOn' => null,
+    ];
+};
+
 // ブラウザの preflight リクエスト（CORS 確認）への応答
 if ($requestMethod === 'OPTIONS') {
     json_response(['ok' => true]);
@@ -131,14 +160,13 @@ if ($requestMethod === 'POST' && $requestPath === '/api/records/exercises') {
 
     try {
         $weightSummary = $weightRepository->getSummaryForDate($date);
-        $resolvedWeight = $weightSummary['current'] ?? $weightSummary['referenceWeight'] ?? 60.0;
-        $usedDefaultWeight = !is_numeric($weightSummary['current']) && !is_numeric($weightSummary['referenceWeight']);
+        $weightContext = $resolveWeightContext($weightSummary);
 
         $estimated = $exerciseMetEstimateService->estimate(
             $exerciseName,
             (int) round((float) $amount),
             $unit,
-            (float) $resolvedWeight
+            $weightContext['weightKg']
         );
         $entry = $activityRepository->addExercise(
             $date,
@@ -151,20 +179,78 @@ if ($requestMethod === 'POST' && $requestPath === '/api/records/exercises') {
             $estimated['source'],
             $estimated['confidence'],
             $estimated['isEstimated'],
+            $weightContext['weightKg'],
+            $weightContext['weightSource'],
             $estimated['note'] !== '' ? $estimated['note'] : null
         );
         $exercises = $activityRepository->getExercisesForDate($date);
     } catch (InvalidArgumentException $exception) {
         json_response(['message' => $exception->getMessage()], 422);
+    } catch (RuntimeException $exception) {
+        json_response(['message' => $exception->getMessage()], 502);
     }
 
     json_response([
         'entry' => $entry,
         'exercises' => $exercises,
         'meta' => [
-            'weightKg' => (float) $resolvedWeight,
-            'usedDefaultWeight' => $usedDefaultWeight,
-            'weightHint' => $usedDefaultWeight ? '体重を登録するとより正確になります' : null,
+            'weightKg' => $weightContext['weightKg'],
+            'weightSource' => $weightContext['weightSource'],
+            'weightRecordedOn' => $weightContext['referenceRecordedOn'],
+            'usedDefaultWeight' => $weightContext['weightSource'] === 'default',
+            'weightHint' => $weightContext['weightSource'] === 'default'
+                ? '体重が未登録のため60kgで計算しています'
+                : null,
+        ],
+    ]);
+}
+
+// POST /api/records/exercises/preview — 運動の事前カロリープレビュー
+if ($requestMethod === 'POST' && $requestPath === '/api/records/exercises/preview') {
+    $body = json_decode(file_get_contents('php://input') ?: '{}', true);
+    $date = trim((string) ($body['date'] ?? WeightRepository::todayDate()));
+    $exerciseName = trim((string) ($body['exerciseName'] ?? ''));
+    $amount = $body['amount'] ?? null;
+    $unit = trim((string) ($body['unit'] ?? ''));
+
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+        json_response(['message' => 'date must be YYYY-MM-DD'], 422);
+    }
+    if (!is_numeric($amount)) {
+        json_response(['message' => 'amount is required'], 422);
+    }
+
+    try {
+        // 変更: 保存前に同じロジックで体重解決・METs推定を実行する。
+        $weightSummary = $weightRepository->getSummaryForDate($date);
+        $weightContext = $resolveWeightContext($weightSummary);
+        $estimated = $exerciseMetEstimateService->estimate(
+            $exerciseName,
+            (int) round((float) $amount),
+            $unit,
+            $weightContext['weightKg']
+        );
+    } catch (InvalidArgumentException $exception) {
+        json_response(['message' => $exception->getMessage()], 422);
+    } catch (RuntimeException $exception) {
+        json_response(['message' => $exception->getMessage()], 502);
+    }
+
+    json_response([
+        'preview' => [
+            'exercise' => $estimated['exercise'],
+            'minutes' => $estimated['minutes'],
+            'mets' => $estimated['mets'],
+            'confidence' => $estimated['confidence'],
+            'note' => $estimated['note'],
+            'source' => $estimated['source'],
+            'isEstimated' => $estimated['isEstimated'],
+            'caloriesBurned' => $estimated['calories'],
+        ],
+        'weight' => [
+            'kg' => $weightContext['weightKg'],
+            'source' => $weightContext['weightSource'],
+            'recordedOn' => $weightContext['referenceRecordedOn'],
         ],
     ]);
 }

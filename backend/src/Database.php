@@ -104,8 +104,44 @@ final class Database
      */
     private static function seedIfEmpty(): void
     {
+        if (self::hasSeedCompleted()) {
+            return;
+        }
+
         self::seedWeightIfEmpty();
         self::seedActivityIfEmpty();
+        self::markSeedCompleted();
+    }
+
+    private static function hasSeedCompleted(): bool
+    {
+        self::$pdo->exec(
+            'CREATE TABLE IF NOT EXISTS app_metadata (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )'
+        );
+
+        $statement = self::$pdo->prepare(
+            'SELECT value FROM app_metadata WHERE key = :key LIMIT 1'
+        );
+        $statement->execute(['key' => 'seed_completed']);
+        $row = $statement->fetch();
+
+        return $row !== false && (string) ($row['value'] ?? '') === '1';
+    }
+
+    private static function markSeedCompleted(): void
+    {
+        $statement = self::$pdo->prepare(
+            'INSERT INTO app_metadata (key, value)
+             VALUES (:key, :value)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value'
+        );
+        $statement->execute([
+            'key' => 'seed_completed',
+            'value' => '1',
+        ]);
     }
 
     private static function seedWeightIfEmpty(): void
@@ -163,11 +199,11 @@ final class Database
         $exerciseStatement = self::$pdo->prepare(
             'INSERT INTO exercise_entries (
                 recorded_on, exercise_name, amount, unit, minutes, mets, source, confidence, is_estimated, estimate_note,
-                burned_calories_kcal, created_at, updated_at
+                weight_kg, weight_source, burned_calories_kcal, created_at, updated_at
              )
              VALUES (
                 :recorded_on, :exercise_name, :amount, :unit, :minutes, :mets, :source, :confidence, :is_estimated, :estimate_note,
-                :burned_calories_kcal, :created_at, :updated_at
+                :weight_kg, :weight_source, :burned_calories_kcal, :created_at, :updated_at
              )'
         );
 
@@ -189,6 +225,8 @@ final class Database
                 'confidence' => 'high',
                 'is_estimated' => 0,
                 'estimate_note' => 'シードデータ',
+                'weight_kg' => 62.4,
+                'weight_source' => 'reference',
                 'burned_calories_kcal' => $exercise['burned'],
                 'created_at' => $now,
                 'updated_at' => $now,

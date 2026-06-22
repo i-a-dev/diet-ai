@@ -88,6 +88,8 @@ export interface ExerciseEntrySummary {
   confidence: "high" | "medium" | "low";
   isEstimated: boolean;
   note: string | null;
+  weightKg: number;
+  weightSource: "current" | "reference" | "default";
   burnedCalories: number;
 }
 
@@ -103,8 +105,28 @@ interface SaveExerciseResponse {
   };
   meta?: {
     weightKg: number;
+    weightSource: "current" | "reference" | "default";
+    weightRecordedOn: string | null;
     usedDefaultWeight: boolean;
     weightHint: string | null;
+  };
+}
+
+export interface ExercisePreviewResponse {
+  preview: {
+    exercise: string;
+    minutes: number;
+    mets: number;
+    confidence: "high" | "medium" | "low";
+    note: string;
+    source: "local_db" | "llm_estimate";
+    isEstimated: boolean;
+    caloriesBurned: number;
+  };
+  weight: {
+    kg: number;
+    source: "current" | "reference" | "default";
+    recordedOn: string | null;
   };
 }
 
@@ -166,6 +188,18 @@ export function saveExercise(
   date?: string,
 ) {
   return request<SaveExerciseResponse>("/records/exercises", {
+    method: "POST",
+    body: JSON.stringify({ exerciseName, amount, unit, date }),
+  });
+}
+
+export function estimateExercisePreview(
+  exerciseName: string,
+  amount: number,
+  unit: "min" | "rep",
+  date?: string,
+) {
+  return request<ExercisePreviewResponse>("/records/exercises/preview", {
     method: "POST",
     body: JSON.stringify({ exerciseName, amount, unit, date }),
   });
