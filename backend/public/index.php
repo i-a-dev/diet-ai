@@ -11,6 +11,7 @@ require_once __DIR__ . '/../src/Http.php';
 require_once __DIR__ . '/../src/Database.php';
 require_once __DIR__ . '/../src/WeightRepository.php';
 require_once __DIR__ . '/../src/MealEntryRepository.php';
+require_once __DIR__ . '/../src/ActivityRepository.php';
 require_once __DIR__ . '/../src/MockRepository.php';
 require_once __DIR__ . '/../src/CalorieEstimateService.php';
 require_once __DIR__ . '/../src/FoodNormalizeService.php';
@@ -18,6 +19,7 @@ require_once __DIR__ . '/../src/FoodNormalizeService.php';
 $repository = new MockRepository();
 $weightRepository = new WeightRepository();
 $mealEntryRepository = new MealEntryRepository();
+$activityRepository = new ActivityRepository();
 $calorieEstimateService = new CalorieEstimateService();
 $foodNormalizeService = new FoodNormalizeService();
 $requestMethod = $_SERVER['REQUEST_METHOD'] ?? 'GET';
@@ -72,14 +74,79 @@ if ($requestMethod === 'GET' && $requestPath === '/api/records/daily') {
     $record = $repository->getDailyRecord();
     $weightSummary = $weightRepository->getSummaryForDate($date);
     $mealSections = $mealEntryRepository->getSectionsForDate($date);
+    $stepsSummary = $activityRepository->getStepsForDate($date);
+    $exerciseSummary = $activityRepository->getExercisesForDate($date);
 
     // モックの weight を DB の値で上書き
     $record['date'] = $weightSummary['dateLabel'] ?? WeightRepository::formatDateLabel($date);
     $record['recordedOn'] = $date;
     $record['weight'] = $weightSummary;
     $record['meals'] = $mealSections;
+    $record['steps'] = $stepsSummary;
+    $record['exercises'] = $exerciseSummary;
 
     json_response($record);
+}
+
+// POST /api/records/steps — 歩数を登録・更新
+if ($requestMethod === 'POST' && $requestPath === '/api/records/steps') {
+    $body = json_decode(file_get_contents('php://input') ?: '{}', true);
+    $date = trim((string) ($body['date'] ?? WeightRepository::todayDate()));
+    $count = $body['count'] ?? null;
+
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+        json_response(['message' => 'date must be YYYY-MM-DD'], 422);
+    }
+
+    if (!is_numeric($count)) {
+        json_response(['message' => 'count is required'], 422);
+    }
+
+    try {
+        $steps = $activityRepository->upsertSteps($date, (int) round((float) $count));
+    } catch (InvalidArgumentException $exception) {
+        json_response(['message' => $exception->getMessage()], 422);
+    }
+
+    json_response(['steps' => $steps]);
+}
+
+// POST /api/records/exercises — 運動を登録
+if ($requestMethod === 'POST' && $requestPath === '/api/records/exercises') {
+    $body = json_decode(file_get_contents('php://input') ?: '{}', true);
+    $date = trim((string) ($body['date'] ?? WeightRepository::todayDate()));
+    $exerciseName = trim((string) ($body['exerciseName'] ?? ''));
+    $amount = $body['amount'] ?? null;
+    $unit = trim((string) ($body['unit'] ?? ''));
+
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+        json_response(['message' => 'date must be YYYY-MM-DD'], 422);
+    }
+
+    if (!is_numeric($amount)) {
+        json_response(['message' => 'amount is required'], 422);
+    }
+
+    try {
+        $entry = $activityRepository->addExercise($date, $exerciseName, (int) round((float) $amount), $unit);
+        $exercises = $activityRepository->getExercisesForDate($date);
+    } catch (InvalidArgumentException $exception) {
+        json_response(['message' => $exception->getMessage()], 422);
+    }
+
+    json_response([
+        'entry' => $entry,
+        'exercises' => $exercises,
+    ]);
+}
+
+// GET /api/records/exercises/history — 運動履歴を取得
+if ($requestMethod === 'GET' && $requestPath === '/api/records/exercises/history') {
+    $limit = (int) ($_GET['limit'] ?? 30);
+    $history = $activityRepository->getExerciseHistory($limit);
+    json_response([
+        'history' => $history,
+    ]);
 }
 
 // POST /api/records/weight — 体重を登録・更新

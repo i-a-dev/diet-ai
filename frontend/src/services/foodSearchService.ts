@@ -104,6 +104,67 @@ function parseFoodInputByRegex(input: string): ParsedFoodInput {
   };
 }
 
+const MIN_FOOD_RELEVANCE_SCORE = 50;
+
+function normalizeFoodText(text: string): string {
+  return text.trim().toLowerCase().replace(/\u3000/g, " ").replace(/\s+/g, " ").normalize("NFKC");
+}
+
+function scoreFoodRelevance(query: string, candidateName: string): number {
+  const q = normalizeFoodText(query);
+  const name = normalizeFoodText(candidateName);
+  if (q === "" || name === "") return 0;
+  if (name === q) return 100;
+
+  if (name.startsWith(q)) {
+    const suffix = name.slice(q.length);
+    if (suffix === "") return 100;
+    if (/^[\d.]+(g|ml|個|杯|切れ|袋|本)?$/i.test(suffix)) return 90;
+    if (suffix.length <= 2) return 75;
+    return 45;
+  }
+
+  if (q.startsWith(name)) return 85;
+
+  const qTokens = q.split(/\s+/);
+  const nameTokens = name.split(/\s+/);
+  if (qTokens.length === 1) {
+    const token = qTokens[0];
+    if (nameTokens.includes(token)) {
+      const tokenIndex = nameTokens.indexOf(token);
+      if (nameTokens.length === 1) return 95;
+      if (tokenIndex === 0) return 80;
+      return Math.max(20, 45 - (nameTokens.length - 2) * 5);
+    }
+    if (name.includes(token)) {
+      if (name.startsWith(token)) return 45;
+      return 15;
+    }
+  }
+
+  if (qTokens.every((token) => name.includes(token))) return 50;
+  return 0;
+}
+
+function pickBestRelevantCandidate<T>(
+  query: string,
+  candidates: T[],
+  getName: (item: T) => string,
+): T | null {
+  let best: T | null = null;
+  let bestScore = -1;
+
+  for (const candidate of candidates) {
+    const score = scoreFoodRelevance(query, getName(candidate));
+    if (score > bestScore) {
+      bestScore = score;
+      best = candidate;
+    }
+  }
+
+  return bestScore >= MIN_FOOD_RELEVANCE_SCORE ? best : null;
+}
+
 function makeCacheKey(input: string): string {
   return input.trim().toLowerCase();
 }
@@ -290,7 +351,7 @@ async function searchFatSecret(query: string, parsed: ParsedFoodInput, rawInput:
       throw new Error("FatSecret request failed");
     }
     const json = (await response.json()) as { foods?: FatSecretFood[] };
-    const found = json.foods?.[0];
+    const found = pickBestRelevantCandidate(query, json.foods ?? [], (food) => food.name);
     if (found) {
       return resultFromFatSecret(found, parsed, rawInput);
     }
@@ -327,12 +388,21 @@ async function searchOpenFoodFacts(
     }>;
   };
   const products = json.products ?? [];
+  let best: { result: FoodSearchResult; score: number } | null = null;
+
   for (const product of products) {
+    const name = product.product_name?.trim() ?? parsed.name;
+    const score = scoreFoodRelevance(query, name);
+    if (score < MIN_FOOD_RELEVANCE_SCORE) continue;
+
     const candidate = resultFromOpenFoodFacts(product, parsed, rawInput);
-    if (candidate) return candidate;
+    if (!candidate) continue;
+    if (!best || score > best.score) {
+      best = { result: candidate, score };
+    }
   }
 
-  return null;
+  return best?.result ?? null;
 }
 
 async function estimateWithClaude(rawInput: string, parsed: ParsedFoodInput): Promise<FoodSearchResult> {

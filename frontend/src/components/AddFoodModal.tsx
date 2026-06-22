@@ -1,4 +1,11 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 import { BottomSheet } from "./BottomSheet.tsx";
 import { ORANGE } from "../constants.ts";
 import { FoodSearchStatus } from "./FoodSearchStatus.tsx";
@@ -35,10 +42,26 @@ interface AddFoodModalProps {
 
 const INITIAL_STEPS = [
   { key: "regex_extracting", label: "入力内容を解析中", status: "pending" },
-  { key: "fatsecret_searching", label: "FatSecretで食品データを検索中", status: "pending" },
-  { key: "open_food_facts_searching", label: "Open Food Factsで商品情報を検索中", status: "pending" },
-  { key: "claude_estimating", label: "AIでカロリーを推定中", status: "pending" },
-  { key: "waiting_user_choice", label: "ユーザー選択を待機中", status: "pending" },
+  {
+    key: "fatsecret_searching",
+    label: "FatSecretで食品データを検索中",
+    status: "pending",
+  },
+  {
+    key: "open_food_facts_searching",
+    label: "Open Food Factsで商品情報を検索中",
+    status: "pending",
+  },
+  {
+    key: "claude_estimating",
+    label: "AIでカロリーを推定中",
+    status: "pending",
+  },
+  {
+    key: "waiting_user_choice",
+    label: "ユーザー選択を待機中",
+    status: "pending",
+  },
   { key: "ai_web_searching", label: "商品情報を検索中", status: "pending" },
 ] as const;
 
@@ -65,16 +88,19 @@ export function AddFoodModal({
   const [inputValue, setInputValue] = useState("");
   const [manualKcal, setManualKcal] = useState("");
   // 変更: 新しい検索フロー状態をモーダル内で一元管理。
-  const [progress, setProgress] = useState<FoodSearchProgress>(makeInitialProgress);
+  const [progress, setProgress] =
+    useState<FoodSearchProgress>(makeInitialProgress);
   const [showManualEdit, setShowManualEdit] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [completedResult, setCompletedResult] = useState<FoodSearchResult | null>(null);
+  const [completedResult, setCompletedResult] =
+    useState<FoodSearchResult | null>(null);
   const [historyTab, setHistoryTab] = useState<"recent" | "meal">("recent");
   const [recentHistory, setRecentHistory] = useState<MealItemInput[]>([]);
   const [mealHistory, setMealHistory] = useState<MealItemInput[]>([]);
   const activeSearchTokenRef = useRef(0);
   const historyRequestTokenRef = useRef(0);
-  const showSearchApiDebug = import.meta.env.VITE_FOOD_SEARCH_DEBUG_MODE === "true";
+  const showSearchApiDebug =
+    import.meta.env.VITE_FOOD_SEARCH_DEBUG_MODE === "true";
 
   useLayoutEffect(() => {
     if (!open) {
@@ -116,7 +142,8 @@ export function AddFoodModal({
 
   const canSearch = inputValue.trim().length >= 2;
   const selectedResult = progress.result;
-  const isSearching = progress.state === "searching" || progress.state === "web_searching";
+  const isSearching =
+    progress.state === "searching" || progress.state === "web_searching";
   const isFoodNameLocked =
     isSearching ||
     progress.state === "found" ||
@@ -135,7 +162,9 @@ export function AddFoodModal({
   }, [completedResult, currentMealKcal, currentTotalKcal, dailyGoalKcal]);
   const isWebSearchFallback =
     progress.state === "low_confidence_estimate" &&
-    progress.steps.some((step) => step.key === "ai_web_searching" && step.status === "done");
+    progress.steps.some(
+      (step) => step.key === "ai_web_searching" && step.status === "done",
+    );
 
   async function handleSearch() {
     if (!canSearch || isSearching) return;
@@ -179,7 +208,8 @@ export function AddFoodModal({
       setProgress({
         ...progress,
         state: "error",
-        message: error instanceof Error ? error.message : "商品情報検索に失敗しました",
+        message:
+          error instanceof Error ? error.message : "商品情報検索に失敗しました",
       });
       setShowManualEdit(true);
     }
@@ -233,7 +263,8 @@ export function AddFoodModal({
       setProgress({
         ...makeInitialProgress(),
         state: "error",
-        message: saveError instanceof Error ? saveError.message : "保存に失敗しました",
+        message:
+          saveError instanceof Error ? saveError.message : "保存に失敗しました",
       });
       setShowManualEdit(true);
     } finally {
@@ -254,7 +285,9 @@ export function AddFoodModal({
             aria-pressed={historyTab === "recent"}
             style={{
               ...tabButtonStyle,
-              ...(historyTab === "recent" ? activeTabButtonStyle : inactiveTabButtonStyle),
+              ...(historyTab === "recent"
+                ? activeTabButtonStyle
+                : inactiveTabButtonStyle),
             }}
           >
             最近の履歴
@@ -265,7 +298,9 @@ export function AddFoodModal({
             aria-pressed={historyTab === "meal"}
             style={{
               ...tabButtonStyle,
-              ...(historyTab === "meal" ? activeTabButtonStyle : inactiveTabButtonStyle),
+              ...(historyTab === "meal"
+                ? activeTabButtonStyle
+                : inactiveTabButtonStyle),
             }}
           >
             {mealTitle}の履歴
@@ -286,7 +321,9 @@ export function AddFoodModal({
                 {item.label}
               </button>
             ))}
-            {chipItems.length === 0 && <span style={emptyHistoryStyle}>履歴がありません</span>}
+            {chipItems.length === 0 && (
+              <span style={emptyHistoryStyle}>履歴がありません</span>
+            )}
           </div>
         </div>
         <button type="button" style={secondaryBtnStyle}>
@@ -296,7 +333,10 @@ export function AddFoodModal({
           type="button"
           onClick={() => void handleSearch()}
           disabled={!canSearch || isSubmitting}
-          style={{ ...primaryBtnStyle, opacity: canSearch && !isSubmitting ? 1 : 0.45 }}
+          style={{
+            ...primaryBtnStyle,
+            opacity: canSearch && !isSubmitting ? 1 : 0.45,
+          }}
         >
           検索する
         </button>
@@ -308,7 +348,11 @@ export function AddFoodModal({
     if (state === "searching" || state === "web_searching") {
       return (
         <FoodSearchStatus
-          title={state === "web_searching" ? "商品情報を検索しています" : "食品情報を探しています"}
+          title={
+            state === "web_searching"
+              ? "商品情報を検索しています"
+              : "食品情報を探しています"
+          }
           query={inputValue.trim()}
           mode={state === "web_searching" ? "web" : "food"}
           steps={progress.steps}
@@ -322,7 +366,12 @@ export function AddFoodModal({
     }
 
     if ((state === "found" || state === "web_found") && selectedResult) {
-      return <FoodSearchResultCard result={selectedResult} onAdd={() => void saveItem(selectedResult)} />;
+      return (
+        <FoodSearchResultCard
+          result={selectedResult}
+          onAdd={() => void saveItem(selectedResult)}
+        />
+      );
     }
 
     if (state === "estimated" && selectedResult) {
@@ -349,7 +398,8 @@ export function AddFoodModal({
           showSearchButton={!isWebSearchFallback}
           warningMessage={
             isWebSearchFallback
-              ? progress.message ?? "Web検索しましたが、うまくヒットしませんでした。AI推定カロリーを表示しています。"
+              ? (progress.message ??
+                "Web検索しましたが、うまくヒットしませんでした。AI推定カロリーを表示しています。")
               : undefined
           }
         />
@@ -366,9 +416,17 @@ export function AddFoodModal({
           <div style={completedMetaStyle}>
             {mealTitle} 合計: {completedSummary.nextMealTotal}kcal
           </div>
-          <div style={completedMetaStyle}>今日の合計: {completedSummary.nextTotal}kcal</div>
-          <div style={completedMetaStyle}>今日の残り: {completedSummary.remaining}kcal</div>
-          <button type="button" onClick={onClose} style={{ ...primaryBtnStyle, marginTop: 10 }}>
+          <div style={completedMetaStyle}>
+            今日の合計: {completedSummary.nextTotal}kcal
+          </div>
+          <div style={completedMetaStyle}>
+            今日の残り: {completedSummary.remaining}kcal
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            style={{ ...primaryBtnStyle, marginTop: 10 }}
+          >
             閉じる
           </button>
         </div>
@@ -410,7 +468,9 @@ export function AddFoodModal({
       {(showManualEdit || progress.state === "error") && (
         <>
           {/* 変更: 失敗時フォールバックとして手入力欄を明示。 */}
-          <label style={{ ...fieldLabelStyle, marginTop: 14 }}>カロリー（手入力）</label>
+          <label style={{ ...fieldLabelStyle, marginTop: 14 }}>
+            カロリー（手入力）
+          </label>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <input
               type="number"
@@ -536,7 +596,7 @@ const inactiveTabButtonStyle: CSSProperties = {
 };
 
 const chipStyle: CSSProperties = {
-  padding: "8px 12px",
+  padding: "3px 12px",
   borderRadius: 999,
   border: "1px solid #F5E1D2",
   background: "#FFF5EB",

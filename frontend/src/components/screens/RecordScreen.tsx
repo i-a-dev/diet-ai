@@ -14,17 +14,22 @@ import {
   Weight,
 } from "lucide-react";
 import {
+  type ExerciseEntrySummary,
   type MealSectionSummary,
   fetchDailyRecord,
+  saveExercise,
   saveMeal,
+  saveSteps,
   saveWeight,
 } from "../../api/client.ts";
 import { ActivitySubSection } from "../ActivitySubSection.tsx";
 import { ExerciseChip } from "../ExerciseChip.tsx";
 import type { MealItemInput } from "../AddFoodModal.tsx";
 import { AddFoodModal } from "../AddFoodModal.tsx";
+import { type ExerciseInput, ExerciseRegisterSheet } from "../ExerciseRegisterSheet.tsx";
 import { MealSection } from "../MealSection.tsx";
 import { SecIcon } from "../SecIcon.tsx";
+import { StepsRegisterSheet } from "../StepsRegisterSheet.tsx";
 import { TopNav } from "../TopNav.tsx";
 import { WeightRegisterSheet } from "../WeightRegisterSheet.tsx";
 import { ORANGE } from "../../constants.ts";
@@ -140,7 +145,11 @@ export function RecordScreen() {
   const [meals, setMeals] = useState<Record<MealKey, MealSectionData>>(createInitialMeals);
   const [weightSheetOpen, setWeightSheetOpen] = useState(false);
   const [mealSheetOpen, setMealSheetOpen] = useState(false);
+  const [stepsSheetOpen, setStepsSheetOpen] = useState(false);
+  const [exerciseSheetOpen, setExerciseSheetOpen] = useState(false);
   const [activeMealKey, setActiveMealKey] = useState<MealKey | null>(null);
+  const [steps, setSteps] = useState({ count: 0, burnedCalories: 0 });
+  const [exercises, setExercises] = useState<ExerciseEntrySummary[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -159,6 +168,11 @@ export function RecordScreen() {
         setReferenceRecordedOn(data.weight.referenceRecordedOn ?? null);
         setWeightDiff(data.weight.diffFromPreviousDay);
         setMeals(mapMealSectionsToState(data.meals));
+        setSteps({
+          count: data.steps?.count ?? 0,
+          burnedCalories: data.steps?.burnedCalories ?? 0,
+        });
+        setExercises(data.exercises?.entries ?? []);
       } catch (loadError) {
         if (!cancelled) {
           setError(loadError instanceof Error ? loadError.message : "読み込みに失敗しました");
@@ -246,6 +260,45 @@ export function RecordScreen() {
     if (!baseDate) return;
     setSelectedDate(shiftDate(baseDate, offset));
   };
+  const exerciseTotalKcal = useMemo(
+    () => exercises.reduce((sum, item) => sum + item.burnedCalories, 0),
+    [exercises],
+  );
+  const totalActivityKcal = steps.burnedCalories + exerciseTotalKcal;
+
+  const handleStepsSave = async (value: number) => {
+    try {
+      setIsSaving(true);
+      setError(null);
+      const data = await saveSteps(value, recordedOn ?? selectedDate);
+      setSteps(data.steps);
+      setStepsSheetOpen(false);
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "歩数の保存に失敗しました");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleExerciseSave = async (input: ExerciseInput) => {
+    try {
+      setIsSaving(true);
+      setError(null);
+      const data = await saveExercise(
+        input.name,
+        input.amount,
+        input.unit,
+        recordedOn ?? selectedDate,
+      );
+      setExercises(data.exercises.entries);
+      setExerciseSheetOpen(false);
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "運動の保存に失敗しました");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   const hasTodayWeight = weight !== null;
   const referenceDateLabel = referenceRecordedOn
     ? referenceRecordedOn === recordedOn
@@ -469,20 +522,44 @@ export function RecordScreen() {
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
               <span style={{ fontSize: 14, color: "#2EAA72" }}>
-                <span style={{ fontWeight: 700 }}>411</span> kcal
+                <span style={{ fontWeight: 700 }}>{totalActivityKcal}</span> kcal
               </span>
-              <button type="button" style={plusBtnStyle}>
+              <button
+                type="button"
+                disabled={isLoading || isSaving}
+                onClick={() => setExerciseSheetOpen(true)}
+                style={{
+                  ...plusBtnStyle,
+                  opacity: isLoading || isSaving ? 0.4 : 1,
+                  cursor: isLoading || isSaving ? "not-allowed" : "pointer",
+                }}
+              >
                 +
               </button>
             </div>
           </div>
-          <ActivitySubSection icon={<Sun size={14} />} title="歩数" totalKcal="231">
+          <ActivitySubSection
+            icon={<Sun size={14} />}
+            title="歩数"
+            totalKcal={String(steps.burnedCalories)}
+            onAdd={() => setStepsSheetOpen(true)}
+            disabled={isLoading || isSaving}
+          >
             <div>
-              <span style={{ fontSize: 28, fontWeight: 700, color: "#111" }}>5,842</span>
+              <span style={{ fontSize: 28, fontWeight: 700, color: "#111" }}>
+                {steps.count.toLocaleString()}
+              </span>
               <span style={{ fontSize: 14, color: "#888" }}> 歩</span>
             </div>
           </ActivitySubSection>
-          <ActivitySubSection icon={<PersonStanding size={14} />} title="運動" totalKcal="180" isLast>
+          <ActivitySubSection
+            icon={<PersonStanding size={14} />}
+            title="運動"
+            totalKcal={String(exerciseTotalKcal)}
+            isLast
+            onAdd={() => setExerciseSheetOpen(true)}
+            disabled={isLoading || isSaving}
+          >
             <div
               style={{
                 display: "flex",
@@ -491,9 +568,16 @@ export function RecordScreen() {
                 alignItems: "center",
               }}
             >
-              <ExerciseChip text="スクワット　30回　60kcal" />
-              <ExerciseChip text="腹筋　20回 × 2セット　30kcal" />
-              <ExerciseChip text="ウォーキング　30分　90kcal" />
+              {exercises.length === 0 ? (
+                <span style={{ fontSize: 13, color: "#A3A3A3" }}>まだ運動記録がありません</span>
+              ) : (
+                exercises.map((item) => (
+                  <ExerciseChip
+                    key={item.id}
+                    text={`${item.name}　${item.amount}${item.unit === "min" ? "分" : "回"}　${item.burnedCalories}kcal`}
+                  />
+                ))
+              )}
             </div>
           </ActivitySubSection>
         </div>
@@ -522,6 +606,21 @@ export function RecordScreen() {
         isSaving={isSaving}
         onClose={() => setWeightSheetOpen(false)}
         onSave={handleWeightSave}
+      />
+
+      <StepsRegisterSheet
+        open={stepsSheetOpen}
+        initialSteps={steps.count}
+        isSaving={isSaving}
+        onClose={() => setStepsSheetOpen(false)}
+        onSave={handleStepsSave}
+      />
+
+      <ExerciseRegisterSheet
+        open={exerciseSheetOpen}
+        isSaving={isSaving}
+        onClose={() => setExerciseSheetOpen(false)}
+        onSave={handleExerciseSave}
       />
 
       {/* 変更: 食事追加UIを新しい検索フロー対応モーダルへ差し替え。 */}

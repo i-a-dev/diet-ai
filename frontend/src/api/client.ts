@@ -48,6 +48,14 @@ interface DailyRecordResponse {
   recordedOn: string;
   weight: WeightSummary;
   meals: MealSectionSummary[];
+  steps?: {
+    count: number;
+    burnedCalories: number;
+  };
+  exercises?: {
+    entries: ExerciseEntrySummary[];
+    burnedCalories: number;
+  };
 }
 
 interface SaveWeightResponse {
@@ -62,6 +70,39 @@ interface SaveMealResponse {
     calories: number;
   };
   meals: MealSectionSummary[];
+}
+
+export interface StepsSummary {
+  count: number;
+  burnedCalories: number;
+}
+
+export interface ExerciseEntrySummary {
+  id: number;
+  name: string;
+  amount: number;
+  unit: "min" | "rep";
+  burnedCalories: number;
+}
+
+interface SaveStepsResponse {
+  steps: StepsSummary;
+}
+
+interface SaveExerciseResponse {
+  entry: ExerciseEntrySummary;
+  exercises: {
+    entries: ExerciseEntrySummary[];
+    burnedCalories: number;
+  };
+}
+
+export interface ExerciseHistoryEntry extends ExerciseEntrySummary {
+  recordedOn: string;
+}
+
+interface ExerciseHistoryResponse {
+  history: ExerciseHistoryEntry[];
 }
 
 export interface MealHistoryEntry {
@@ -98,6 +139,34 @@ export function saveMeal(
     method: "POST",
     body: JSON.stringify({ mealType, foodName, calories, date }),
   });
+}
+
+export function saveSteps(count: number, date?: string) {
+  return request<SaveStepsResponse>("/records/steps", {
+    method: "POST",
+    body: JSON.stringify({ count, date }),
+  });
+}
+
+export function saveExercise(
+  exerciseName: string,
+  amount: number,
+  unit: "min" | "rep",
+  date?: string,
+) {
+  return request<SaveExerciseResponse>("/records/exercises", {
+    method: "POST",
+    body: JSON.stringify({ exerciseName, amount, unit, date }),
+  });
+}
+
+export function fetchExerciseHistory(options?: { limit?: number }) {
+  const params = new URLSearchParams();
+  if (options?.limit) {
+    params.set("limit", String(options.limit));
+  }
+  const query = params.toString();
+  return request<ExerciseHistoryResponse>(`/records/exercises/history${query ? `?${query}` : ""}`);
 }
 
 export function fetchMealHistory(options?: { mealType?: MealType; limit?: number }) {

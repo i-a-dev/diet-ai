@@ -14,6 +14,8 @@ interface ActivitySubSectionProps {
   totalKcal: string
   children: ReactNode
   isLast?: boolean
+  onAdd?: () => void
+  disabled?: boolean
 }
 
 export function ActivitySubSection({
@@ -22,6 +24,8 @@ export function ActivitySubSection({
   totalKcal,
   children,
   isLast = false,
+  onAdd,
+  disabled = false,
 }: ActivitySubSectionProps) {
   return (
     <div
@@ -48,7 +52,24 @@ export function ActivitySubSection({
             <span style={{ fontWeight: 600 }}>{totalKcal}</span> kcal
           </span>
         </div>
-        <span style={{ color: ORANGE, fontSize: 26, lineHeight: 1, cursor: 'pointer' }}>+</span>
+        <button
+          type="button"
+          aria-label={`${title}を追加`}
+          disabled={disabled}
+          onClick={() => onAdd?.()}
+          style={{
+            border: 'none',
+            background: 'transparent',
+            color: ORANGE,
+            fontSize: 26,
+            lineHeight: 1,
+            cursor: disabled ? 'not-allowed' : 'pointer',
+            opacity: disabled ? 0.4 : 1,
+            padding: 0,
+          }}
+        >
+          +
+        </button>
 
         <div style={{ gridColumn: '2 / -1' }}>{children}</div>
       </div>

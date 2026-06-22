@@ -67,8 +67,13 @@ final class Database
      */
     private static function seedIfEmpty(): void
     {
-        $count = (int) self::$pdo->query('SELECT COUNT(*) FROM weight_entries')->fetchColumn();
+        self::seedWeightIfEmpty();
+        self::seedActivityIfEmpty();
+    }
 
+    private static function seedWeightIfEmpty(): void
+    {
+        $count = (int) self::$pdo->query('SELECT COUNT(*) FROM weight_entries')->fetchColumn();
         if ($count > 0) {
             return;
         }
@@ -76,7 +81,6 @@ final class Database
         $timezone = new DateTimeZone('Asia/Tokyo');
         $today = new DateTimeImmutable('now', $timezone);
         $weights = [63.0, 62.9, 62.8, 62.7, 62.65, 62.6, 62.4];
-
         $statement = self::$pdo->prepare(
             'INSERT INTO weight_entries (recorded_on, weight_kg, created_at, updated_at)
              VALUES (:recorded_on, :weight_kg, :created_at, :updated_at)'
@@ -86,12 +90,59 @@ final class Database
             $daysAgo = count($weights) - 1 - $index;
             $date = $today->modify(sprintf('-%d days', $daysAgo));
             $timestamp = $date->format('Y-m-d H:i:s');
-
             $statement->execute([
                 'recorded_on' => $date->format('Y-m-d'),
                 'weight_kg' => $weight,
                 'created_at' => $timestamp,
                 'updated_at' => $timestamp,
+            ]);
+        }
+    }
+
+    private static function seedActivityIfEmpty(): void
+    {
+        $stepCount = (int) self::$pdo->query('SELECT COUNT(*) FROM step_entries')->fetchColumn();
+        $exerciseCount = (int) self::$pdo->query('SELECT COUNT(*) FROM exercise_entries')->fetchColumn();
+
+        if ($stepCount > 0 || $exerciseCount > 0) {
+            return;
+        }
+
+        $today = (new DateTimeImmutable('now', new DateTimeZone('Asia/Tokyo')))->format('Y-m-d');
+        $now = (new DateTimeImmutable('now', new DateTimeZone('Asia/Tokyo')))->format('Y-m-d H:i:s');
+
+        $stepStatement = self::$pdo->prepare(
+            'INSERT INTO step_entries (recorded_on, step_count, burned_calories_kcal, created_at, updated_at)
+             VALUES (:recorded_on, :step_count, :burned_calories_kcal, :created_at, :updated_at)'
+        );
+        $stepStatement->execute([
+            'recorded_on' => $today,
+            'step_count' => 5842,
+            'burned_calories_kcal' => 231,
+            'created_at' => $now,
+            'updated_at' => $now,
+        ]);
+
+        $exerciseStatement = self::$pdo->prepare(
+            'INSERT INTO exercise_entries (recorded_on, exercise_name, amount, unit, burned_calories_kcal, created_at, updated_at)
+             VALUES (:recorded_on, :exercise_name, :amount, :unit, :burned_calories_kcal, :created_at, :updated_at)'
+        );
+
+        $seedExercises = [
+            ['name' => 'スクワット', 'amount' => 30, 'unit' => 'rep', 'burned' => 60],
+            ['name' => '腹筋', 'amount' => 40, 'unit' => 'rep', 'burned' => 60],
+            ['name' => 'ウォーキング', 'amount' => 30, 'unit' => 'min', 'burned' => 90],
+        ];
+
+        foreach ($seedExercises as $exercise) {
+            $exerciseStatement->execute([
+                'recorded_on' => $today,
+                'exercise_name' => $exercise['name'],
+                'amount' => $exercise['amount'],
+                'unit' => $exercise['unit'],
+                'burned_calories_kcal' => $exercise['burned'],
+                'created_at' => $now,
+                'updated_at' => $now,
             ]);
         }
     }
