@@ -20,7 +20,6 @@ interface ExerciseRegisterSheetProps {
   isSaving?: boolean;
   recordDate?: string;
   onClose: () => void;
-  onOpenWeightRegister?: () => void;
   onSave: (input: ExerciseInput) => void | Promise<void>;
 }
 
@@ -29,7 +28,6 @@ export function ExerciseRegisterSheet({
   isSaving = false,
   recordDate,
   onClose,
-  onOpenWeightRegister,
   onSave,
 }: ExerciseRegisterSheetProps) {
   const [name, setName] = useState("");
@@ -120,8 +118,8 @@ export function ExerciseRegisterSheet({
 
   const handleSave = () => {
     if (!previewReady || isSaving) return;
-    // 変更: 保存時はプレビューで正規化された運動名を利用する。
-    void onSave({ name: preview.preview.exercise, amount, unit });
+    // 変更: 登録名はユーザー入力を使い、計算の根拠は note/source で示す。
+    void onSave({ name: trimmedName, amount, unit });
   };
 
   return (
@@ -218,12 +216,24 @@ export function ExerciseRegisterSheet({
                   <span style={previewKcalTextStyle}>
                     {preview.preview.caloriesBurned} kcal
                   </span>
-                  <span style={estimateBadgeStyle}>推定</span>
+                  <span style={estimateBadgeStyle}>
+                    {preview.preview.source === "llm_estimate"
+                      ? "AI推定"
+                      : "ローカルMETs"}
+                  </span>
                 </div>
                 <div style={previewSubTextStyle}>
                   {preview.preview.mets} METs × {preview.weight.kg}kg ×{" "}
                   {preview.preview.minutes}h/60
                 </div>
+                {preview.preview.source === "llm_estimate" &&
+                  preview.preview.estimatedExercise !== "" &&
+                  preview.preview.estimatedExercise !==
+                    preview.preview.exercise && (
+                    <div style={previewNoteStyle}>
+                      {preview.preview.estimatedExercise} 相当として計算
+                    </div>
+                  )}
               </div>
             ) : null}
 
@@ -459,17 +469,6 @@ const weightWarningStyle: CSSProperties = {
   fontSize: 12,
   color: "#B45309",
   marginTop: 6,
-};
-
-const weightLinkButtonStyle: CSSProperties = {
-  border: "none",
-  background: "transparent",
-  color: "#2EAA72",
-  textDecoration: "underline",
-  padding: 0,
-  fontSize: 12,
-  fontWeight: 700,
-  cursor: "pointer",
 };
 
 const hintTitleStyle: CSSProperties = {

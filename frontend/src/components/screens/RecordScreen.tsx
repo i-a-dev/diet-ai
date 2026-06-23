@@ -26,6 +26,7 @@ import { ActivitySubSection } from "../ActivitySubSection.tsx";
 import { ExerciseChip } from "../ExerciseChip.tsx";
 import type { MealItemInput } from "../AddFoodModal.tsx";
 import { AddFoodModal } from "../AddFoodModal.tsx";
+import { BottomSheet } from "../BottomSheet.tsx";
 import { type ExerciseInput, ExerciseRegisterSheet } from "../ExerciseRegisterSheet.tsx";
 import { MealSection } from "../MealSection.tsx";
 import { SecIcon } from "../SecIcon.tsx";
@@ -151,6 +152,7 @@ export function RecordScreen() {
   const [steps, setSteps] = useState({ count: 0, burnedCalories: 0 });
   const [exercises, setExercises] = useState<ExerciseEntrySummary[]>([]);
   const [exerciseNotice, setExerciseNotice] = useState<string | null>(null);
+  const [activeExerciseNote, setActiveExerciseNote] = useState<ExerciseEntrySummary | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -583,8 +585,13 @@ export function RecordScreen() {
                   <ExerciseChip
                     key={item.id}
                     text={`${item.name}　${item.amount}${item.unit === "min" ? "分" : "回"}　${item.burnedCalories}kcal${
-                      item.confidence === "high" ? "" : "　推定"
+                      item.source === "llm_estimate" ? "　AI推定 ⓘ" : ""
                     }`}
+                    onClick={
+                      item.source === "llm_estimate" && item.note
+                        ? () => setActiveExerciseNote(item)
+                        : undefined
+                    }
                   />
                 ))
               )}
@@ -639,9 +646,36 @@ export function RecordScreen() {
         isSaving={isSaving}
         recordDate={recordedOn ?? selectedDate}
         onClose={() => setExerciseSheetOpen(false)}
-        onOpenWeightRegister={() => setWeightSheetOpen(true)}
         onSave={handleExerciseSave}
       />
+
+      <BottomSheet
+        open={activeExerciseNote !== null}
+        title={activeExerciseNote ? `${activeExerciseNote.name}について` : "運動について"}
+        onClose={() => setActiveExerciseNote(null)}
+      >
+        {activeExerciseNote && (
+          <div
+            style={{
+              border: "1px solid #EEE",
+              borderRadius: 12,
+              padding: "14px 12px",
+              background: "#fff",
+              display: "flex",
+              flexDirection: "column",
+              gap: 10,
+            }}
+          >
+            <div style={{ fontSize: 14, color: "#374151", lineHeight: 1.6 }}>
+              {activeExerciseNote.note ?? "AI推定で計算しました"}
+            </div>
+            <div style={{ borderTop: "1px solid #F0F0F0" }} />
+            <div style={{ fontSize: 14, fontWeight: 700, color: "#111" }}>
+              消費カロリー {activeExerciseNote.burnedCalories}kcal
+            </div>
+          </div>
+        )}
+      </BottomSheet>
 
       {/* 変更: 食事追加UIを新しい検索フロー対応モーダルへ差し替え。 */}
       <AddFoodModal

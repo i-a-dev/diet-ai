@@ -115,6 +115,7 @@ interface SaveExerciseResponse {
 export interface ExercisePreviewResponse {
   preview: {
     exercise: string;
+    estimatedExercise: string;
     minutes: number;
     mets: number;
     confidence: "high" | "medium" | "low";

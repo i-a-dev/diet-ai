@@ -1,14 +1,18 @@
 interface ExerciseChipProps {
   text: string
+  onClick?: () => void
 }
 
 const CHIP_BG = '#EDF9F3'
 const CHIP_BORDER = '#BFE6D0'
 const CHIP_TEXT = '#2E7D5A'
 
-export function ExerciseChip({ text }: ExerciseChipProps) {
+export function ExerciseChip({ text, onClick }: ExerciseChipProps) {
   return (
-    <div
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={!onClick}
       style={{
         display: 'inline-flex',
         alignItems: 'center',
@@ -19,9 +23,11 @@ export function ExerciseChip({ text }: ExerciseChipProps) {
         fontSize: 10,
         color: CHIP_TEXT,
         whiteSpace: 'nowrap',
+        cursor: onClick ? 'pointer' : 'default',
+        opacity: onClick ? 1 : 0.95,
       }}
     >
       {text}
-    </div>
+    </button>
   )
 }

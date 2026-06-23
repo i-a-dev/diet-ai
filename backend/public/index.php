@@ -61,6 +61,25 @@ if ($requestMethod === 'OPTIONS') {
     json_response(['ok' => true]);
 }
 
+/**
+ * 変更: AI推定時に「何相当で計算したか」が分かるノート文言を生成する。
+ */
+function composeExerciseEstimateNote(string $source, string $inputExercise, string $estimatedExercise, string $rawNote): string
+{
+    $trimmedRawNote = trim($rawNote);
+    if ($source !== 'llm_estimate') {
+        return $trimmedRawNote;
+    }
+
+    if ($estimatedExercise !== '' && $estimatedExercise !== $inputExercise) {
+        $base = sprintf('AI推定: 「%s」相当で計算', $estimatedExercise);
+        return $trimmedRawNote !== '' ? $base . '。' . $trimmedRawNote : $base;
+    }
+
+    $base = 'AI推定で計算';
+    return $trimmedRawNote !== '' ? $base . '。' . $trimmedRawNote : $base;
+}
+
 // GET /api/chat/messages — チャット履歴を取得
 if ($requestMethod === 'GET' && $requestPath === '/api/chat/messages') {
     json_response(['messages' => $repository->getChatMessages()]);
@@ -159,18 +178,26 @@ if ($requestMethod === 'POST' && $requestPath === '/api/records/exercises') {
     }
 
     try {
+        $inputExerciseName = $exerciseName;
         $weightSummary = $weightRepository->getSummaryForDate($date);
         $weightContext = $resolveWeightContext($weightSummary);
 
         $estimated = $exerciseMetEstimateService->estimate(
-            $exerciseName,
+            $inputExerciseName,
             (int) round((float) $amount),
             $unit,
             $weightContext['weightKg']
         );
+        $estimateNote = composeExerciseEstimateNote(
+            $estimated['source'],
+            $inputExerciseName,
+            $estimated['exercise'],
+            $estimated['note']
+        );
         $entry = $activityRepository->addExercise(
             $date,
-            $estimated['exercise'],
+            // 変更: 表示・履歴の運動名はユーザー入力を優先して保存する。
+            $inputExerciseName,
             (int) round((float) $amount),
             $unit,
             $estimated['minutes'],
@@ -181,7 +208,7 @@ if ($requestMethod === 'POST' && $requestPath === '/api/records/exercises') {
             $estimated['isEstimated'],
             $weightContext['weightKg'],
             $weightContext['weightSource'],
-            $estimated['note'] !== '' ? $estimated['note'] : null
+            $estimateNote !== '' ? $estimateNote : null
         );
         $exercises = $activityRepository->getExercisesForDate($date);
     } catch (InvalidArgumentException $exception) {
@@ -222,13 +249,20 @@ if ($requestMethod === 'POST' && $requestPath === '/api/records/exercises/previe
 
     try {
         // 変更: 保存前に同じロジックで体重解決・METs推定を実行する。
+        $inputExerciseName = $exerciseName;
         $weightSummary = $weightRepository->getSummaryForDate($date);
         $weightContext = $resolveWeightContext($weightSummary);
         $estimated = $exerciseMetEstimateService->estimate(
-            $exerciseName,
+            $inputExerciseName,
             (int) round((float) $amount),
             $unit,
             $weightContext['weightKg']
+        );
+        $estimateNote = composeExerciseEstimateNote(
+            $estimated['source'],
+            $inputExerciseName,
+            $estimated['exercise'],
+            $estimated['note']
         );
     } catch (InvalidArgumentException $exception) {
         json_response(['message' => $exception->getMessage()], 422);
@@ -238,11 +272,12 @@ if ($requestMethod === 'POST' && $requestPath === '/api/records/exercises/previe
 
     json_response([
         'preview' => [
-            'exercise' => $estimated['exercise'],
+            'exercise' => $inputExerciseName,
+            'estimatedExercise' => $estimated['exercise'],
             'minutes' => $estimated['minutes'],
             'mets' => $estimated['mets'],
             'confidence' => $estimated['confidence'],
-            'note' => $estimated['note'],
+            'note' => $estimateNote,
             'source' => $estimated['source'],
             'isEstimated' => $estimated['isEstimated'],
             'caloriesBurned' => $estimated['calories'],
