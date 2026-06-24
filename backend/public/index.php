@@ -16,9 +16,11 @@ require_once __DIR__ . '/../src/MockRepository.php';
 require_once __DIR__ . '/../src/CalorieEstimateService.php';
 require_once __DIR__ . '/../src/FoodNormalizeService.php';
 require_once __DIR__ . '/../src/ExerciseMetEstimateService.php';
+require_once __DIR__ . '/../src/UserProfileRepository.php';
 
 $repository = new MockRepository();
 $weightRepository = new WeightRepository();
+$userProfileRepository = new UserProfileRepository();
 $mealEntryRepository = new MealEntryRepository();
 $activityRepository = new ActivityRepository();
 $calorieEstimateService = new CalorieEstimateService();
@@ -402,6 +404,39 @@ if ($requestMethod === 'POST' && $requestPath === '/api/foods/normalize') {
     json_response($result);
 }
 
+// GET /api/profile — 目標体重・身長などのプロフィール
+if ($requestMethod === 'GET' && $requestPath === '/api/profile') {
+    json_response(['profile' => $userProfileRepository->get()]);
+}
+
+// PATCH /api/profile — プロフィールの更新
+if ($requestMethod === 'PATCH' && $requestPath === '/api/profile') {
+    $body = json_decode(file_get_contents('php://input') ?: '{}', true);
+    $fields = [];
+
+    if (array_key_exists('targetWeightKg', $body)) {
+        $value = $body['targetWeightKg'];
+        $fields['targetWeightKg'] = is_numeric($value) ? round((float) $value, 1) : null;
+    }
+
+    if (array_key_exists('heightCm', $body)) {
+        $value = $body['heightCm'];
+        $fields['heightCm'] = is_numeric($value) ? round((float) $value, 1) : null;
+    }
+
+    if ($fields === []) {
+        json_response(['message' => 'No updatable fields provided'], 422);
+    }
+
+    try {
+        $profile = $userProfileRepository->update($fields);
+    } catch (InvalidArgumentException $exception) {
+        json_response(['message' => $exception->getMessage()], 422);
+    }
+
+    json_response(['profile' => $profile]);
+}
+
 // GET /api/reports/weekly — グラフ画面用の週次レポート（体重は DB から取得）
 if ($requestMethod === 'GET' && $requestPath === '/api/reports/weekly') {
     $endDate = trim((string) ($_GET['endDate'] ?? WeightRepository::todayDate()));
@@ -412,35 +447,55 @@ if ($requestMethod === 'GET' && $requestPath === '/api/reports/weekly') {
 
     $report = $repository->getWeeklyReport();
     $points = $weightRepository->getPointsEndingOn($endDate, 7);
+    $profile = $userProfileRepository->get();
+    $targetWeightKg = $profile['targetWeightKg'];
 
-    // DB に体重データがあれば、モックの weight 部分を上書き
-    if ($points !== []) {
-        $values = array_column($points, 'value');
-        $first = $values[0];
-        $last = $values[count($values) - 1];
-        $average = round(array_sum($values) / count($values), 1);
+    $values = array_values(array_filter(
+        array_map(static fn (array $point): ?float => $point['value'], $points),
+        static fn (?float $value): bool => $value !== null
+    ));
 
-        $timezone = new DateTimeZone('Asia/Tokyo');
-        $start = (new DateTimeImmutable($points[0]['date'], $timezone))->format('n/j');
-        $end = (new DateTimeImmutable($points[count($points) - 1]['date'], $timezone))->format('n/j');
-        $weekdays = ['日', '月', '火', '水', '木', '金', '土'];
-        $startWeekday = $weekdays[(int) (new DateTimeImmutable($points[0]['date'], $timezone))->format('w')];
-        $endWeekday = $weekdays[(int) (new DateTimeImmutable($points[count($points) - 1]['date'], $timezone))->format('w')];
+    $timezone = new DateTimeZone('Asia/Tokyo');
+    $end = new DateTimeImmutable($endDate, $timezone);
+    $start = $end->modify('-6 days');
+    $weekdays = ['日', '月', '火', '水', '木', '金', '土'];
+    $startWeekday = $weekdays[(int) $start->format('w')];
+    $endWeekday = $weekdays[(int) $end->format('w')];
 
-        $report['rangeLabel'] = sprintf('%s（%s）〜 %s（%s）', $start, $startWeekday, $end, $endWeekday);
-        $report['weight'] = [
-            'points' => array_map(
-                static fn (array $point): array => [
-                    'label' => $point['label'],
-                    'value' => $point['value'],
-                ],
-                $points
-            ),
-            'weeklyAverage' => $average,
-            'weeklyDiff' => round($last - $first, 1),
-            'targetDiff' => round($last - 57.0, 1),
-        ];
-    }
+    $report['rangeLabel'] = sprintf(
+        '%s（%s）〜 %s（%s）',
+        $start->format('n/j'),
+        $startWeekday,
+        $end->format('n/j'),
+        $endWeekday
+    );
+
+    $periodMin = $values !== [] ? min($values) : null;
+    $chartBounds = $weightRepository->computeChartBounds($targetWeightKg, $periodMin);
+    $first = $values !== [] ? $values[0] : null;
+    $last = $values !== [] ? $values[count($values) - 1] : null;
+
+    $report['weight'] = [
+        'points' => array_map(
+            static fn (array $point): array => [
+                'label' => $point['label'],
+                'value' => $point['value'],
+            ],
+            $points
+        ),
+        'weeklyAverage' => $values !== []
+            ? round(array_sum($values) / count($values), 1)
+            : null,
+        'weeklyDiff' => ($first !== null && $last !== null)
+            ? round($last - $first, 1)
+            : null,
+        'targetWeightKg' => $targetWeightKg,
+        'targetDiff' => ($targetWeightKg !== null && $last !== null)
+            ? round($targetWeightKg - $last, 1)
+            : null,
+        'chartMin' => $chartBounds['min'],
+        'chartMax' => $chartBounds['max'],
+    ];
 
     json_response($report);
 }

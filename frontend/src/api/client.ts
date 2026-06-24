@@ -259,3 +259,48 @@ export function normalizeFoodInput(foodName: string) {
     body: JSON.stringify({ foodName }),
   });
 }
+
+export interface UserProfile {
+  targetWeightKg: number | null;
+  heightCm: number | null;
+  updatedAt: string | null;
+}
+
+export interface WeightChartPoint {
+  label: string;
+  value: number | null;
+}
+
+export interface WeeklyWeightReport {
+  points: WeightChartPoint[];
+  weeklyAverage: number | null;
+  weeklyDiff: number | null;
+  targetWeightKg: number | null;
+  targetDiff: number | null;
+  chartMin: number;
+  chartMax: number;
+}
+
+export interface WeeklyReportResponse {
+  rangeLabel: string;
+  weight: WeeklyWeightReport;
+}
+
+export function fetchWeeklyReport(endDate?: string) {
+  const query = endDate ? `?endDate=${encodeURIComponent(endDate)}` : "";
+  return request<WeeklyReportResponse>(`/reports/weekly${query}`);
+}
+
+export function fetchProfile() {
+  return request<{ profile: UserProfile }>("/profile");
+}
+
+export function updateProfile(fields: {
+  targetWeightKg?: number | null;
+  heightCm?: number | null;
+}) {
+  return request<{ profile: UserProfile }>("/profile", {
+    method: "PATCH",
+    body: JSON.stringify(fields),
+  });
+}

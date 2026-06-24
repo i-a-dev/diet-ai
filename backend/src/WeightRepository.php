@@ -102,10 +102,10 @@ final class WeightRepository
     }
 
     /**
-     * グラフ用に、終了日から遡った N 日分の体重データを配列で返す。
-     * 例: [{ label: "6/12", value: 62.7, date: "2026-06-12" }, ...]
+     * グラフ用に、終了日から遡った N 日分の枠を返す。
+     * 記録がない日は value を null にする（日付ラベルは常に N 日分）。
      *
-     * @return array<int, array{label: string, value: float, date: string}>
+     * @return array<int, array{label: string, value: float|null, date: string}>
      */
     public function getPointsEndingOn(string $endDate, int $days = 7): array
     {
@@ -136,18 +136,61 @@ final class WeightRepository
         for ($index = $days - 1; $index >= 0; $index--) {
             $date = $end->modify(sprintf('-%d days', $index))->format('Y-m-d');
 
-            if (!isset($byDate[$date])) {
-                continue;
-            }
-
             $points[] = [
                 'label' => self::formatShortLabel($date),
-                'value' => $byDate[$date],
+                'value' => $byDate[$date] ?? null,
                 'date' => $date,
             ];
         }
 
         return $points;
+    }
+
+    /**
+     * これまで記録した体重の最大値を返す（グラフ上限の計算用）。
+     */
+    public function getMaxRecordedWeight(): ?float
+    {
+        $value = $this->db->query('SELECT MAX(weight_kg) FROM weight_entries')->fetchColumn();
+
+        if (!is_numeric($value)) {
+            return null;
+        }
+
+        return round((float) $value, 1);
+    }
+
+    /**
+     * 体重グラフのY軸範囲を計算する。
+     * 下限: 目標体重 - 3kg 付近、上限: 記録最大値 + 5kg。
+     *
+     * @return array{min: float, max: float}
+     */
+    public function computeChartBounds(?float $targetWeightKg, ?float $fallbackMin = null): array
+    {
+        $maxRecorded = $this->getMaxRecordedWeight() ?? $targetWeightKg ?? 60.0;
+        $chartMax = round($maxRecorded + 5, 1);
+
+        if ($targetWeightKg !== null) {
+            $chartMin = round($targetWeightKg - 3, 1);
+        } elseif ($fallbackMin !== null) {
+            $chartMin = round($fallbackMin - 2, 1);
+        } else {
+            $chartMin = round($maxRecorded - 10, 1);
+        }
+
+        if ($chartMin >= $chartMax) {
+            $chartMin = round($chartMax - 10, 1);
+        }
+
+        if ($chartMin < 0) {
+            $chartMin = 0.0;
+        }
+
+        return [
+            'min' => $chartMin,
+            'max' => $chartMax,
+        ];
     }
 
     /**

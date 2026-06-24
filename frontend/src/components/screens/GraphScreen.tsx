@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   Calendar,
   ChevronLeft,
@@ -11,6 +11,10 @@ import {
 import { SecIcon } from "../SecIcon.tsx";
 import { TopNav } from "../TopNav.tsx";
 import { ORANGE } from "../../constants.ts";
+import {
+  fetchWeeklyReport,
+  type WeeklyWeightReport,
+} from "../../api/client.ts";
 
 const METRIC_TABS = ["体重", "食事", "運動", "歩数"] as const;
 const PERIOD_TABS = ["週", "月", "3ヶ月", "半年", "1年", "3年"] as const;
@@ -19,46 +23,138 @@ const STEP_GREEN = "#2EAA72";
 const STEP_GREEN_BG = "#D6F5E8";
 const STEP_GREEN_LIGHT = "#EDF9F3";
 
-const days = ["4/18", "4/19", "4/20", "4/21", "4/22", "4/23", "4/24"];
 const kcalH = [44, 60, 38, 52, 36, 66, 54];
 const exerciseH = [28, 42, 20, 36, 24, 48, 32];
 const stepH = [48, 64, 34, 56, 42, 68, 52];
 const BAR_WIDTH = 13;
 const CHART_HEIGHT = 130;
 const CHART_PLOT_WIDTH = 310;
-const Y_AXIS_WIDTH = 40;
+const Y_AXIS_WIDTH = 25;
 const CHART_BOTTOM_Y = CHART_HEIGHT;
 const KCAL_AXIS_TICKS = [0, 43, 86, CHART_HEIGHT] as const;
 const STEP_AXIS_TICKS = [0, 43, 86, CHART_HEIGHT] as const;
-const WEIGHT_AXIS_LABELS = ["64", "63", "62"] as const;
-const WEIGHT_AXIS_TICKS = [0, 65, CHART_HEIGHT] as const;
-const WEIGHT_MIN = 62;
-const WEIGHT_MAX = 64;
-const weightData = [62.85, 62.75, 62.35, 62.55, 62.65, 62.8, 62.9];
+
+const CHART_GRID_COLOR = "#ECECEC";
+
+function buildChartGridLines(dayCount: number, horizontalTicks: number[]) {
+  const columnWidth = CHART_PLOT_WIDTH / dayCount;
+  const verticalLines = Array.from(
+    { length: dayCount + 1 },
+    (_, index) => index * columnWidth,
+  );
+
+  return { horizontalTicks, verticalLines };
+}
+
+const mockDays = ["4/18", "4/19", "4/20", "4/21", "4/22", "4/23", "4/24"];
+const xsBar = [22.5, 65.5, 108.5, 151.5, 194.5, 237.5, 280.5];
 
 function valueToY(value: number, max: number) {
   return CHART_HEIGHT - (value / max) * CHART_HEIGHT;
 }
 
-function weightToY(weight: number) {
-  return ((WEIGHT_MAX - weight) / (WEIGHT_MAX - WEIGHT_MIN)) * CHART_HEIGHT;
+function weightToY(weight: number, min: number, max: number) {
+  if (max <= min) {
+    return CHART_HEIGHT / 2;
+  }
+  return ((max - weight) / (max - min)) * CHART_HEIGHT;
 }
 
-const xsBar = [22.5, 65.5, 108.5, 151.5, 194.5, 237.5, 280.5];
-const xsLine = [44, 87, 130, 173, 216, 259, 302];
+function distributeLineX(count: number) {
+  if (count <= 0) {
+    return [];
+  }
 
-const plusBtn = (
-  <span
-    style={{ color: ORANGE, fontSize: 26, lineHeight: 1, cursor: "pointer" }}
-  >
-    +
-  </span>
-);
+  const columnWidth = CHART_PLOT_WIDTH / count;
+  return Array.from(
+    { length: count },
+    (_, index) => columnWidth * index + columnWidth / 2,
+  );
+}
+
+function formatAxisWeight(value: number) {
+  return Number.isInteger(value) ? String(value) : value.toFixed(1);
+}
+
+function buildWeightAxis(chartMin: number, chartMax: number) {
+  const mid = Math.round(((chartMin + chartMax) / 2) * 10) / 10;
+  return {
+    labels: [
+      formatAxisWeight(chartMax),
+      formatAxisWeight(mid),
+      formatAxisWeight(chartMin),
+    ],
+    ticks: [0, CHART_HEIGHT / 2, CHART_HEIGHT],
+  };
+}
+
+function buildWeightLineSegments(
+  xs: number[],
+  points: { value: number | null }[],
+  chartMin: number,
+  chartMax: number,
+) {
+  const segments: string[] = [];
+  let current: string[] = [];
+
+  points.forEach((point, index) => {
+    if (point.value === null) {
+      if (current.length > 0) {
+        segments.push(current.join(" "));
+        current = [];
+      }
+      return;
+    }
+
+    const y = weightToY(point.value, chartMin, chartMax);
+    current.push(`${xs[index]},${y}`);
+  });
+
+  if (current.length > 0) {
+    segments.push(current.join(" "));
+  }
+
+  return segments;
+}
+
+function formatSignedKg(value: number | null) {
+  if (value === null) {
+    return "--";
+  }
+  const sign = value > 0 ? "+" : "";
+  return `${sign}${value.toFixed(1)} kg`;
+}
 
 export function GraphScreen() {
   const [metricTab, setMetricTab] = useState(0);
   const [periodTab, setPeriodTab] = useState(0);
+  const [rangeLabel, setRangeLabel] = useState("読み込み中...");
+  const [weightReport, setWeightReport] = useState<WeeklyWeightReport | null>(
+    null,
+  );
   const accent = metricTab >= 2 ? STEP_GREEN : ORANGE;
+
+  useEffect(() => {
+    let cancelled = false;
+
+    fetchWeeklyReport()
+      .then((report) => {
+        if (cancelled) {
+          return;
+        }
+        setRangeLabel(report.rangeLabel);
+        setWeightReport(report.weight);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setRangeLabel("データを取得できませんでした");
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [periodTab]);
 
   return (
     <div
@@ -164,9 +260,7 @@ export function GraphScreen() {
           }}
         >
           <ChevronLeft size={20} color="#C0C0C0" />
-          <span style={{ fontSize: 13, color: "#666" }}>
-            4/18（木）〜 4/24（水）
-          </span>
+          <span style={{ fontSize: 13, color: "#666" }}>{rangeLabel}</span>
           <ChevronRight size={20} color="#C0C0C0" />
         </div>
 
@@ -180,7 +274,7 @@ export function GraphScreen() {
             minHeight: 0,
           }}
         >
-          {metricTab === 0 && <WeightGraphCard />}
+          {metricTab === 0 && <WeightGraphCard report={weightReport} />}
           {metricTab === 1 && <MealGraphCard />}
           {metricTab === 2 && <ExerciseGraphCard />}
           {metricTab === 3 && <StepsGraphCard />}
@@ -214,23 +308,19 @@ function CardHeader({ icon, label }: { icon: ReactNode; label: string }) {
     <div
       style={{
         flexShrink: 0,
-        // , marginBottom: 15
       }}
     >
       <div
         style={{
           display: "flex",
           alignItems: "center",
-          justifyContent: "space-between",
+          gap: 8,
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          {icon}
-          <span style={{ fontSize: 15, fontWeight: 600, color: "#222" }}>
-            {label}
-          </span>
-        </div>
-        {plusBtn}
+        {icon}
+        <span style={{ fontSize: 15, fontWeight: 600, color: "#222" }}>
+          {label}
+        </span>
       </div>
       <div style={{ height: 20 }} aria-hidden="true" />
     </div>
@@ -277,14 +367,51 @@ function StatBoxes({
   );
 }
 
+function ChartGrid({
+  horizontalTicks,
+  verticalLines,
+}: {
+  horizontalTicks: number[];
+  verticalLines: number[];
+}) {
+  return (
+    <>
+      {horizontalTicks.map((y) => (
+        <line
+          key={`h-${y}`}
+          x1="0"
+          y1={y}
+          x2={CHART_PLOT_WIDTH}
+          y2={y}
+          stroke={CHART_GRID_COLOR}
+          strokeWidth="1"
+        />
+      ))}
+      {verticalLines.map((x) => (
+        <line
+          key={`v-${x}`}
+          x1={x}
+          y1="0"
+          x2={x}
+          y2={CHART_HEIGHT}
+          stroke={CHART_GRID_COLOR}
+          strokeWidth="1"
+        />
+      ))}
+    </>
+  );
+}
+
 function GraphChart({
   children,
+  days,
   yAxisLabels,
   yAxisTicks,
   goalOverlay,
   plotMarkers,
 }: {
   children: ReactNode;
+  days: string[];
   yAxisLabels?: string[];
   yAxisTicks?: number[];
   goalOverlay?: { label: string; color: string };
@@ -298,14 +425,13 @@ function GraphChart({
     <div
       style={{
         display: "flex",
-        justifyContent: "space-between",
-        padding: `2px 4px 0 ${showYAxis ? `${Y_AXIS_WIDTH}px` : "4px"}`,
-        flexShrink: 0,
+        flex: 1,
+        minWidth: 0,
       }}
     >
-      {days.map((day) => (
+      {days.map((day, index) => (
         <span
-          key={day}
+          key={`${day}-${index}`}
           style={{
             fontSize: 11,
             color: "#888",
@@ -369,9 +495,9 @@ function GraphChart({
         <div
           style={{
             width: Y_AXIS_WIDTH,
-            height: "100%",
             position: "relative",
             flexShrink: 0,
+            alignSelf: "stretch",
           }}
         >
           {yAxisLabels!.map((label, index) => (
@@ -380,12 +506,14 @@ function GraphChart({
               style={{
                 position: "absolute",
                 left: 0,
+                right: 0,
                 top: `${(yAxisTicks![index] / CHART_HEIGHT) * 100}%`,
                 transform: "translateY(-50%)",
                 fontSize: 11,
                 color: "#7A7A7A",
                 fontWeight: 500,
                 lineHeight: 1,
+                textAlign: "right",
               }}
             >
               {label}
@@ -446,12 +574,99 @@ function GraphChart({
           ))}
         </div>
       </div>
-      {dateRow}
+      <div
+        style={{
+          display: "flex",
+          gap: 6,
+          flexShrink: 0,
+          paddingTop: 2,
+        }}
+      >
+        <div
+          style={{ width: Y_AXIS_WIDTH, flexShrink: 0 }}
+          aria-hidden="true"
+        />
+        {dateRow}
+      </div>
     </div>
   );
 }
 
-function WeightGraphCard() {
+function WeightGraphCard({ report }: { report: WeeklyWeightReport | null }) {
+  const chart = useMemo(() => {
+    if (!report || report.points.length === 0) {
+      return null;
+    }
+
+    const { chartMin, chartMax } = report;
+    const axis = buildWeightAxis(chartMin, chartMax);
+    const xs = distributeLineX(report.points.length);
+    const lineSegments = buildWeightLineSegments(
+      xs,
+      report.points,
+      chartMin,
+      chartMax,
+    );
+    const plotMarkers = report.points.flatMap((point, index) => {
+      if (point.value === null) {
+        return [];
+      }
+
+      return [
+        {
+          x: xs[index],
+          y: weightToY(point.value, chartMin, chartMax),
+          color: ORANGE,
+        },
+      ];
+    });
+    const goalY =
+      report.targetWeightKg === null
+        ? null
+        : weightToY(report.targetWeightKg, chartMin, chartMax);
+    const grid = buildChartGridLines(report.points.length, axis.ticks);
+
+    return {
+      axis,
+      xs,
+      lineSegments,
+      plotMarkers,
+      goalY,
+      grid,
+      days: report.points.map((point) => point.label),
+      hasValues: report.points.some((point) => point.value !== null),
+    };
+  }, [report]);
+
+  if (!report || !chart) {
+    return (
+      <CardShell>
+        <CardHeader
+          icon={
+            <SecIcon bg="#FDE8C8" color={ORANGE} size={26}>
+              <Weight size={14} />
+            </SecIcon>
+          }
+          label="体重"
+        />
+        <div
+          style={{
+            flex: 1,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            color: "#AAA",
+            fontSize: 13,
+          }}
+        >
+          体重データがありません
+        </div>
+      </CardShell>
+    );
+  }
+
+  const gridTicks = chart.axis.ticks;
+
   return (
     <CardShell>
       <CardHeader
@@ -464,45 +679,59 @@ function WeightGraphCard() {
       />
 
       <GraphChart
-        yAxisLabels={[...WEIGHT_AXIS_LABELS]}
-        yAxisTicks={[...WEIGHT_AXIS_TICKS]}
-        plotMarkers={xsLine.map((x, index) => ({
-          x,
-          y: weightToY(weightData[index]),
-          color: ORANGE,
-        }))}
+        days={chart.days}
+        yAxisLabels={chart.axis.labels}
+        yAxisTicks={gridTicks}
+        goalOverlay={
+          report.targetWeightKg === null
+            ? undefined
+            : {
+                label: `${report.targetWeightKg.toFixed(1)}kg`,
+                color: ORANGE,
+              }
+        }
+        plotMarkers={chart.plotMarkers}
       >
-        {WEIGHT_AXIS_TICKS.map((y) => (
-          <line
-            key={y}
-            x1="0"
-            y1={y}
-            x2={CHART_PLOT_WIDTH}
-            y2={y}
-            stroke="#F0F0F0"
-            strokeWidth="1"
+        <ChartGrid
+          horizontalTicks={chart.grid.horizontalTicks}
+          verticalLines={chart.grid.verticalLines}
+        />
+        {chart.goalY !== null && <GoalLineSvg y={chart.goalY} color={ORANGE} />}
+        {chart.lineSegments.map((segment, index) => (
+          <polyline
+            key={index}
+            points={segment}
+            fill="none"
+            stroke={ORANGE}
+            strokeWidth="2.5"
+            strokeLinejoin="round"
+            strokeLinecap="round"
+            vectorEffect="non-scaling-stroke"
           />
         ))}
-        <polyline
-          points={xsLine
-            .map((x, i) => `${x},${weightToY(weightData[i])}`)
-            .join(" ")}
-          fill="none"
-          stroke={ORANGE}
-          strokeWidth="2.5"
-          strokeLinejoin="round"
-          strokeLinecap="round"
-          vectorEffect="non-scaling-stroke"
-        />
       </GraphChart>
 
       <StatBoxes
         accent={ORANGE}
         boxBg="#FFF5EB"
         items={[
-          { value: "62.7 kg", label: "平均" },
-          { value: "-0.8 kg", label: "変化量", highlight: true },
-          { value: "-5.4 kg", label: "目標まで", highlight: true },
+          {
+            value:
+              report.weeklyAverage === null
+                ? "--"
+                : `${report.weeklyAverage.toFixed(1)} kg`,
+            label: "平均",
+          },
+          {
+            value: formatSignedKg(report.weeklyDiff),
+            label: "変化量",
+            highlight: true,
+          },
+          {
+            value: formatSignedKg(report.targetDiff),
+            label: "目標まで",
+            highlight: true,
+          },
         ]}
       />
     </CardShell>
@@ -559,35 +788,30 @@ function BarGraphCard({
   goalLine?: { value: number; max: number; label: string };
 }) {
   const goalY = goalLine ? valueToY(goalLine.value, goalLine.max) : undefined;
+  const grid = buildChartGridLines(barHeights.length, yAxisTicks);
 
   return (
     <CardShell>
       <CardHeader icon={icon} label={label} />
 
       <GraphChart
+        days={mockDays}
         yAxisLabels={yAxisLabels}
         yAxisTicks={yAxisTicks}
         goalOverlay={
           goalLine ? { label: goalLine.label, color: accent } : undefined
         }
       >
-        {yAxisTicks.map((y) => (
-          <line
-            key={y}
-            x1="0"
-            y1={y}
-            x2={CHART_PLOT_WIDTH}
-            y2={y}
-            stroke="#F5F5F5"
-            strokeWidth="1"
-          />
-        ))}
+        <ChartGrid
+          horizontalTicks={grid.horizontalTicks}
+          verticalLines={grid.verticalLines}
+        />
         {goalLine && goalY !== undefined && (
           <GoalLineSvg y={goalY} color={accent} />
         )}
         {barHeights.map((height, index) => (
           <rect
-            key={days[index]}
+            key={mockDays[index]}
             x={xsBar[index]}
             y={CHART_BOTTOM_Y - height * 1.4}
             width={BAR_WIDTH}
