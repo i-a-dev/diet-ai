@@ -213,20 +213,26 @@ function CardHeader({ icon, label }: { icon: ReactNode; label: string }) {
   return (
     <div
       style={{
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        marginBottom: 6,
         flexShrink: 0,
+        // , marginBottom: 15
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        {icon}
-        <span style={{ fontSize: 15, fontWeight: 600, color: "#222" }}>
-          {label}
-        </span>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {icon}
+          <span style={{ fontSize: 15, fontWeight: 600, color: "#222" }}>
+            {label}
+          </span>
+        </div>
+        {plusBtn}
       </div>
-      {plusBtn}
+      <div style={{ height: 20 }} aria-hidden="true" />
     </div>
   );
 }
@@ -456,26 +462,6 @@ function WeightGraphCard() {
         }
         label="体重"
       />
-      <GraphMetricHeader
-        subline={
-          <div
-            style={{
-              fontSize: 12,
-              color: ORANGE,
-              marginTop: 2,
-              marginBottom: 15,
-              lineHeight: 1,
-            }}
-          >
-            前日比 -0.2kg
-          </div>
-        }
-      >
-        <span style={{ fontSize: 28, fontWeight: 700, color: "#111" }}>
-          62.4
-        </span>
-        <span style={{ fontSize: 15, color: "#888" }}> kg</span>
-      </GraphMetricHeader>
 
       <GraphChart
         yAxisLabels={[...WEIGHT_AXIS_LABELS]}
@@ -551,46 +537,9 @@ function GoalLineSvg({ y, color }: { y: number; color: string }) {
   );
 }
 
-function GraphMetricHeader({
-  children,
-  subline,
-}: {
-  children: ReactNode;
-  subline?: ReactNode;
-}) {
-  return (
-    <div style={{ marginBottom: 15, flexShrink: 0 }}>
-      <div>{children}</div>
-      {subline}
-    </div>
-  );
-}
-
-function GraphAverageHeader({
-  average,
-  unit,
-  accent,
-}: {
-  average: string;
-  unit: string;
-  accent: string;
-}) {
-  return (
-    <GraphMetricHeader>
-      <span style={{ fontSize: 13, color: "#888" }}>平均 </span>
-      <span style={{ fontSize: 28, fontWeight: 700, color: accent }}>
-        {average}
-      </span>
-      <span style={{ fontSize: 15, color: "#888" }}>{unit}</span>
-    </GraphMetricHeader>
-  );
-}
-
 function BarGraphCard({
   icon,
   label,
-  average,
-  unit,
   barHeights,
   statItems,
   yAxisLabels,
@@ -601,8 +550,6 @@ function BarGraphCard({
 }: {
   icon: ReactNode;
   label: string;
-  average: string;
-  unit: string;
   barHeights: number[];
   statItems: { value: string; label: string; highlight?: boolean }[];
   yAxisLabels: string[];
@@ -616,7 +563,6 @@ function BarGraphCard({
   return (
     <CardShell>
       <CardHeader icon={icon} label={label} />
-      <GraphAverageHeader average={average} unit={unit} accent={accent} />
 
       <GraphChart
         yAxisLabels={yAxisLabels}
@@ -666,8 +612,6 @@ function MealGraphCard() {
         </SecIcon>
       }
       label="食事"
-      average="1,582"
-      unit=" kcal"
       goalLine={{ value: 1800, max: 3000, label: "1,800kcal" }}
       barHeights={kcalH}
       yAxisLabels={["3000", "2000", "1000", "0"]}
@@ -690,8 +634,6 @@ function ExerciseGraphCard() {
         </SecIcon>
       }
       label="運動"
-      average="180"
-      unit=" kcal"
       barHeights={exerciseH}
       yAxisLabels={["3000", "2000", "1000", "0"]}
       yAxisTicks={[...KCAL_AXIS_TICKS]}
@@ -715,8 +657,6 @@ function StepsGraphCard() {
         </SecIcon>
       }
       label="歩数"
-      average="6,240"
-      unit=" 歩"
       barHeights={stepH}
       yAxisLabels={["12000", "8000", "4000", "0"]}
       yAxisTicks={[...STEP_AXIS_TICKS]}
