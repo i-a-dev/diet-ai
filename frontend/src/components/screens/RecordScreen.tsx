@@ -578,23 +578,19 @@ export function RecordScreen() {
                 alignItems: "center",
               }}
             >
-              {exercises.length === 0 ? (
-                <span style={{ fontSize: 13, color: "#A3A3A3" }}>まだ運動記録がありません</span>
-              ) : (
-                exercises.map((item) => (
-                  <ExerciseChip
-                    key={item.id}
-                    text={`${item.name}　${item.amount}${item.unit === "min" ? "分" : "回"}　${item.burnedCalories}kcal${
-                      item.source === "llm_estimate" ? "　AI推定 ⓘ" : ""
-                    }`}
-                    onClick={
-                      item.source === "llm_estimate" && item.note
-                        ? () => setActiveExerciseNote(item)
-                        : undefined
-                    }
-                  />
-                ))
-              )}
+              {exercises.map((item) => (
+                <ExerciseChip
+                  key={item.id}
+                  text={`${item.name}　${item.amount}${item.unit === "min" ? "分" : "回"}　${item.burnedCalories}kcal${
+                    item.source === "llm_estimate" ? "　AI推定 ⓘ" : ""
+                  }`}
+                  onClick={
+                    item.source === "llm_estimate" && item.note
+                      ? () => setActiveExerciseNote(item)
+                      : undefined
+                  }
+                />
+              ))}
             </div>
             {hasLowConfidenceExercise && (
               <div style={{ marginTop: 8, fontSize: 12, color: "#9CA3AF" }}>
