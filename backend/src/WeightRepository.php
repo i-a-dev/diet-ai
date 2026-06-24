@@ -161,30 +161,60 @@ final class WeightRepository
     }
 
     /**
+     * これまで記録した体重の最小値を返す（グラフ下限の計算用）。
+     */
+    public function getMinRecordedWeight(): ?float
+    {
+        $value = $this->db->query('SELECT MIN(weight_kg) FROM weight_entries')->fetchColumn();
+
+        if (!is_numeric($value)) {
+            return null;
+        }
+
+        return round((float) $value, 1);
+    }
+
+    /**
      * 体重グラフのY軸範囲を計算する。
-     * 下限: 目標体重 - 3kg 付近、上限: 記録最大値 + 5kg。
+     * 上限: 最高記録とグラフ上端の間が全体の約1/10。
+     * 下限: 1/10 の式で求めた値を floor した整数（最低記録が目標より下なら最低記録を基準）。
      *
-     * @return array{min: float, max: float}
+     * @return array{min: int, max: int}
      */
     public function computeChartBounds(?float $targetWeightKg, ?float $fallbackMin = null): array
     {
         $maxRecorded = $this->getMaxRecordedWeight() ?? $targetWeightKg ?? 60.0;
-        $chartMax = round($maxRecorded + 5, 1);
+        $minRecorded = $this->getMinRecordedWeight() ?? $fallbackMin ?? $maxRecorded;
 
-        if ($targetWeightKg !== null) {
-            $chartMin = round($targetWeightKg - 3, 1);
-        } elseif ($fallbackMin !== null) {
-            $chartMin = round($fallbackMin - 2, 1);
+        if ($targetWeightKg !== null && $minRecorded < $targetWeightKg) {
+            $bottomReference = $minRecorded;
+        } elseif ($targetWeightKg !== null) {
+            $bottomReference = $targetWeightKg;
         } else {
-            $chartMin = round($maxRecorded - 10, 1);
+            $bottomReference = $minRecorded;
+        }
+
+        // (max - maxRecorded) / (max - min) = 1/10 かつ (bottomRef - min) / (max - min) = 1/10
+        // => max = (9 * maxRecorded - bottomRef) / 8, min = (10 * bottomRef - max) / 9
+        $chartMax = (9 * $maxRecorded - $bottomReference) / 8;
+        $chartMin = (10 * $bottomReference - $chartMax) / 9;
+        $chartMax = (int) round($chartMax);
+        $chartMin = (int) floor($chartMin);
+
+        if ($chartMax <= (int) floor($maxRecorded)) {
+            $chartMax = (int) ceil($maxRecorded);
+        }
+
+        if ($chartMin >= $bottomReference) {
+            $chartMin = (int) floor($bottomReference) - 1;
         }
 
         if ($chartMin >= $chartMax) {
-            $chartMin = round($chartMax - 10, 1);
+            $chartMin = $chartMax - 10;
         }
 
         if ($chartMin < 0) {
-            $chartMin = 0.0;
+            $chartMin = 0;
         }
 
         return [

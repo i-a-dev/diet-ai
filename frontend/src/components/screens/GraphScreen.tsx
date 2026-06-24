@@ -29,12 +29,14 @@ const stepH = [48, 64, 34, 56, 42, 68, 52];
 const BAR_WIDTH = 13;
 const CHART_HEIGHT = 130;
 const CHART_PLOT_WIDTH = 310;
-const Y_AXIS_WIDTH = 25;
+const Y_AXIS_WIDTH = 30;
+const CHART_AXIS_GAP = 2;
 const CHART_BOTTOM_Y = CHART_HEIGHT;
 const KCAL_AXIS_TICKS = [0, 43, 86, CHART_HEIGHT] as const;
 const STEP_AXIS_TICKS = [0, 43, 86, CHART_HEIGHT] as const;
 
 const CHART_GRID_COLOR = "#ECECEC";
+const WEIGHT_AXIS_STEP_THRESHOLD_KG = 15;
 
 function buildChartGridLines(dayCount: number, horizontalTicks: number[]) {
   const columnWidth = CHART_PLOT_WIDTH / dayCount;
@@ -72,19 +74,34 @@ function distributeLineX(count: number) {
   );
 }
 
-function formatAxisWeight(value: number) {
-  return Number.isInteger(value) ? String(value) : value.toFixed(1);
-}
-
 function buildWeightAxis(chartMin: number, chartMax: number) {
-  const mid = Math.round(((chartMin + chartMax) / 2) * 10) / 10;
+  const min = Math.floor(chartMin);
+  let max = Math.round(chartMax);
+  if (max <= min) {
+    max = min + 10;
+  }
+
+  const range = max - min;
+  const step = range >= WEIGHT_AXIS_STEP_THRESHOLD_KG ? 2 : 1;
+  const integerWeights: number[] = [];
+
+  for (let weight = max; weight >= min; weight -= step) {
+    integerWeights.push(weight);
+  }
+
+  const lastWeight = integerWeights[integerWeights.length - 1];
+  if (lastWeight !== min) {
+    integerWeights.push(min);
+  }
+
+  const ticks = integerWeights.map((weight) => weightToY(weight, min, max));
+  const labels = integerWeights.map((weight) => weight.toFixed(1));
+
   return {
-    labels: [
-      formatAxisWeight(chartMax),
-      formatAxisWeight(mid),
-      formatAxisWeight(chartMin),
-    ],
-    ticks: [0, CHART_HEIGHT / 2, CHART_HEIGHT],
+    labels,
+    ticks,
+    chartMin: min,
+    chartMax: max,
   };
 }
 
@@ -291,7 +308,7 @@ function CardShell({ children }: { children: ReactNode }) {
         flex: 1,
         background: "#fff",
         borderRadius: 16,
-        padding: "10px 12px",
+        padding: "10px 8px",
         display: "flex",
         flexDirection: "column",
         minHeight: 0,
@@ -414,7 +431,7 @@ function GraphChart({
   days: string[];
   yAxisLabels?: string[];
   yAxisTicks?: number[];
-  goalOverlay?: { label: string; color: string };
+  goalOverlay?: { label: string; color: string; y: number };
   plotMarkers?: { x: number; y: number; color: string }[];
 }) {
   const showYAxis = Boolean(
@@ -489,7 +506,7 @@ function GraphChart({
           minHeight: 0,
           width: "100%",
           display: "flex",
-          gap: 6,
+          gap: CHART_AXIS_GAP,
         }}
       >
         <div
@@ -505,11 +522,10 @@ function GraphChart({
               key={`${label}-${index}`}
               style={{
                 position: "absolute",
-                left: 0,
-                right: 0,
+                paddingLeft: 2,
                 top: `${(yAxisTicks![index] / CHART_HEIGHT) * 100}%`,
                 transform: "translateY(-50%)",
-                fontSize: 11,
+                fontSize: yAxisLabels!.length > 5 ? 9 : 11,
                 color: "#7A7A7A",
                 fontWeight: 500,
                 lineHeight: 1,
@@ -525,8 +541,9 @@ function GraphChart({
             <div
               style={{
                 position: "absolute",
-                top: 4,
                 right: 4,
+                top: `${(goalOverlay.y / CHART_HEIGHT) * 100}%`,
+                transform: "translateY(3px)",
                 textAlign: "right",
                 zIndex: 1,
                 pointerEvents: "none",
@@ -577,7 +594,7 @@ function GraphChart({
       <div
         style={{
           display: "flex",
-          gap: 6,
+          gap: CHART_AXIS_GAP,
           flexShrink: 0,
           paddingTop: 2,
         }}
@@ -600,12 +617,14 @@ function WeightGraphCard({ report }: { report: WeeklyWeightReport | null }) {
 
     const { chartMin, chartMax } = report;
     const axis = buildWeightAxis(chartMin, chartMax);
+    const plotMin = axis.chartMin;
+    const plotMax = axis.chartMax;
     const xs = distributeLineX(report.points.length);
     const lineSegments = buildWeightLineSegments(
       xs,
       report.points,
-      chartMin,
-      chartMax,
+      plotMin,
+      plotMax,
     );
     const plotMarkers = report.points.flatMap((point, index) => {
       if (point.value === null) {
@@ -615,7 +634,7 @@ function WeightGraphCard({ report }: { report: WeeklyWeightReport | null }) {
       return [
         {
           x: xs[index],
-          y: weightToY(point.value, chartMin, chartMax),
+          y: weightToY(point.value, plotMin, plotMax),
           color: ORANGE,
         },
       ];
@@ -623,7 +642,7 @@ function WeightGraphCard({ report }: { report: WeeklyWeightReport | null }) {
     const goalY =
       report.targetWeightKg === null
         ? null
-        : weightToY(report.targetWeightKg, chartMin, chartMax);
+        : weightToY(report.targetWeightKg, plotMin, plotMax);
     const grid = buildChartGridLines(report.points.length, axis.ticks);
 
     return {
@@ -683,11 +702,12 @@ function WeightGraphCard({ report }: { report: WeeklyWeightReport | null }) {
         yAxisLabels={chart.axis.labels}
         yAxisTicks={gridTicks}
         goalOverlay={
-          report.targetWeightKg === null
+          report.targetWeightKg === null || chart.goalY === null
             ? undefined
             : {
                 label: `${report.targetWeightKg.toFixed(1)}kg`,
                 color: ORANGE,
+                y: chart.goalY,
               }
         }
         plotMarkers={chart.plotMarkers}
@@ -739,30 +759,17 @@ function WeightGraphCard({ report }: { report: WeeklyWeightReport | null }) {
 }
 
 function GoalLineSvg({ y, color }: { y: number; color: string }) {
-  const connectorX = CHART_PLOT_WIDTH - 14;
-
   return (
-    <>
-      <line
-        x1="0"
-        y1={y}
-        x2={CHART_PLOT_WIDTH}
-        y2={y}
-        stroke={color}
-        strokeWidth="1"
-        strokeDasharray="4 3"
-        opacity="0.5"
-      />
-      <line
-        x1={connectorX}
-        y1={y}
-        x2={connectorX}
-        y2={24}
-        stroke={color}
-        strokeWidth="1"
-        opacity="0.7"
-      />
-    </>
+    <line
+      x1="0"
+      y1={y}
+      x2={CHART_PLOT_WIDTH}
+      y2={y}
+      stroke={color}
+      strokeWidth="1"
+      strokeDasharray="4 3"
+      opacity="0.5"
+    />
   );
 }
 
@@ -799,7 +806,9 @@ function BarGraphCard({
         yAxisLabels={yAxisLabels}
         yAxisTicks={yAxisTicks}
         goalOverlay={
-          goalLine ? { label: goalLine.label, color: accent } : undefined
+          goalLine && goalY !== undefined
+            ? { label: goalLine.label, color: accent, y: goalY }
+            : undefined
         }
       >
         <ChartGrid
