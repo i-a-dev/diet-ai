@@ -1,8 +1,12 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   Calendar,
-  ChevronLeft,
-  ChevronRight,
   Footprints,
   PersonStanding,
   UtensilsCrossed,
@@ -12,8 +16,8 @@ import { SecIcon } from "../SecIcon.tsx";
 import { TopNav } from "../TopNav.tsx";
 import { ORANGE } from "../../constants.ts";
 import {
-  fetchWeeklyReport,
-  type WeeklyWeightReport,
+  fetchWeightTimeline,
+  type WeightTimelinePoint,
 } from "../../api/client.ts";
 
 const METRIC_TABS = ["体重", "食事", "運動", "歩数"] as const;
@@ -37,6 +41,9 @@ const STEP_AXIS_TICKS = [0, 43, 86, CHART_HEIGHT] as const;
 
 const CHART_GRID_COLOR = "#ECECEC";
 const WEIGHT_AXIS_STEP_THRESHOLD_KG = 15;
+const TIMELINE_SLOT_WIDTH = 44;
+const TIMELINE_FIXED_START_DATE = "2026-01-01";
+const PERIOD_DAY_WINDOWS = [7, 30, 90, 180, 365, 1095] as const;
 
 function buildChartGridLines(dayCount: number, horizontalTicks: number[]) {
   const columnWidth = CHART_PLOT_WIDTH / dayCount;
@@ -60,18 +67,6 @@ function weightToY(weight: number, min: number, max: number) {
     return CHART_HEIGHT / 2;
   }
   return ((max - weight) / (max - min)) * CHART_HEIGHT;
-}
-
-function distributeLineX(count: number) {
-  if (count <= 0) {
-    return [];
-  }
-
-  const columnWidth = CHART_PLOT_WIDTH / count;
-  return Array.from(
-    { length: count },
-    (_, index) => columnWidth * index + columnWidth / 2,
-  );
 }
 
 function buildWeightAxis(chartMin: number, chartMax: number) {
@@ -142,36 +137,54 @@ function formatSignedKg(value: number | null) {
   return `${sign}${value.toFixed(1)} kg`;
 }
 
+function roundToOneDecimal(value: number) {
+  return Math.round(value * 10) / 10;
+}
+
+function formatDateToYmd(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 export function GraphScreen() {
   const [metricTab, setMetricTab] = useState(0);
   const [periodTab, setPeriodTab] = useState(0);
-  const [rangeLabel, setRangeLabel] = useState("読み込み中...");
-  const [weightReport, setWeightReport] = useState<WeeklyWeightReport | null>(
-    null,
-  );
+  const [timelinePoints, setTimelinePoints] = useState<WeightTimelinePoint[]>([]);
+  const [timelineBounds, setTimelineBounds] = useState<{
+    chartMin: number;
+    chartMax: number;
+    targetWeightKg: number | null;
+  } | null>(null);
   const accent = metricTab >= 2 ? STEP_GREEN : ORANGE;
+  const todayYmdRef = useRef(formatDateToYmd(new Date()));
+  const visibleWindowDays = PERIOD_DAY_WINDOWS[periodTab] ?? 7;
 
   useEffect(() => {
     let cancelled = false;
+    const endDate = todayYmdRef.current;
+    const startDate = TIMELINE_FIXED_START_DATE;
 
-    fetchWeeklyReport()
-      .then((report) => {
+    fetchWeightTimeline(startDate, endDate)
+      .then((response) => {
         if (cancelled) {
           return;
         }
-        setRangeLabel(report.rangeLabel);
-        setWeightReport(report.weight);
+        const payload = response.weight;
+        setTimelinePoints(payload.points);
+        setTimelineBounds({
+          chartMin: payload.chartMin,
+          chartMax: payload.chartMax,
+          targetWeightKg: payload.targetWeightKg,
+        });
       })
-      .catch(() => {
-        if (!cancelled) {
-          setRangeLabel("データを取得できませんでした");
-        }
-      });
+      .catch(() => undefined);
 
     return () => {
       cancelled = true;
     };
-  }, [periodTab]);
+  }, [visibleWindowDays]);
 
   return (
     <div
@@ -269,20 +282,6 @@ export function GraphScreen() {
 
         <div
           style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            padding: "2px 20px 8px",
-            flexShrink: 0,
-          }}
-        >
-          <ChevronLeft size={20} color="#C0C0C0" />
-          <span style={{ fontSize: 13, color: "#666" }}>{rangeLabel}</span>
-          <ChevronRight size={20} color="#C0C0C0" />
-        </div>
-
-        <div
-          style={{
             flex: 1,
             display: "flex",
             flexDirection: "column",
@@ -291,7 +290,13 @@ export function GraphScreen() {
             minHeight: 0,
           }}
         >
-          {metricTab === 0 && <WeightGraphCard report={weightReport} />}
+          {metricTab === 0 && (
+            <WeightGraphCard
+              timelinePoints={timelinePoints}
+              timelineBounds={timelineBounds}
+              visibleWindowDays={visibleWindowDays}
+            />
+          )}
           {metricTab === 1 && <MealGraphCard />}
           {metricTab === 2 && <ExerciseGraphCard />}
           {metricTab === 3 && <StepsGraphCard />}
@@ -387,9 +392,11 @@ function StatBoxes({
 function ChartGrid({
   horizontalTicks,
   verticalLines,
+  plotWidth = CHART_PLOT_WIDTH,
 }: {
   horizontalTicks: number[];
   verticalLines: number[];
+  plotWidth?: number;
 }) {
   return (
     <>
@@ -398,7 +405,7 @@ function ChartGrid({
           key={`h-${y}`}
           x1="0"
           y1={y}
-          x2={CHART_PLOT_WIDTH}
+          x2={plotWidth}
           y2={y}
           stroke={CHART_GRID_COLOR}
           strokeWidth="1"
@@ -609,24 +616,41 @@ function GraphChart({
   );
 }
 
-function WeightGraphCard({ report }: { report: WeeklyWeightReport | null }) {
+function WeightGraphCard({
+  timelinePoints,
+  timelineBounds,
+  visibleWindowDays,
+}: {
+  timelinePoints: WeightTimelinePoint[];
+  timelineBounds: {
+    chartMin: number;
+    chartMax: number;
+    targetWeightKg: number | null;
+  } | null;
+  visibleWindowDays: number;
+}) {
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const [viewport, setViewport] = useState({ startIndex: 0, endIndex: 0 });
+  const [scrollLeft, setScrollLeft] = useState(0);
+  const [viewportWidth, setViewportWidth] = useState(CHART_PLOT_WIDTH);
+  const slotWidth = useMemo(() => {
+    if (visibleWindowDays <= 0) {
+      return TIMELINE_SLOT_WIDTH;
+    }
+    return Math.max(24, viewportWidth / visibleWindowDays);
+  }, [viewportWidth, visibleWindowDays]);
+
   const chart = useMemo(() => {
-    if (!report || report.points.length === 0) {
+    if (!timelineBounds || timelinePoints.length === 0) {
       return null;
     }
 
-    const { chartMin, chartMax } = report;
-    const axis = buildWeightAxis(chartMin, chartMax);
+    const axis = buildWeightAxis(timelineBounds.chartMin, timelineBounds.chartMax);
     const plotMin = axis.chartMin;
     const plotMax = axis.chartMax;
-    const xs = distributeLineX(report.points.length);
-    const lineSegments = buildWeightLineSegments(
-      xs,
-      report.points,
-      plotMin,
-      plotMax,
-    );
-    const plotMarkers = report.points.flatMap((point, index) => {
+    const xs = timelinePoints.map((_, index) => slotWidth * index + slotWidth / 2);
+    const lineSegments = buildWeightLineSegments(xs, timelinePoints, plotMin, plotMax);
+    const plotMarkers = timelinePoints.flatMap((point, index) => {
       if (point.value === null) {
         return [];
       }
@@ -639,25 +663,106 @@ function WeightGraphCard({ report }: { report: WeeklyWeightReport | null }) {
         },
       ];
     });
-    const goalY =
-      report.targetWeightKg === null
-        ? null
-        : weightToY(report.targetWeightKg, plotMin, plotMax);
-    const grid = buildChartGridLines(report.points.length, axis.ticks);
 
     return {
       axis,
       xs,
       lineSegments,
       plotMarkers,
-      goalY,
-      grid,
-      days: report.points.map((point) => point.label),
-      hasValues: report.points.some((point) => point.value !== null),
+      goalY:
+        timelineBounds.targetWeightKg === null
+          ? null
+          : weightToY(timelineBounds.targetWeightKg, plotMin, plotMax),
+      chartWidth: timelinePoints.length * slotWidth,
     };
-  }, [report]);
+  }, [slotWidth, timelineBounds, timelinePoints]);
 
-  if (!report || !chart) {
+  useEffect(() => {
+    const element = scrollRef.current;
+    if (!element || timelinePoints.length === 0) {
+      return;
+    }
+
+    const updateViewport = () => {
+      const nextViewportWidth = Math.max(1, element.clientWidth);
+      setViewportWidth(nextViewportWidth);
+      const visibleCount = visibleWindowDays;
+      const maxStart = Math.max(0, timelinePoints.length - visibleCount);
+      const startIndex = Math.min(
+        maxStart,
+        Math.max(0, Math.floor(element.scrollLeft / slotWidth)),
+      );
+      const endIndex = Math.min(timelinePoints.length - 1, startIndex + visibleCount - 1);
+      setViewport({ startIndex, endIndex });
+      setScrollLeft(element.scrollLeft);
+    };
+
+    const alignToLatest = () => {
+      const maxStart = Math.max(0, timelinePoints.length - visibleWindowDays);
+      element.scrollLeft = maxStart * slotWidth;
+      updateViewport();
+    };
+
+    const onWheel = (event: WheelEvent) => {
+      const dominantDelta =
+        Math.abs(event.deltaX) >= Math.abs(event.deltaY)
+          ? event.deltaX
+          : event.deltaY;
+
+      if (Math.abs(dominantDelta) < 0.5) {
+        return;
+      }
+
+      // ブラウザの履歴スワイプを抑止して、グラフ横スクロールに専念させる
+      event.preventDefault();
+      event.stopPropagation();
+      element.scrollLeft += dominantDelta;
+    };
+
+    requestAnimationFrame(() => {
+      requestAnimationFrame(alignToLatest);
+    });
+
+    element.addEventListener("scroll", updateViewport, { passive: true });
+    element.addEventListener("wheel", onWheel, { passive: false });
+    window.addEventListener("resize", updateViewport);
+
+    return () => {
+      element.removeEventListener("scroll", updateViewport);
+      element.removeEventListener("wheel", onWheel);
+      window.removeEventListener("resize", updateViewport);
+    };
+  }, [slotWidth, timelinePoints, visibleWindowDays]);
+
+  const stats = useMemo(() => {
+    if (timelinePoints.length === 0) {
+      return { average: null, diff: null, targetDiff: null };
+    }
+
+    const points = timelinePoints.slice(viewport.startIndex, viewport.endIndex + 1);
+    const values = points
+      .map((point) => point.value)
+      .filter((value): value is number => value !== null);
+    const first = values.length > 0 ? values[0] : null;
+    const last = values.length > 0 ? values[values.length - 1] : null;
+
+    return {
+      average:
+        values.length > 0
+          ? roundToOneDecimal(values.reduce((sum, value) => sum + value, 0) / values.length)
+          : null,
+      diff:
+        first !== null && last !== null ? roundToOneDecimal(last - first) : null,
+      targetDiff:
+        timelineBounds?.targetWeightKg !== null &&
+        timelineBounds?.targetWeightKg !== undefined &&
+        last !== null
+          ? roundToOneDecimal(timelineBounds.targetWeightKg - last)
+          : null,
+    };
+  }, [timelineBounds?.targetWeightKg, timelinePoints, viewport.endIndex, viewport.startIndex]);
+
+  if (!chart || !timelineBounds) {
     return (
       <CardShell>
         <CardHeader
@@ -684,7 +789,11 @@ function WeightGraphCard({ report }: { report: WeeklyWeightReport | null }) {
     );
   }
 
-  const gridTicks = chart.axis.ticks;
+  const verticalLineCount = Math.floor(chart.chartWidth / slotWidth) + 1;
+  const verticalLines = Array.from(
+    { length: verticalLineCount },
+    (_, index) => index * slotWidth,
+  );
 
   return (
     <CardShell>
@@ -697,58 +806,202 @@ function WeightGraphCard({ report }: { report: WeeklyWeightReport | null }) {
         label="体重"
       />
 
-      <GraphChart
-        days={chart.days}
-        yAxisLabels={chart.axis.labels}
-        yAxisTicks={gridTicks}
-        goalOverlay={
-          report.targetWeightKg === null || chart.goalY === null
-            ? undefined
-            : {
-                label: `${report.targetWeightKg.toFixed(1)}kg`,
-                color: ORANGE,
-                y: chart.goalY,
-              }
-        }
-        plotMarkers={chart.plotMarkers}
+      <div
+        style={{
+          flex: 1,
+          minHeight: 0,
+          width: "100%",
+          display: "flex",
+          flexDirection: "column",
+        }}
       >
-        <ChartGrid
-          horizontalTicks={chart.grid.horizontalTicks}
-          verticalLines={chart.grid.verticalLines}
-        />
-        {chart.goalY !== null && <GoalLineSvg y={chart.goalY} color={ORANGE} />}
-        {chart.lineSegments.map((segment, index) => (
-          <polyline
-            key={index}
-            points={segment}
-            fill="none"
-            stroke={ORANGE}
-            strokeWidth="2.5"
-            strokeLinejoin="round"
-            strokeLinecap="round"
-            vectorEffect="non-scaling-stroke"
-          />
-        ))}
-      </GraphChart>
+        <div
+          style={{
+            flex: 1,
+            minHeight: 0,
+            width: "100%",
+            display: "flex",
+            gap: CHART_AXIS_GAP,
+            minWidth: 0,
+          }}
+        >
+          <div
+            style={{
+              width: Y_AXIS_WIDTH,
+              position: "relative",
+              flexShrink: 0,
+            }}
+          >
+            {chart.axis.labels.map((label, index) => (
+              <span
+                key={`${label}-${index}`}
+                style={{
+                  position: "absolute",
+                  paddingLeft: 2,
+                  top: `${(chart.axis.ticks[index] / CHART_HEIGHT) * 100}%`,
+                  transform: "translateY(-50%)",
+                  fontSize: chart.axis.labels.length > 5 ? 9 : 11,
+                  color: "#7A7A7A",
+                  fontWeight: 500,
+                  lineHeight: 1,
+                }}
+              >
+                {label}
+              </span>
+            ))}
+          </div>
+          <div style={{ flex: 1, minHeight: 0, minWidth: 0, position: "relative" }}>
+            {chart.goalY !== null && timelineBounds.targetWeightKg !== null && (
+              <div
+                style={{
+                  position: "absolute",
+                  right: 4,
+                  top: `${(chart.goalY / CHART_HEIGHT) * 100}%`,
+                  transform: "translateY(3px)",
+                  textAlign: "right",
+                  zIndex: 2,
+                  pointerEvents: "none",
+                  lineHeight: 1.3,
+                }}
+              >
+                <div style={{ fontSize: 9, color: ORANGE }}>目標</div>
+                <div style={{ fontSize: 10, color: ORANGE, fontWeight: 600 }}>
+                  {timelineBounds.targetWeightKg.toFixed(1)}kg
+                </div>
+              </div>
+            )}
+            <div
+              ref={scrollRef}
+              style={{
+                width: "100%",
+                height: "100%",
+                overflowX: "auto",
+                overflowY: "hidden",
+                WebkitOverflowScrolling: "touch",
+                scrollbarWidth: "thin",
+                position: "relative",
+                overscrollBehaviorX: "contain",
+                overscrollBehaviorY: "contain",
+              }}
+            >
+              <div
+                style={{
+                  position: "relative",
+                  width: Math.max(CHART_PLOT_WIDTH, chart.chartWidth),
+                  height: "100%",
+                }}
+              >
+                <svg
+                  width={Math.max(CHART_PLOT_WIDTH, chart.chartWidth)}
+                  height="100%"
+                  viewBox={`0 0 ${Math.max(CHART_PLOT_WIDTH, chart.chartWidth)} ${CHART_HEIGHT}`}
+                  preserveAspectRatio="none"
+                  style={{ display: "block" }}
+                >
+                  <ChartGrid
+                    horizontalTicks={chart.axis.ticks}
+                    verticalLines={verticalLines}
+                    plotWidth={Math.max(CHART_PLOT_WIDTH, chart.chartWidth)}
+                  />
+                  {chart.goalY !== null && (
+                    <line
+                      x1="0"
+                      y1={chart.goalY}
+                      x2={Math.max(CHART_PLOT_WIDTH, chart.chartWidth)}
+                      y2={chart.goalY}
+                      stroke={ORANGE}
+                      strokeWidth="1"
+                      strokeDasharray="4 3"
+                      opacity="0.5"
+                    />
+                  )}
+                  {chart.lineSegments.map((segment, index) => (
+                    <polyline
+                      key={index}
+                      points={segment}
+                      fill="none"
+                      stroke={ORANGE}
+                      strokeWidth="2.5"
+                      strokeLinejoin="round"
+                      strokeLinecap="round"
+                      vectorEffect="non-scaling-stroke"
+                    />
+                  ))}
+                </svg>
+                {chart.plotMarkers.map((marker, index) => (
+                  <div
+                    key={index}
+                    style={{
+                      position: "absolute",
+                      left: marker.x,
+                      top: `${(marker.y / CHART_HEIGHT) * 100}%`,
+                      transform: "translate(-50%, -50%)",
+                      width: 10,
+                      height: 10,
+                      borderRadius: "50%",
+                      background: "#fff",
+                      border: `2px solid ${marker.color}`,
+                      boxSizing: "border-box",
+                      pointerEvents: "none",
+                    }}
+                  />
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+        <div
+          style={{
+            display: "flex",
+            gap: CHART_AXIS_GAP,
+            flexShrink: 0,
+            paddingTop: 2,
+          }}
+        >
+          <div style={{ width: Y_AXIS_WIDTH, flexShrink: 0 }} aria-hidden="true" />
+          <div style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
+            <div
+              style={{
+                width: Math.max(CHART_PLOT_WIDTH, chart.chartWidth),
+                display: "flex",
+                transform: `translateX(-${scrollLeft}px)`,
+              }}
+            >
+              {timelinePoints.map((point, index) => (
+                <span
+                  key={`${point.date}-${index}`}
+                  style={{
+                    width: slotWidth,
+                    flexShrink: 0,
+                    fontSize: 11,
+                    color: "#888",
+                    textAlign: "center",
+                    fontWeight: 500,
+                  }}
+                >
+                  {point.label}
+                </span>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
 
       <StatBoxes
         accent={ORANGE}
         boxBg="#FFF5EB"
         items={[
           {
-            value:
-              report.weeklyAverage === null
-                ? "--"
-                : `${report.weeklyAverage.toFixed(1)} kg`,
+            value: stats.average === null ? "--" : `${stats.average.toFixed(1)} kg`,
             label: "平均",
           },
           {
-            value: formatSignedKg(report.weeklyDiff),
+            value: formatSignedKg(stats.diff),
             label: "変化量",
             highlight: true,
           },
           {
-            value: formatSignedKg(report.targetDiff),
+            value: formatSignedKg(stats.targetDiff),
             label: "目標まで",
             highlight: true,
           },

@@ -500,5 +500,49 @@ if ($requestMethod === 'GET' && $requestPath === '/api/reports/weekly') {
     json_response($report);
 }
 
+// GET /api/reports/weight-timeline — 体重グラフの横スクロール用時系列データ
+if ($requestMethod === 'GET' && $requestPath === '/api/reports/weight-timeline') {
+    $today = WeightRepository::todayDate();
+    $endDate = trim((string) ($_GET['endDate'] ?? $today));
+    $startDateParam = trim((string) ($_GET['startDate'] ?? ''));
+
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $endDate)) {
+        json_response(['message' => 'endDate must be YYYY-MM-DD'], 422);
+    }
+
+    $timezone = new DateTimeZone('Asia/Tokyo');
+    $end = new DateTimeImmutable($endDate, $timezone);
+    $startDate = $startDateParam !== ''
+        ? $startDateParam
+        : $end->modify('-119 days')->format('Y-m-d');
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $startDate)) {
+        json_response(['message' => 'startDate must be YYYY-MM-DD'], 422);
+    }
+
+    $start = new DateTimeImmutable($startDate, $timezone);
+    if ($start > $end) {
+        json_response(['message' => 'startDate must be earlier than or equal to endDate'], 422);
+    }
+
+    $points = $weightRepository->getPointsBetween($startDate, $endDate);
+    $profile = $userProfileRepository->get();
+    $targetWeightKg = $profile['targetWeightKg'];
+    $values = array_values(array_filter(
+        array_map(static fn (array $point): ?float => $point['value'], $points),
+        static fn (?float $value): bool => $value !== null
+    ));
+    $periodMin = $values !== [] ? min($values) : null;
+    $chartBounds = $weightRepository->computeChartBounds($targetWeightKg, $periodMin);
+
+    json_response([
+        'weight' => [
+            'points' => $points,
+            'targetWeightKg' => $targetWeightKg,
+            'chartMin' => $chartBounds['min'],
+            'chartMax' => $chartBounds['max'],
+        ],
+    ]);
+}
+
 // どのルートにも一致しなかった場合
 json_response(['message' => 'Not Found'], 404);

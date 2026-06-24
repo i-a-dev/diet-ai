@@ -147,6 +147,54 @@ final class WeightRepository
     }
 
     /**
+     * 指定期間（開始日〜終了日）の体重点列を返す。
+     * 記録がない日は value を null にする。
+     *
+     * @return array<int, array{label: string, value: float|null, date: string}>
+     */
+    public function getPointsBetween(string $startDate, string $endDate): array
+    {
+        $timezone = new DateTimeZone('Asia/Tokyo');
+        $start = new DateTimeImmutable($startDate, $timezone);
+        $end = new DateTimeImmutable($endDate, $timezone);
+
+        if ($start > $end) {
+            return [];
+        }
+
+        $statement = $this->db->prepare(
+            'SELECT recorded_on, weight_kg
+             FROM weight_entries
+             WHERE recorded_on BETWEEN :start AND :end
+             ORDER BY recorded_on ASC'
+        );
+        $statement->execute([
+            'start' => $startDate,
+            'end' => $endDate,
+        ]);
+
+        /** @var array<string, float> $byDate */
+        $byDate = [];
+        foreach ($statement->fetchAll() as $row) {
+            $byDate[(string) $row['recorded_on']] = (float) $row['weight_kg'];
+        }
+
+        $points = [];
+        $cursor = $start;
+        while ($cursor <= $end) {
+            $date = $cursor->format('Y-m-d');
+            $points[] = [
+                'label' => self::formatShortLabel($date),
+                'value' => $byDate[$date] ?? null,
+                'date' => $date,
+            ];
+            $cursor = $cursor->modify('+1 day');
+        }
+
+        return $points;
+    }
+
+    /**
      * これまで記録した体重の最大値を返す（グラフ上限の計算用）。
      */
     public function getMaxRecordedWeight(): ?float
