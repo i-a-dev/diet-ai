@@ -634,24 +634,40 @@ function WeightGraphCard({
   const [viewport, setViewport] = useState({ startIndex: 0, endIndex: 0 });
   const [dateLabelPhase, setDateLabelPhase] = useState(0);
   const [viewportWidth, setViewportWidth] = useState(CHART_PLOT_WIDTH);
+  const effectiveVisibleDays = useMemo(
+    () => Math.max(1, Math.min(visibleWindowDays, timelinePoints.length || 1)),
+    [timelinePoints.length, visibleWindowDays],
+  );
   const slotWidth = useMemo(() => {
-    if (visibleWindowDays <= 0) {
+    if (effectiveVisibleDays <= 0) {
       return TIMELINE_SLOT_WIDTH;
     }
     // 表示期間に対して1日幅を厳密に合わせ、グリッド端のズレを防ぐ
-    return viewportWidth / visibleWindowDays;
-  }, [viewportWidth, visibleWindowDays]);
+    return viewportWidth / effectiveVisibleDays;
+  }, [effectiveVisibleDays, viewportWidth]);
   const dateLabelStep = useMemo(() => {
     if (visibleWindowDays <= 7) return 1;
     if (visibleWindowDays <= 30) return 4;
-    if (visibleWindowDays <= 90) return 7;
-    if (visibleWindowDays <= 180) return 14;
-    if (visibleWindowDays <= 365) return 30;
+    if (visibleWindowDays <= 90) return 13;
+    if (visibleWindowDays <= 180) return 26;
+    if (visibleWindowDays <= 365) {
+      // 1画面内で8つ前後（7区間）になるように動的計算
+      return Math.max(1, Math.floor((effectiveVisibleDays - 1) / 7));
+    }
     return 60;
-  }, [visibleWindowDays]);
+  }, [effectiveVisibleDays, visibleWindowDays]);
   const rightLabelOffset = useMemo(() => {
     if (visibleWindowDays <= 7) {
       return 0;
+    }
+    if (visibleWindowDays <= 90) {
+      return 5;
+    }
+    if (visibleWindowDays <= 180) {
+      return 10;
+    }
+    if (visibleWindowDays <= 365) {
+      return 15;
     }
     return Math.min(2, dateLabelStep - 1);
   }, [dateLabelStep, visibleWindowDays]);
@@ -702,7 +718,7 @@ function WeightGraphCard({
     const updateViewport = () => {
       const nextViewportWidth = Math.max(1, element.clientWidth);
       setViewportWidth(nextViewportWidth);
-      const visibleCount = Math.max(1, visibleWindowDays);
+      const visibleCount = Math.max(1, effectiveVisibleDays);
       const maxStart = Math.max(0, timelinePoints.length - visibleCount);
       const maxScrollLeft = Math.max(0, element.scrollWidth - element.clientWidth);
       const isNearRightEdge = element.scrollLeft >= maxScrollLeft - 1;
@@ -718,10 +734,10 @@ function WeightGraphCard({
     };
 
     const alignToLatest = () => {
-      const maxStart = Math.max(0, timelinePoints.length - visibleWindowDays);
+      const maxStart = Math.max(0, timelinePoints.length - effectiveVisibleDays);
       const endIndex = Math.min(
         timelinePoints.length - 1,
-        maxStart + visibleWindowDays - 1,
+        maxStart + effectiveVisibleDays - 1,
       );
       const preferredRightLabelIndex = Math.max(0, endIndex - rightLabelOffset);
       setDateLabelPhase(preferredRightLabelIndex % dateLabelStep);
@@ -758,7 +774,13 @@ function WeightGraphCard({
       element.removeEventListener("wheel", onWheel);
       window.removeEventListener("resize", updateViewport);
     };
-  }, [dateLabelStep, rightLabelOffset, slotWidth, timelinePoints, visibleWindowDays]);
+  }, [
+    dateLabelStep,
+    effectiveVisibleDays,
+    rightLabelOffset,
+    slotWidth,
+    timelinePoints,
+  ]);
 
   const stats = useMemo(() => {
     if (timelinePoints.length === 0) {
