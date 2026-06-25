@@ -630,15 +630,31 @@ function WeightGraphCard({
   visibleWindowDays: number;
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const dateScrollRef = useRef<HTMLDivElement | null>(null);
   const [viewport, setViewport] = useState({ startIndex: 0, endIndex: 0 });
-  const [scrollLeft, setScrollLeft] = useState(0);
+  const [dateLabelPhase, setDateLabelPhase] = useState(0);
   const [viewportWidth, setViewportWidth] = useState(CHART_PLOT_WIDTH);
   const slotWidth = useMemo(() => {
     if (visibleWindowDays <= 0) {
       return TIMELINE_SLOT_WIDTH;
     }
-    return Math.max(24, viewportWidth / visibleWindowDays);
+    // 表示期間に対して1日幅を厳密に合わせ、グリッド端のズレを防ぐ
+    return viewportWidth / visibleWindowDays;
   }, [viewportWidth, visibleWindowDays]);
+  const dateLabelStep = useMemo(() => {
+    if (visibleWindowDays <= 7) return 1;
+    if (visibleWindowDays <= 30) return 4;
+    if (visibleWindowDays <= 90) return 7;
+    if (visibleWindowDays <= 180) return 14;
+    if (visibleWindowDays <= 365) return 30;
+    return 60;
+  }, [visibleWindowDays]);
+  const rightLabelOffset = useMemo(() => {
+    if (visibleWindowDays <= 7) {
+      return 0;
+    }
+    return Math.min(2, dateLabelStep - 1);
+  }, [dateLabelStep, visibleWindowDays]);
 
   const chart = useMemo(() => {
     if (!timelineBounds || timelinePoints.length === 0) {
@@ -686,20 +702,30 @@ function WeightGraphCard({
     const updateViewport = () => {
       const nextViewportWidth = Math.max(1, element.clientWidth);
       setViewportWidth(nextViewportWidth);
-      const visibleCount = visibleWindowDays;
+      const visibleCount = Math.max(1, visibleWindowDays);
       const maxStart = Math.max(0, timelinePoints.length - visibleCount);
-      const startIndex = Math.min(
-        maxStart,
-        Math.max(0, Math.floor(element.scrollLeft / slotWidth)),
-      );
+      const maxScrollLeft = Math.max(0, element.scrollWidth - element.clientWidth);
+      const isNearRightEdge = element.scrollLeft >= maxScrollLeft - 1;
+      const rawStart = isNearRightEdge
+        ? maxStart
+        : Math.round(element.scrollLeft / slotWidth);
+      const startIndex = Math.min(maxStart, Math.max(0, rawStart));
       const endIndex = Math.min(timelinePoints.length - 1, startIndex + visibleCount - 1);
       setViewport({ startIndex, endIndex });
-      setScrollLeft(element.scrollLeft);
+      if (dateScrollRef.current) {
+        dateScrollRef.current.scrollLeft = element.scrollLeft;
+      }
     };
 
     const alignToLatest = () => {
       const maxStart = Math.max(0, timelinePoints.length - visibleWindowDays);
-      element.scrollLeft = maxStart * slotWidth;
+      const endIndex = Math.min(
+        timelinePoints.length - 1,
+        maxStart + visibleWindowDays - 1,
+      );
+      const preferredRightLabelIndex = Math.max(0, endIndex - rightLabelOffset);
+      setDateLabelPhase(preferredRightLabelIndex % dateLabelStep);
+      element.scrollLeft = Math.round(maxStart * slotWidth);
       updateViewport();
     };
 
@@ -732,7 +758,7 @@ function WeightGraphCard({
       element.removeEventListener("wheel", onWheel);
       window.removeEventListener("resize", updateViewport);
     };
-  }, [slotWidth, timelinePoints, visibleWindowDays]);
+  }, [dateLabelStep, rightLabelOffset, slotWidth, timelinePoints, visibleWindowDays]);
 
   const stats = useMemo(() => {
     if (timelinePoints.length === 0) {
@@ -789,11 +815,18 @@ function WeightGraphCard({
     );
   }
 
-  const verticalLineCount = Math.floor(chart.chartWidth / slotWidth) + 1;
-  const verticalLines = Array.from(
-    { length: verticalLineCount },
-    (_, index) => index * slotWidth,
-  );
+  const shouldShowDateLabel = (index: number) => {
+    if (index < viewport.startIndex || index > viewport.endIndex) {
+      return false;
+    }
+    return (index - dateLabelPhase) % dateLabelStep === 0;
+  };
+  const verticalLines = timelinePoints.flatMap((_, index) => {
+    if (!shouldShowDateLabel(index)) {
+      return [];
+    }
+    return [index * slotWidth + slotWidth / 2];
+  });
 
   return (
     <CardShell>
@@ -959,27 +992,39 @@ function WeightGraphCard({
           }}
         >
           <div style={{ width: Y_AXIS_WIDTH, flexShrink: 0 }} aria-hidden="true" />
-          <div style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
+          <div
+            ref={dateScrollRef}
+            style={{
+              flex: 1,
+              minWidth: 0,
+              overflowX: "auto",
+              overflowY: "hidden",
+              scrollbarWidth: "none",
+              pointerEvents: "none",
+            }}
+          >
             <div
               style={{
                 width: Math.max(CHART_PLOT_WIDTH, chart.chartWidth),
-                display: "flex",
-                transform: `translateX(-${scrollLeft}px)`,
+                position: "relative",
+                height: 20,
               }}
             >
               {timelinePoints.map((point, index) => (
                 <span
                   key={`${point.date}-${index}`}
                   style={{
-                    width: slotWidth,
-                    flexShrink: 0,
+                    position: "absolute",
+                    left: index * slotWidth + slotWidth / 2,
+                    transform: "translateX(-50%)",
                     fontSize: 11,
                     color: "#888",
-                    textAlign: "center",
                     fontWeight: 500,
+                    lineHeight: "20px",
+                    whiteSpace: "nowrap",
                   }}
                 >
-                  {point.label}
+                  {shouldShowDateLabel(index) ? point.label : ""}
                 </span>
               ))}
             </div>
