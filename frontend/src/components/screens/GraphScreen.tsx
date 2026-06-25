@@ -42,7 +42,6 @@ const STEP_AXIS_TICKS = [0, 43, 86, CHART_HEIGHT] as const;
 const CHART_GRID_COLOR = "#ECECEC";
 const WEIGHT_AXIS_STEP_THRESHOLD_KG = 15;
 const TIMELINE_SLOT_WIDTH = 44;
-const TIMELINE_FIXED_START_DATE = "2026-01-01";
 const PERIOD_DAY_WINDOWS = [7, 30, 90, 180, 365, 1095] as const;
 
 function buildChartGridLines(dayCount: number, horizontalTicks: number[]) {
@@ -148,6 +147,17 @@ function formatDateToYmd(date: Date) {
   return `${year}-${month}-${day}`;
 }
 
+function addDays(base: Date, days: number) {
+  const copy = new Date(base);
+  copy.setDate(copy.getDate() + days);
+  return copy;
+}
+
+function formatFullDateLabel(date: string) {
+  const [year, month, day] = date.split("-");
+  return `${year}/${Number(month)}/${Number(day)}`;
+}
+
 export function GraphScreen() {
   const [metricTab, setMetricTab] = useState(0);
   const [periodTab, setPeriodTab] = useState(0);
@@ -164,7 +174,8 @@ export function GraphScreen() {
   useEffect(() => {
     let cancelled = false;
     const endDate = todayYmdRef.current;
-    const startDate = TIMELINE_FIXED_START_DATE;
+    const endDateObj = new Date(`${endDate}T00:00:00+09:00`);
+    const startDate = formatDateToYmd(addDays(endDateObj, -(visibleWindowDays - 1)));
 
     fetchWeightTimeline(startDate, endDate)
       .then((response) => {
@@ -654,7 +665,8 @@ function WeightGraphCard({
       // 1画面内で8つ前後（7区間）になるように動的計算
       return Math.max(1, Math.floor((effectiveVisibleDays - 1) / 7));
     }
-    return 60;
+    // 3年は1画面内で5つ前後（4区間）になるように動的計算
+    return Math.max(1, Math.floor((effectiveVisibleDays - 1) / 4));
   }, [effectiveVisibleDays, visibleWindowDays]);
   const rightLabelOffset = useMemo(() => {
     if (visibleWindowDays <= 7) {
@@ -669,7 +681,8 @@ function WeightGraphCard({
     if (visibleWindowDays <= 365) {
       return 15;
     }
-    return Math.min(2, dateLabelStep - 1);
+    // 3年は最新日付表示を今日から60日前に寄せる
+    return Math.min(60, dateLabelStep - 1);
   }, [dateLabelStep, visibleWindowDays]);
 
   const chart = useMemo(() => {
@@ -741,7 +754,7 @@ function WeightGraphCard({
       );
       const preferredRightLabelIndex = Math.max(0, endIndex - rightLabelOffset);
       setDateLabelPhase(preferredRightLabelIndex % dateLabelStep);
-      element.scrollLeft = Math.round(maxStart * slotWidth);
+      element.scrollLeft = Math.max(0, element.scrollWidth - element.clientWidth);
       updateViewport();
     };
 
@@ -1046,7 +1059,11 @@ function WeightGraphCard({
                     whiteSpace: "nowrap",
                   }}
                 >
-                  {shouldShowDateLabel(index) ? point.label : ""}
+                  {shouldShowDateLabel(index)
+                    ? visibleWindowDays > 365
+                      ? formatFullDateLabel(point.date)
+                      : point.label
+                    : ""}
                 </span>
               ))}
             </div>
