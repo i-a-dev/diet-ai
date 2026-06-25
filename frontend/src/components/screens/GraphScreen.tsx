@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -18,6 +19,7 @@ import { ORANGE } from "../../constants.ts";
 import {
   fetchWeightTimeline,
   type WeightTimelinePoint,
+  type WeightTimelineResponse,
 } from "../../api/client.ts";
 
 const METRIC_TABS = ["体重", "食事", "運動", "歩数"] as const;
@@ -43,6 +45,34 @@ const CHART_GRID_COLOR = "#ECECEC";
 const WEIGHT_AXIS_STEP_THRESHOLD_KG = 15;
 const TIMELINE_SLOT_WIDTH = 44;
 const PERIOD_DAY_WINDOWS = [7, 30, 90, 180, 365, 1095] as const;
+const WEIGHT_SCROLL_FLOOR_YMD = "2026-01-01";
+
+type WeightTimelineBundle = {
+  visibleWindowDays: number;
+  points: WeightTimelinePoint[];
+  bounds: {
+    chartMin: number;
+    chartMax: number;
+    targetWeightKg: number | null;
+  };
+  scrollFloor: string;
+};
+
+function toWeightTimelineBundle(
+  visibleWindowDays: number,
+  payload: WeightTimelineResponse["weight"],
+): WeightTimelineBundle {
+  return {
+    visibleWindowDays,
+    points: payload.points,
+    scrollFloor: payload.scrollFloor,
+    bounds: {
+      chartMin: payload.chartMin,
+      chartMax: payload.chartMax,
+      targetWeightKg: payload.targetWeightKg,
+    },
+  };
+}
 
 function buildChartGridLines(dayCount: number, horizontalTicks: number[]) {
   const columnWidth = CHART_PLOT_WIDTH / dayCount;
@@ -147,12 +177,6 @@ function formatDateToYmd(date: Date) {
   return `${year}-${month}-${day}`;
 }
 
-function addDays(base: Date, days: number) {
-  const copy = new Date(base);
-  copy.setDate(copy.getDate() + days);
-  return copy;
-}
-
 function formatFullDateLabel(date: string) {
   const [year, month, day] = date.split("-");
   return `${year}/${Number(month)}/${Number(day)}`;
@@ -161,34 +185,37 @@ function formatFullDateLabel(date: string) {
 export function GraphScreen() {
   const [metricTab, setMetricTab] = useState(0);
   const [periodTab, setPeriodTab] = useState(0);
-  const [timelinePoints, setTimelinePoints] = useState<WeightTimelinePoint[]>([]);
-  const [timelineBounds, setTimelineBounds] = useState<{
-    chartMin: number;
-    chartMax: number;
-    targetWeightKg: number | null;
-  } | null>(null);
+  const [displayedTimeline, setDisplayedTimeline] =
+    useState<WeightTimelineBundle | null>(null);
+  const [pendingTimeline, setPendingTimeline] =
+    useState<WeightTimelineBundle | null>(null);
   const accent = metricTab >= 2 ? STEP_GREEN : ORANGE;
   const todayYmdRef = useRef(formatDateToYmd(new Date()));
+  const displayedTimelineRef = useRef<WeightTimelineBundle | null>(null);
   const visibleWindowDays = PERIOD_DAY_WINDOWS[periodTab] ?? 7;
+  displayedTimelineRef.current = displayedTimeline;
 
   useEffect(() => {
     let cancelled = false;
     const endDate = todayYmdRef.current;
-    const endDateObj = new Date(`${endDate}T00:00:00+09:00`);
-    const startDate = formatDateToYmd(addDays(endDateObj, -(visibleWindowDays - 1)));
+    const requestedVisibleDays = visibleWindowDays;
 
-    fetchWeightTimeline(startDate, endDate)
+    setPendingTimeline(null);
+
+    fetchWeightTimeline(endDate, requestedVisibleDays)
       .then((response) => {
         if (cancelled) {
           return;
         }
-        const payload = response.weight;
-        setTimelinePoints(payload.points);
-        setTimelineBounds({
-          chartMin: payload.chartMin,
-          chartMax: payload.chartMax,
-          targetWeightKg: payload.targetWeightKg,
-        });
+        const bundle = toWeightTimelineBundle(
+          requestedVisibleDays,
+          response.weight,
+        );
+        if (displayedTimelineRef.current === null) {
+          setDisplayedTimeline(bundle);
+          return;
+        }
+        setPendingTimeline(bundle);
       })
       .catch(() => undefined);
 
@@ -303,9 +330,16 @@ export function GraphScreen() {
         >
           {metricTab === 0 && (
             <WeightGraphCard
-              timelinePoints={timelinePoints}
-              timelineBounds={timelineBounds}
-              visibleWindowDays={visibleWindowDays}
+              bundle={displayedTimeline}
+              pendingBundle={pendingTimeline}
+              onPendingCommitted={() => {
+                setPendingTimeline((pending) => {
+                  if (pending) {
+                    setDisplayedTimeline(pending);
+                  }
+                  return null;
+                });
+              }}
             />
           )}
           {metricTab === 1 && <MealGraphCard />}
@@ -628,26 +662,45 @@ function GraphChart({
 }
 
 function WeightGraphCard({
-  timelinePoints,
-  timelineBounds,
-  visibleWindowDays,
+  bundle,
+  pendingBundle = null,
+  onPendingCommitted,
 }: {
-  timelinePoints: WeightTimelinePoint[];
-  timelineBounds: {
-    chartMin: number;
-    chartMax: number;
-    targetWeightKg: number | null;
-  } | null;
-  visibleWindowDays: number;
+  bundle: WeightTimelineBundle | null;
+  pendingBundle?: WeightTimelineBundle | null;
+  onPendingCommitted?: () => void;
 }) {
+  const [renderBundle, setRenderBundle] = useState<WeightTimelineBundle | null>(
+    bundle,
+  );
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const dateScrollRef = useRef<HTMLDivElement | null>(null);
+  const pendingCommitRef = useRef(false);
   const [viewport, setViewport] = useState({ startIndex: 0, endIndex: 0 });
   const [dateLabelPhase, setDateLabelPhase] = useState(0);
   const [viewportWidth, setViewportWidth] = useState(CHART_PLOT_WIDTH);
+
+  useLayoutEffect(() => {
+    if (pendingBundle) {
+      setRenderBundle(pendingBundle);
+      return;
+    }
+    if (bundle) {
+      setRenderBundle(bundle);
+    }
+  }, [bundle, pendingBundle]);
+
+  const timelinePoints = renderBundle?.points ?? [];
+  const timelineBounds = renderBundle?.bounds ?? null;
+  const visibleWindowDays = renderBundle?.visibleWindowDays ?? 7;
+  const scrollFloor = renderBundle?.scrollFloor ?? WEIGHT_SCROLL_FLOOR_YMD;
+  const scrollFloorIndex = useMemo(() => {
+    const index = timelinePoints.findIndex((point) => point.date >= scrollFloor);
+    return index >= 0 ? index : 0;
+  }, [scrollFloor, timelinePoints]);
   const effectiveVisibleDays = useMemo(
-    () => Math.max(1, Math.min(visibleWindowDays, timelinePoints.length || 1)),
-    [timelinePoints.length, visibleWindowDays],
+    () => Math.max(1, visibleWindowDays),
+    [visibleWindowDays],
   );
   const slotWidth = useMemo(() => {
     if (effectiveVisibleDays <= 0) {
@@ -690,11 +743,21 @@ function WeightGraphCard({
       return null;
     }
 
-    const axis = buildWeightAxis(timelineBounds.chartMin, timelineBounds.chartMax);
+    const axis = buildWeightAxis(
+      timelineBounds.chartMin,
+      timelineBounds.chartMax,
+    );
     const plotMin = axis.chartMin;
     const plotMax = axis.chartMax;
-    const xs = timelinePoints.map((_, index) => slotWidth * index + slotWidth / 2);
-    const lineSegments = buildWeightLineSegments(xs, timelinePoints, plotMin, plotMax);
+    const xs = timelinePoints.map(
+      (_, index) => slotWidth * index + slotWidth / 2,
+    );
+    const lineSegments = buildWeightLineSegments(
+      xs,
+      timelinePoints,
+      plotMin,
+      plotMax,
+    );
     const plotMarkers = timelinePoints.flatMap((point, index) => {
       if (point.value === null) {
         return [];
@@ -722,6 +785,66 @@ function WeightGraphCard({
     };
   }, [slotWidth, timelineBounds, timelinePoints]);
 
+  useLayoutEffect(() => {
+    const element = scrollRef.current;
+    if (!element || timelinePoints.length === 0) {
+      return;
+    }
+
+    const nextViewportWidth = Math.max(1, element.clientWidth);
+    const visibleCount = Math.max(1, effectiveVisibleDays);
+    const nextSlotWidth = nextViewportWidth / visibleCount;
+    const maxStart = Math.max(0, timelinePoints.length - visibleCount);
+    const endIndex = Math.min(
+      timelinePoints.length - 1,
+      maxStart + effectiveVisibleDays - 1,
+    );
+    const preferredRightLabelIndex = Math.max(0, endIndex - rightLabelOffset);
+    const nextDateLabelPhase = preferredRightLabelIndex % dateLabelStep;
+    const minScrollLeft = scrollFloorIndex * nextSlotWidth;
+    const nextScrollLeft = Math.max(
+      minScrollLeft,
+      Math.max(0, element.scrollWidth - element.clientWidth),
+    );
+    const startIndex = Math.min(
+      maxStart,
+      Math.max(scrollFloorIndex, Math.round(nextScrollLeft / nextSlotWidth)),
+    );
+
+    setViewportWidth(nextViewportWidth);
+    setDateLabelPhase(nextDateLabelPhase);
+    element.scrollLeft = nextScrollLeft;
+    if (dateScrollRef.current) {
+      dateScrollRef.current.scrollLeft = nextScrollLeft;
+    }
+    setViewport({
+      startIndex,
+      endIndex: Math.min(timelinePoints.length - 1, startIndex + visibleCount - 1),
+    });
+
+    if (
+      pendingBundle &&
+      pendingBundle.visibleWindowDays === renderBundle?.visibleWindowDays &&
+      !pendingCommitRef.current
+    ) {
+      pendingCommitRef.current = true;
+      onPendingCommitted?.();
+    }
+
+    if (!pendingBundle) {
+      pendingCommitRef.current = false;
+    }
+  }, [
+    dateLabelStep,
+    effectiveVisibleDays,
+    onPendingCommitted,
+    pendingBundle,
+    renderBundle?.visibleWindowDays,
+    rightLabelOffset,
+    scrollFloorIndex,
+    timelinePoints,
+  ]);
+
   useEffect(() => {
     const element = scrollRef.current;
     if (!element || timelinePoints.length === 0) {
@@ -733,29 +856,30 @@ function WeightGraphCard({
       setViewportWidth(nextViewportWidth);
       const visibleCount = Math.max(1, effectiveVisibleDays);
       const maxStart = Math.max(0, timelinePoints.length - visibleCount);
-      const maxScrollLeft = Math.max(0, element.scrollWidth - element.clientWidth);
+      const maxScrollLeft = Math.max(
+        0,
+        element.scrollWidth - element.clientWidth,
+      );
+      const minScrollLeft = scrollFloorIndex * slotWidth;
+      if (element.scrollLeft < minScrollLeft) {
+        element.scrollLeft = minScrollLeft;
+      }
       const isNearRightEdge = element.scrollLeft >= maxScrollLeft - 1;
       const rawStart = isNearRightEdge
         ? maxStart
         : Math.round(element.scrollLeft / slotWidth);
-      const startIndex = Math.min(maxStart, Math.max(0, rawStart));
-      const endIndex = Math.min(timelinePoints.length - 1, startIndex + visibleCount - 1);
+      const startIndex = Math.min(
+        maxStart,
+        Math.max(scrollFloorIndex, rawStart),
+      );
+      const endIndex = Math.min(
+        timelinePoints.length - 1,
+        startIndex + visibleCount - 1,
+      );
       setViewport({ startIndex, endIndex });
       if (dateScrollRef.current) {
         dateScrollRef.current.scrollLeft = element.scrollLeft;
       }
-    };
-
-    const alignToLatest = () => {
-      const maxStart = Math.max(0, timelinePoints.length - effectiveVisibleDays);
-      const endIndex = Math.min(
-        timelinePoints.length - 1,
-        maxStart + effectiveVisibleDays - 1,
-      );
-      const preferredRightLabelIndex = Math.max(0, endIndex - rightLabelOffset);
-      setDateLabelPhase(preferredRightLabelIndex % dateLabelStep);
-      element.scrollLeft = Math.max(0, element.scrollWidth - element.clientWidth);
-      updateViewport();
     };
 
     const onWheel = (event: WheelEvent) => {
@@ -771,12 +895,12 @@ function WeightGraphCard({
       // ブラウザの履歴スワイプを抑止して、グラフ横スクロールに専念させる
       event.preventDefault();
       event.stopPropagation();
-      element.scrollLeft += dominantDelta;
+      const minScrollLeft = scrollFloorIndex * slotWidth;
+      element.scrollLeft = Math.max(
+        minScrollLeft,
+        element.scrollLeft + dominantDelta,
+      );
     };
-
-    requestAnimationFrame(() => {
-      requestAnimationFrame(alignToLatest);
-    });
 
     element.addEventListener("scroll", updateViewport, { passive: true });
     element.addEventListener("wheel", onWheel, { passive: false });
@@ -788,9 +912,8 @@ function WeightGraphCard({
       window.removeEventListener("resize", updateViewport);
     };
   }, [
-    dateLabelStep,
     effectiveVisibleDays,
-    rightLabelOffset,
+    scrollFloorIndex,
     slotWidth,
     timelinePoints,
   ]);
@@ -800,7 +923,10 @@ function WeightGraphCard({
       return { average: null, diff: null, targetDiff: null };
     }
 
-    const points = timelinePoints.slice(viewport.startIndex, viewport.endIndex + 1);
+    const points = timelinePoints.slice(
+      viewport.startIndex,
+      viewport.endIndex + 1,
+    );
     const values = points
       .map((point) => point.value)
       .filter((value): value is number => value !== null);
@@ -810,10 +936,14 @@ function WeightGraphCard({
     return {
       average:
         values.length > 0
-          ? roundToOneDecimal(values.reduce((sum, value) => sum + value, 0) / values.length)
+          ? roundToOneDecimal(
+              values.reduce((sum, value) => sum + value, 0) / values.length,
+            )
           : null,
       diff:
-        first !== null && last !== null ? roundToOneDecimal(last - first) : null,
+        first !== null && last !== null
+          ? roundToOneDecimal(last - first)
+          : null,
       targetDiff:
         timelineBounds?.targetWeightKg !== null &&
         timelineBounds?.targetWeightKg !== undefined &&
@@ -821,7 +951,12 @@ function WeightGraphCard({
           ? roundToOneDecimal(timelineBounds.targetWeightKg - last)
           : null,
     };
-  }, [timelineBounds?.targetWeightKg, timelinePoints, viewport.endIndex, viewport.startIndex]);
+  }, [
+    timelineBounds?.targetWeightKg,
+    timelinePoints,
+    viewport.endIndex,
+    viewport.startIndex,
+  ]);
 
   if (!chart || !timelineBounds) {
     return (
@@ -918,7 +1053,9 @@ function WeightGraphCard({
               </span>
             ))}
           </div>
-          <div style={{ flex: 1, minHeight: 0, minWidth: 0, position: "relative" }}>
+          <div
+            style={{ flex: 1, minHeight: 0, minWidth: 0, position: "relative" }}
+          >
             {chart.goalY !== null && timelineBounds.targetWeightKg !== null && (
               <div
                 style={{
@@ -1026,7 +1163,10 @@ function WeightGraphCard({
             paddingTop: 2,
           }}
         >
-          <div style={{ width: Y_AXIS_WIDTH, flexShrink: 0 }} aria-hidden="true" />
+          <div
+            style={{ width: Y_AXIS_WIDTH, flexShrink: 0 }}
+            aria-hidden="true"
+          />
           <div
             ref={dateScrollRef}
             style={{
@@ -1076,7 +1216,8 @@ function WeightGraphCard({
         boxBg="#FFF5EB"
         items={[
           {
-            value: stats.average === null ? "--" : `${stats.average.toFixed(1)} kg`,
+            value:
+              stats.average === null ? "--" : `${stats.average.toFixed(1)} kg`,
             label: "平均",
           },
           {

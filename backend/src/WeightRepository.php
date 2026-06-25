@@ -8,6 +8,8 @@ declare(strict_types=1);
  */
 final class WeightRepository
 {
+    public const WEIGHT_TIMELINE_SCROLL_FLOOR = '2026-01-01';
+
     private PDO $db;
 
     /**
@@ -192,6 +194,50 @@ final class WeightRepository
         }
 
         return $points;
+    }
+
+    /**
+     * 最も古い体重記録日を返す。
+     */
+    public function getEarliestRecordedDate(): ?string
+    {
+        $value = $this->db->query('SELECT MIN(recorded_on) FROM weight_entries')->fetchColumn();
+
+        if (!is_string($value) || $value === '') {
+            return null;
+        }
+
+        return $value;
+    }
+
+    /**
+     * 体重グラフの取得開始日とスクロール下限日を決める。
+     * 表示幅は今日から visibleDays 分（2026-01-01 は考慮しない）。
+     * スクロール下限は基本 2026-01-01 だが、それより前の記録があればその日付まで遡れる。
+     *
+     * @return array{fetchStart: string, scrollFloor: string}
+     */
+    public function resolveTimelineRange(
+        string $endDate,
+        int $visibleDays,
+        string $scrollFloor = self::WEIGHT_TIMELINE_SCROLL_FLOOR,
+    ): array {
+        $timezone = new DateTimeZone('Asia/Tokyo');
+        $end = new DateTimeImmutable($endDate, $timezone);
+        $displayStart = $end->modify(sprintf('-%d days', max(0, $visibleDays - 1)))->format('Y-m-d');
+
+        $earliestRecord = $this->getEarliestRecordedDate();
+        $effectiveScrollFloor = $scrollFloor;
+        if ($earliestRecord !== null && $earliestRecord < $scrollFloor) {
+            $effectiveScrollFloor = $earliestRecord;
+        }
+
+        $fetchStart = $displayStart < $effectiveScrollFloor ? $displayStart : $effectiveScrollFloor;
+
+        return [
+            'fetchStart' => $fetchStart,
+            'scrollFloor' => $effectiveScrollFloor,
+        ];
     }
 
     /**

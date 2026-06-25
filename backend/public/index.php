@@ -504,25 +504,18 @@ if ($requestMethod === 'GET' && $requestPath === '/api/reports/weekly') {
 if ($requestMethod === 'GET' && $requestPath === '/api/reports/weight-timeline') {
     $today = WeightRepository::todayDate();
     $endDate = trim((string) ($_GET['endDate'] ?? $today));
-    $startDateParam = trim((string) ($_GET['startDate'] ?? ''));
+    $visibleDays = (int) ($_GET['visibleDays'] ?? 7);
 
     if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $endDate)) {
         json_response(['message' => 'endDate must be YYYY-MM-DD'], 422);
     }
 
-    $timezone = new DateTimeZone('Asia/Tokyo');
-    $end = new DateTimeImmutable($endDate, $timezone);
-    $startDate = $startDateParam !== ''
-        ? $startDateParam
-        : $end->modify('-119 days')->format('Y-m-d');
-    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $startDate)) {
-        json_response(['message' => 'startDate must be YYYY-MM-DD'], 422);
+    if ($visibleDays < 1 || $visibleDays > 3660) {
+        json_response(['message' => 'visibleDays must be between 1 and 3660'], 422);
     }
 
-    $start = new DateTimeImmutable($startDate, $timezone);
-    if ($start > $end) {
-        json_response(['message' => 'startDate must be earlier than or equal to endDate'], 422);
-    }
+    $timelineRange = $weightRepository->resolveTimelineRange($endDate, $visibleDays);
+    $startDate = $timelineRange['fetchStart'];
 
     $points = $weightRepository->getPointsBetween($startDate, $endDate);
     $profile = $userProfileRepository->get();
@@ -540,6 +533,7 @@ if ($requestMethod === 'GET' && $requestPath === '/api/reports/weight-timeline')
             'targetWeightKg' => $targetWeightKg,
             'chartMin' => $chartBounds['min'],
             'chartMax' => $chartBounds['max'],
+            'scrollFloor' => $timelineRange['scrollFloor'],
         ],
     ]);
 }

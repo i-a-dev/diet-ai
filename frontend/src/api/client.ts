@@ -212,10 +212,15 @@ export function fetchExerciseHistory(options?: { limit?: number }) {
     params.set("limit", String(options.limit));
   }
   const query = params.toString();
-  return request<ExerciseHistoryResponse>(`/records/exercises/history${query ? `?${query}` : ""}`);
+  return request<ExerciseHistoryResponse>(
+    `/records/exercises/history${query ? `?${query}` : ""}`,
+  );
 }
 
-export function fetchMealHistory(options?: { mealType?: MealType; limit?: number }) {
+export function fetchMealHistory(options?: {
+  mealType?: MealType;
+  limit?: number;
+}) {
   const params = new URLSearchParams();
   if (options?.mealType) {
     params.set("mealType", options.mealType);
@@ -224,7 +229,9 @@ export function fetchMealHistory(options?: { mealType?: MealType; limit?: number
     params.set("limit", String(options.limit));
   }
   const query = params.toString();
-  return request<MealHistoryResponse>(`/records/meals/history${query ? `?${query}` : ""}`);
+  return request<MealHistoryResponse>(
+    `/records/meals/history${query ? `?${query}` : ""}`,
+  );
 }
 
 export interface CalorieEstimateResponse {
@@ -236,7 +243,10 @@ export interface CalorieEstimateResponse {
 
 export type CalorieEstimateMode = "auto" | "no_web" | "web";
 
-export function estimateCalories(foodName: string, mode: CalorieEstimateMode = "auto") {
+export function estimateCalories(
+  foodName: string,
+  mode: CalorieEstimateMode = "auto",
+) {
   return request<CalorieEstimateResponse>("/foods/estimate-calories", {
     method: "POST",
     body: JSON.stringify({ foodName, mode }),
@@ -296,6 +306,7 @@ export interface WeightTimelineResponse {
     targetWeightKg: number | null;
     chartMin: number;
     chartMax: number;
+    scrollFloor: string;
   };
 }
 
@@ -304,8 +315,8 @@ export function fetchWeeklyReport(endDate?: string) {
   return request<WeeklyReportResponse>(`/reports/weekly${query}`);
 }
 
-export function fetchWeightTimeline(startDate: string, endDate: string) {
-  const query = `?startDate=${encodeURIComponent(startDate)}&endDate=${encodeURIComponent(endDate)}`;
+export function fetchWeightTimeline(endDate: string, visibleDays: number) {
+  const query = `?endDate=${encodeURIComponent(endDate)}&visibleDays=${visibleDays}`;
   return request<WeightTimelineResponse>(`/reports/weight-timeline${query}`);
 }
 
