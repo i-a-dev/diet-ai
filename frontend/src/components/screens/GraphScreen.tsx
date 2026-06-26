@@ -43,7 +43,7 @@ const STEP_AXIS_TICKS = [0, 43, 86, CHART_HEIGHT] as const;
 
 const CHART_GRID_COLOR = "#ECECEC";
 const WEIGHT_AXIS_STEP_THRESHOLD_KG = 15;
-const TIMELINE_SLOT_WIDTH = 44;
+const DATE_LABEL_HALF_WIDTH = 14;
 const PERIOD_DAY_WINDOWS = [7, 30, 90, 180, 365, 1095] as const;
 const WEIGHT_SCROLL_FLOOR_YMD = "2026-01-01";
 
@@ -71,6 +71,24 @@ function toWeightTimelineBundle(
       chartMax: payload.chartMax,
       targetWeightKg: payload.targetWeightKg,
     },
+  };
+}
+
+function getTimelinePlotMetrics(clientWidth: number, visibleDays: number) {
+  const safeClientWidth = Math.max(1, clientWidth);
+  const safeVisibleDays = Math.max(1, visibleDays);
+  const provisionalSlotWidth = safeClientWidth / safeVisibleDays;
+  const leftInset =
+    provisionalSlotWidth / 2 >= DATE_LABEL_HALF_WIDTH
+      ? 0
+      : Math.ceil(DATE_LABEL_HALF_WIDTH - provisionalSlotWidth / 2);
+  const contentWidth = Math.max(1, safeClientWidth - leftInset);
+  const slotWidth = contentWidth / safeVisibleDays;
+
+  return {
+    leftInset,
+    contentWidth,
+    slotWidth,
   };
 }
 
@@ -702,13 +720,18 @@ function WeightGraphCard({
     () => Math.max(1, visibleWindowDays),
     [visibleWindowDays],
   );
-  const slotWidth = useMemo(() => {
-    if (effectiveVisibleDays <= 0) {
-      return TIMELINE_SLOT_WIDTH;
-    }
-    // 表示期間に対して1日幅を厳密に合わせ、グリッド端のズレを防ぐ
-    return viewportWidth / effectiveVisibleDays;
-  }, [effectiveVisibleDays, viewportWidth]);
+  const plotMetrics = useMemo(
+    () => getTimelinePlotMetrics(viewportWidth, effectiveVisibleDays),
+    [effectiveVisibleDays, viewportWidth],
+  );
+  const { leftInset, slotWidth } = plotMetrics;
+  const rightAlignMargin = useMemo(
+    () =>
+      timelinePoints.length < effectiveVisibleDays
+        ? (effectiveVisibleDays - timelinePoints.length) * slotWidth
+        : 0,
+    [effectiveVisibleDays, slotWidth, timelinePoints.length],
+  );
   const dateLabelStep = useMemo(() => {
     if (visibleWindowDays <= 7) return 1;
     if (visibleWindowDays <= 30) return 4;
@@ -793,7 +816,10 @@ function WeightGraphCard({
 
     const nextViewportWidth = Math.max(1, element.clientWidth);
     const visibleCount = Math.max(1, effectiveVisibleDays);
-    const nextSlotWidth = nextViewportWidth / visibleCount;
+    const { slotWidth: nextSlotWidth } = getTimelinePlotMetrics(
+      nextViewportWidth,
+      visibleCount,
+    );
     const maxStart = Math.max(0, timelinePoints.length - visibleCount);
     const endIndex = Math.min(
       timelinePoints.length - 1,
@@ -802,10 +828,11 @@ function WeightGraphCard({
     const preferredRightLabelIndex = Math.max(0, endIndex - rightLabelOffset);
     const nextDateLabelPhase = preferredRightLabelIndex % dateLabelStep;
     const minScrollLeft = scrollFloorIndex * nextSlotWidth;
-    const nextScrollLeft = Math.max(
-      minScrollLeft,
-      Math.max(0, element.scrollWidth - element.clientWidth),
+    const maxScrollLeft = Math.max(
+      0,
+      element.scrollWidth - element.clientWidth,
     );
+    const nextScrollLeft = Math.max(minScrollLeft, maxScrollLeft);
     const startIndex = Math.min(
       maxStart,
       Math.max(scrollFloorIndex, Math.round(nextScrollLeft / nextSlotWidth)),
@@ -855,19 +882,23 @@ function WeightGraphCard({
       const nextViewportWidth = Math.max(1, element.clientWidth);
       setViewportWidth(nextViewportWidth);
       const visibleCount = Math.max(1, effectiveVisibleDays);
+      const { slotWidth: nextSlotWidth } = getTimelinePlotMetrics(
+        nextViewportWidth,
+        visibleCount,
+      );
       const maxStart = Math.max(0, timelinePoints.length - visibleCount);
       const maxScrollLeft = Math.max(
         0,
         element.scrollWidth - element.clientWidth,
       );
-      const minScrollLeft = scrollFloorIndex * slotWidth;
+      const minScrollLeft = scrollFloorIndex * nextSlotWidth;
       if (element.scrollLeft < minScrollLeft) {
         element.scrollLeft = minScrollLeft;
       }
       const isNearRightEdge = element.scrollLeft >= maxScrollLeft - 1;
       const rawStart = isNearRightEdge
         ? maxStart
-        : Math.round(element.scrollLeft / slotWidth);
+        : Math.round(element.scrollLeft / nextSlotWidth);
       const startIndex = Math.min(
         maxStart,
         Math.max(scrollFloorIndex, rawStart),
@@ -895,7 +926,11 @@ function WeightGraphCard({
       // ブラウザの履歴スワイプを抑止して、グラフ横スクロールに専念させる
       event.preventDefault();
       event.stopPropagation();
-      const minScrollLeft = scrollFloorIndex * slotWidth;
+      const { slotWidth: wheelSlotWidth } = getTimelinePlotMetrics(
+        element.clientWidth,
+        effectiveVisibleDays,
+      );
+      const minScrollLeft = scrollFloorIndex * wheelSlotWidth;
       element.scrollLeft = Math.max(
         minScrollLeft,
         element.scrollLeft + dominantDelta,
@@ -914,7 +949,6 @@ function WeightGraphCard({
   }, [
     effectiveVisibleDays,
     scrollFloorIndex,
-    slotWidth,
     timelinePoints,
   ]);
 
@@ -1087,32 +1121,42 @@ function WeightGraphCard({
                 position: "relative",
                 overscrollBehaviorX: "contain",
                 overscrollBehaviorY: "contain",
+                paddingLeft: leftInset,
+                boxSizing: "border-box",
               }}
             >
               <div
                 style={{
                   position: "relative",
-                  width: Math.max(CHART_PLOT_WIDTH, chart.chartWidth),
+                  width: chart.chartWidth + rightAlignMargin,
                   height: "100%",
                 }}
               >
+                <div
+                  style={{
+                    position: "relative",
+                    marginLeft: rightAlignMargin,
+                    width: chart.chartWidth,
+                    height: "100%",
+                  }}
+                >
                 <svg
-                  width={Math.max(CHART_PLOT_WIDTH, chart.chartWidth)}
+                  width={chart.chartWidth}
                   height="100%"
-                  viewBox={`0 0 ${Math.max(CHART_PLOT_WIDTH, chart.chartWidth)} ${CHART_HEIGHT}`}
+                  viewBox={`0 0 ${chart.chartWidth} ${CHART_HEIGHT}`}
                   preserveAspectRatio="none"
                   style={{ display: "block" }}
                 >
                   <ChartGrid
                     horizontalTicks={chart.axis.ticks}
                     verticalLines={verticalLines}
-                    plotWidth={Math.max(CHART_PLOT_WIDTH, chart.chartWidth)}
+                    plotWidth={chart.chartWidth}
                   />
                   {chart.goalY !== null && (
                     <line
                       x1="0"
                       y1={chart.goalY}
-                      x2={Math.max(CHART_PLOT_WIDTH, chart.chartWidth)}
+                      x2={chart.chartWidth}
                       y2={chart.goalY}
                       stroke={ORANGE}
                       strokeWidth="1"
@@ -1151,6 +1195,7 @@ function WeightGraphCard({
                     }}
                   />
                 ))}
+                </div>
               </div>
             </div>
           </div>
@@ -1176,15 +1221,25 @@ function WeightGraphCard({
               overflowY: "hidden",
               scrollbarWidth: "none",
               pointerEvents: "none",
+              paddingLeft: leftInset,
+              boxSizing: "border-box",
             }}
           >
             <div
               style={{
-                width: Math.max(CHART_PLOT_WIDTH, chart.chartWidth),
+                width: chart.chartWidth + rightAlignMargin,
                 position: "relative",
                 height: 20,
               }}
             >
+              <div
+                style={{
+                  marginLeft: rightAlignMargin,
+                  width: chart.chartWidth,
+                  position: "relative",
+                  height: 20,
+                }}
+              >
               {timelinePoints.map((point, index) => (
                 <span
                   key={`${point.date}-${index}`}
@@ -1206,6 +1261,7 @@ function WeightGraphCard({
                     : ""}
                 </span>
               ))}
+              </div>
             </div>
           </div>
         </div>
