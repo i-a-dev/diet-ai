@@ -7,7 +7,6 @@ import {
   type ReactNode,
 } from "react";
 import {
-  Calendar,
   Footprints,
   PersonStanding,
   UtensilsCrossed,
@@ -417,10 +416,7 @@ export function GraphScreen() {
         minHeight: 0,
       }}
     >
-      <TopNav
-        title="記録を見る"
-        rightIcon={<Calendar size={22} color="#C0C0C0" />}
-      />
+      <TopNav title="記録を見る" />
 
       <div
         style={{

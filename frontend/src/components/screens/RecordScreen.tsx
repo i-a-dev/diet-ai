@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  Calendar,
   ChevronLeft,
   ChevronRight,
   Cookie,
@@ -357,7 +356,7 @@ export function RecordScreen() {
         minHeight: 0,
       }}
     >
-      <TopNav title="記録する" rightIcon={<Calendar size={22} color="#C0C0C0" />} />
+      <TopNav title="記録する" />
       <div
         style={{
           display: "flex",

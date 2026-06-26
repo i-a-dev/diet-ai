@@ -3,7 +3,7 @@ import { Menu } from "lucide-react";
 
 interface TopNavProps {
   title: string;
-  rightIcon: ReactNode;
+  rightIcon?: ReactNode;
 }
 
 export function TopNav({ title, rightIcon }: TopNavProps) {
@@ -30,7 +30,9 @@ export function TopNav({ title, rightIcon }: TopNavProps) {
       >
         {title}
       </span>
-      <span style={{ display: "flex", alignItems: "center" }}>{rightIcon}</span>
+      <span style={{ display: "flex", alignItems: "center", width: 22 }}>
+        {rightIcon}
+      </span>
     </div>
   );
 }
