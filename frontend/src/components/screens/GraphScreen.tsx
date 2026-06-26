@@ -44,6 +44,7 @@ const STEP_AXIS_TICKS = [0, 43, 86, CHART_HEIGHT] as const;
 const CHART_GRID_COLOR = "#ECECEC";
 const WEIGHT_AXIS_STEP_THRESHOLD_KG = 15;
 const DATE_LABEL_HALF_WIDTH = 14;
+const LATEST_POINT_REFERENCE_VISIBLE_DAYS = 7;
 const PERIOD_DAY_WINDOWS = [7, 30, 90, 180, 365, 1095] as const;
 const WEIGHT_SCROLL_FLOOR_YMD = "2026-01-01";
 
@@ -89,6 +90,63 @@ function getTimelinePlotMetrics(clientWidth: number, visibleDays: number) {
     leftInset,
     contentWidth,
     slotWidth,
+  };
+}
+
+function getLatestPointAnchorX(contentWidth: number) {
+  return (
+    contentWidth -
+    contentWidth / (2 * LATEST_POINT_REFERENCE_VISIBLE_DAYS)
+  );
+}
+
+function getTimelineLatestAlignment(
+  clientWidth: number,
+  visibleDays: number,
+  timelineLength: number,
+  scrollFloorIndex: number,
+) {
+  const metrics = getTimelinePlotMetrics(clientWidth, visibleDays);
+  const weekMetrics = getTimelinePlotMetrics(
+    clientWidth,
+    LATEST_POINT_REFERENCE_VISIBLE_DAYS,
+  );
+  const screenAnchorX = getLatestPointAnchorX(weekMetrics.contentWidth);
+  const { leftInset, slotWidth } = metrics;
+
+  const leadingPadSlots = Math.max(0, visibleDays - timelineLength);
+  const dataSlotCount = leadingPadSlots + timelineLength;
+  const lastCenterChart =
+    timelineLength > 0
+      ? (dataSlotCount - 1) * slotWidth + slotWidth / 2
+      : 0;
+
+  const rawScrollLeft = leftInset + lastCenterChart - screenAnchorX;
+  // 表示日数よりデータが多いときだけスクロール下限を適用（週タブ相当）。
+  // 1年・3年のようにデータ長≒表示幅のときは下限をかけると最新点のアンカー位置と衝突する。
+  const minScrollLeft =
+    timelineLength > visibleDays
+      ? Math.max(0, scrollFloorIndex * slotWidth)
+      : 0;
+  const targetScrollLeft = Math.max(minScrollLeft, rawScrollLeft);
+
+  const minChartSlotsForScroll = Math.ceil(
+    (targetScrollLeft + clientWidth) / slotWidth,
+  );
+  const chartSlotCount = Math.max(
+    visibleDays,
+    dataSlotCount,
+    minChartSlotsForScroll,
+  );
+
+  return {
+    leftInset,
+    slotWidth,
+    leadingPadSlots,
+    chartSlotCount,
+    screenAnchorX,
+    targetScrollLeft,
+    minScrollLeft,
   };
 }
 
@@ -720,18 +778,23 @@ function WeightGraphCard({
     () => Math.max(1, visibleWindowDays),
     [visibleWindowDays],
   );
-  const plotMetrics = useMemo(
-    () => getTimelinePlotMetrics(viewportWidth, effectiveVisibleDays),
-    [effectiveVisibleDays, viewportWidth],
-  );
-  const { leftInset, slotWidth } = plotMetrics;
-  const rightAlignMargin = useMemo(
+  const latestAlignment = useMemo(
     () =>
-      timelinePoints.length < effectiveVisibleDays
-        ? (effectiveVisibleDays - timelinePoints.length) * slotWidth
-        : 0,
-    [effectiveVisibleDays, slotWidth, timelinePoints.length],
+      getTimelineLatestAlignment(
+        viewportWidth,
+        effectiveVisibleDays,
+        timelinePoints.length,
+        scrollFloorIndex,
+      ),
+    [
+      effectiveVisibleDays,
+      scrollFloorIndex,
+      timelinePoints.length,
+      viewportWidth,
+    ],
   );
+  const { leftInset, slotWidth, leadingPadSlots, chartSlotCount } =
+    latestAlignment;
   const dateLabelStep = useMemo(() => {
     if (visibleWindowDays <= 7) return 1;
     if (visibleWindowDays <= 30) return 4;
@@ -773,7 +836,8 @@ function WeightGraphCard({
     const plotMin = axis.chartMin;
     const plotMax = axis.chartMax;
     const xs = timelinePoints.map(
-      (_, index) => slotWidth * index + slotWidth / 2,
+      (_, index) =>
+        (leadingPadSlots + index) * slotWidth + slotWidth / 2,
     );
     const lineSegments = buildWeightLineSegments(
       xs,
@@ -804,9 +868,9 @@ function WeightGraphCard({
         timelineBounds.targetWeightKg === null
           ? null
           : weightToY(timelineBounds.targetWeightKg, plotMin, plotMax),
-      chartWidth: timelinePoints.length * slotWidth,
+      chartWidth: chartSlotCount * slotWidth,
     };
-  }, [slotWidth, timelineBounds, timelinePoints]);
+  }, [chartSlotCount, leadingPadSlots, slotWidth, timelineBounds, timelinePoints]);
 
   useLayoutEffect(() => {
     const element = scrollRef.current;
@@ -816,9 +880,11 @@ function WeightGraphCard({
 
     const nextViewportWidth = Math.max(1, element.clientWidth);
     const visibleCount = Math.max(1, effectiveVisibleDays);
-    const { slotWidth: nextSlotWidth } = getTimelinePlotMetrics(
+    const alignment = getTimelineLatestAlignment(
       nextViewportWidth,
       visibleCount,
+      timelinePoints.length,
+      scrollFloorIndex,
     );
     const maxStart = Math.max(0, timelinePoints.length - visibleCount);
     const endIndex = Math.min(
@@ -827,15 +893,13 @@ function WeightGraphCard({
     );
     const preferredRightLabelIndex = Math.max(0, endIndex - rightLabelOffset);
     const nextDateLabelPhase = preferredRightLabelIndex % dateLabelStep;
-    const minScrollLeft = scrollFloorIndex * nextSlotWidth;
-    const maxScrollLeft = Math.max(
-      0,
-      element.scrollWidth - element.clientWidth,
-    );
-    const nextScrollLeft = Math.max(minScrollLeft, maxScrollLeft);
+    const nextScrollLeft = alignment.targetScrollLeft;
     const startIndex = Math.min(
       maxStart,
-      Math.max(scrollFloorIndex, Math.round(nextScrollLeft / nextSlotWidth)),
+      Math.max(
+        scrollFloorIndex,
+        Math.round(nextScrollLeft / alignment.slotWidth) - alignment.leadingPadSlots,
+      ),
     );
 
     setViewportWidth(nextViewportWidth);
@@ -870,6 +934,7 @@ function WeightGraphCard({
     rightLabelOffset,
     scrollFloorIndex,
     timelinePoints,
+    leadingPadSlots,
   ]);
 
   useEffect(() => {
@@ -882,23 +947,30 @@ function WeightGraphCard({
       const nextViewportWidth = Math.max(1, element.clientWidth);
       setViewportWidth(nextViewportWidth);
       const visibleCount = Math.max(1, effectiveVisibleDays);
-      const { slotWidth: nextSlotWidth } = getTimelinePlotMetrics(
+      const alignment = getTimelineLatestAlignment(
         nextViewportWidth,
         visibleCount,
+        timelinePoints.length,
+        scrollFloorIndex,
       );
       const maxStart = Math.max(0, timelinePoints.length - visibleCount);
       const maxScrollLeft = Math.max(
         0,
         element.scrollWidth - element.clientWidth,
       );
-      const minScrollLeft = scrollFloorIndex * nextSlotWidth;
-      if (element.scrollLeft < minScrollLeft) {
-        element.scrollLeft = minScrollLeft;
+      if (element.scrollLeft < alignment.minScrollLeft) {
+        element.scrollLeft = alignment.minScrollLeft;
       }
       const isNearRightEdge = element.scrollLeft >= maxScrollLeft - 1;
+      const anchoredScrollLeft = alignment.targetScrollLeft;
+      if (isNearRightEdge) {
+        element.scrollLeft = anchoredScrollLeft;
+      }
       const rawStart = isNearRightEdge
-        ? maxStart
-        : Math.round(element.scrollLeft / nextSlotWidth);
+        ? Math.round(anchoredScrollLeft / alignment.slotWidth) -
+          alignment.leadingPadSlots
+        : Math.round(element.scrollLeft / alignment.slotWidth) -
+          alignment.leadingPadSlots;
       const startIndex = Math.min(
         maxStart,
         Math.max(scrollFloorIndex, rawStart),
@@ -926,13 +998,14 @@ function WeightGraphCard({
       // ブラウザの履歴スワイプを抑止して、グラフ横スクロールに専念させる
       event.preventDefault();
       event.stopPropagation();
-      const { slotWidth: wheelSlotWidth } = getTimelinePlotMetrics(
+      const { minScrollLeft: wheelMinScrollLeft } = getTimelineLatestAlignment(
         element.clientWidth,
         effectiveVisibleDays,
+        timelinePoints.length,
+        scrollFloorIndex,
       );
-      const minScrollLeft = scrollFloorIndex * wheelSlotWidth;
       element.scrollLeft = Math.max(
-        minScrollLeft,
+        wheelMinScrollLeft,
         element.scrollLeft + dominantDelta,
       );
     };
@@ -1029,7 +1102,7 @@ function WeightGraphCard({
     if (!shouldShowDateLabel(index)) {
       return [];
     }
-    return [index * slotWidth + slotWidth / 2];
+    return [leadingPadSlots * slotWidth + index * slotWidth + slotWidth / 2];
   });
 
   return (
@@ -1128,18 +1201,10 @@ function WeightGraphCard({
               <div
                 style={{
                   position: "relative",
-                  width: chart.chartWidth + rightAlignMargin,
+                  width: chart.chartWidth,
                   height: "100%",
                 }}
               >
-                <div
-                  style={{
-                    position: "relative",
-                    marginLeft: rightAlignMargin,
-                    width: chart.chartWidth,
-                    height: "100%",
-                  }}
-                >
                 <svg
                   width={chart.chartWidth}
                   height="100%"
@@ -1195,7 +1260,6 @@ function WeightGraphCard({
                     }}
                   />
                 ))}
-                </div>
               </div>
             </div>
           </div>
@@ -1227,25 +1291,20 @@ function WeightGraphCard({
           >
             <div
               style={{
-                width: chart.chartWidth + rightAlignMargin,
+                width: chart.chartWidth,
                 position: "relative",
                 height: 20,
               }}
             >
-              <div
-                style={{
-                  marginLeft: rightAlignMargin,
-                  width: chart.chartWidth,
-                  position: "relative",
-                  height: 20,
-                }}
-              >
               {timelinePoints.map((point, index) => (
                 <span
                   key={`${point.date}-${index}`}
                   style={{
                     position: "absolute",
-                    left: index * slotWidth + slotWidth / 2,
+                    left:
+                      leadingPadSlots * slotWidth +
+                      index * slotWidth +
+                      slotWidth / 2,
                     transform: "translateX(-50%)",
                     fontSize: 11,
                     color: "#888",
@@ -1261,7 +1320,6 @@ function WeightGraphCard({
                     : ""}
                 </span>
               ))}
-              </div>
             </div>
           </div>
         </div>
