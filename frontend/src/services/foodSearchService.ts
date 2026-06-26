@@ -435,14 +435,11 @@ function buildProgress(
   steps: FoodSearchStep[],
   result: FoodSearchResult | null,
   message: string,
-  canUseAiWebSearch = false,
 ): FoodSearchProgress {
   return {
     state,
     steps,
     result,
-    quota: getWebSearchQuota(),
-    canUseAiWebSearch,
     message,
   };
 }
@@ -510,15 +507,12 @@ export async function searchFoodByText(
         steps,
         claudeResult,
         "AI推定の精度が低い可能性があります",
-        true,
       ),
     );
   }
 
   return emitProgress(onProgress, buildProgress("estimated", steps, claudeResult, "AIがカロリーを推定しました"));
 }
-
-export const searchFood = searchFoodByText;
 
 export async function runAiWebSearch(
   rawInput: string,
@@ -541,12 +535,11 @@ export async function runAiWebSearch(
       const webEstimate = await estimateCalories(input, "web");
       const result = resultFromEstimate(input, "ai_web_search", webEstimate);
       storeResult(result);
-      const updatedQuota = consumeWebSearchQuota();
+      consumeWebSearchQuota();
       return emitProgress(onProgress, {
         state: "web_found",
         steps: updateStep(steps, "ai_web_searching", "done"),
         result,
-        quota: updatedQuota,
         message: "候補が見つかりました",
       });
     }
@@ -559,8 +552,6 @@ export async function runAiWebSearch(
     state: "low_confidence_estimate",
     steps: updateStep(steps, "ai_web_searching", "done"),
     result: fallbackEstimate,
-    quota: getWebSearchQuota(),
-    canUseAiWebSearch: false,
     message: "Web検索しましたが、うまくヒットしませんでした。AI推定カロリーを表示しています。",
   });
 }

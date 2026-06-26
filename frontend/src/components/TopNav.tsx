@@ -1,11 +1,8 @@
-import type { ReactNode } from "react";
-
 interface TopNavProps {
   title: string;
-  rightIcon?: ReactNode;
 }
 
-export function TopNav({ title, rightIcon }: TopNavProps) {
+export function TopNav({ title }: TopNavProps) {
   return (
     <div
       style={{
@@ -29,9 +26,7 @@ export function TopNav({ title, rightIcon }: TopNavProps) {
       >
         {title}
       </span>
-      <span style={{ display: "flex", alignItems: "center", width: 22 }}>
-        {rightIcon}
-      </span>
+      <span style={{ width: 22 }} />
     </div>
   );
 }

@@ -1,4 +1,10 @@
-import type { WebSearchQuota } from "../types/foodSearch.ts";
+export interface WebSearchQuota {
+  monthlyLimit: number;
+  usedCount: number;
+  remainingCount: number;
+  resetDate: string;
+  isPremium: boolean;
+}
 
 const WEB_SEARCH_USAGE_KEY = "dietai.webSearchUsage.v1";
 const DEFAULT_MONTHLY_LIMIT = 20;

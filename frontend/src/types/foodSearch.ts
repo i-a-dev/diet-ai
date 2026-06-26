@@ -45,14 +45,6 @@ export interface FoodSearchResult {
   items?: FoodResultItem[];
 }
 
-export interface WebSearchQuota {
-  monthlyLimit: number;
-  usedCount: number;
-  remainingCount: number;
-  resetDate: string;
-  isPremium: boolean;
-}
-
 export interface FoodSearchStep {
   key:
     | "regex_extracting"
@@ -69,13 +61,5 @@ export interface FoodSearchProgress {
   state: SearchState;
   steps: FoodSearchStep[];
   result: FoodSearchResult | null;
-  quota: WebSearchQuota | null;
-  canUseAiWebSearch?: boolean;
   message?: string;
-}
-
-export interface NormalizedFoodItem {
-  name: string;
-  amount: number;
-  unit: string;
 }

@@ -13,7 +13,6 @@ require_once __DIR__ . '/../src/WeightRepository.php';
 require_once __DIR__ . '/../src/MealEntryRepository.php';
 require_once __DIR__ . '/../src/ActivityRepository.php';
 require_once __DIR__ . '/../src/CalorieEstimateService.php';
-require_once __DIR__ . '/../src/FoodNormalizeService.php';
 require_once __DIR__ . '/../src/ExerciseMetEstimateService.php';
 require_once __DIR__ . '/../src/UserProfileRepository.php';
 
@@ -22,7 +21,6 @@ $userProfileRepository = new UserProfileRepository();
 $mealEntryRepository = new MealEntryRepository();
 $activityRepository = new ActivityRepository();
 $calorieEstimateService = new CalorieEstimateService();
-$foodNormalizeService = new FoodNormalizeService();
 $exerciseMetEstimateService = new ExerciseMetEstimateService();
 $requestMethod = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 $requestPath = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
@@ -349,55 +347,6 @@ if ($requestMethod === 'POST' && $requestPath === '/api/foods/estimate-calories'
     }
 
     json_response($result);
-}
-
-// POST /api/foods/normalize — Claude Haiku で食品入力を正規化
-if ($requestMethod === 'POST' && $requestPath === '/api/foods/normalize') {
-    $body = json_decode(file_get_contents('php://input') ?: '{}', true);
-    $foodName = trim((string) ($body['foodName'] ?? ''));
-
-    try {
-        $result = $foodNormalizeService->normalize($foodName);
-    } catch (InvalidArgumentException $exception) {
-        json_response(['message' => $exception->getMessage()], 422);
-    } catch (RuntimeException $exception) {
-        json_response(['message' => $exception->getMessage()], 502);
-    }
-
-    json_response($result);
-}
-
-// GET /api/profile — 目標体重・身長などのプロフィール
-if ($requestMethod === 'GET' && $requestPath === '/api/profile') {
-    json_response(['profile' => $userProfileRepository->get()]);
-}
-
-// PATCH /api/profile — プロフィールの更新
-if ($requestMethod === 'PATCH' && $requestPath === '/api/profile') {
-    $body = json_decode(file_get_contents('php://input') ?: '{}', true);
-    $fields = [];
-
-    if (array_key_exists('targetWeightKg', $body)) {
-        $value = $body['targetWeightKg'];
-        $fields['targetWeightKg'] = is_numeric($value) ? round((float) $value, 1) : null;
-    }
-
-    if (array_key_exists('heightCm', $body)) {
-        $value = $body['heightCm'];
-        $fields['heightCm'] = is_numeric($value) ? round((float) $value, 1) : null;
-    }
-
-    if ($fields === []) {
-        json_response(['message' => 'No updatable fields provided'], 422);
-    }
-
-    try {
-        $profile = $userProfileRepository->update($fields);
-    } catch (InvalidArgumentException $exception) {
-        json_response(['message' => $exception->getMessage()], 422);
-    }
-
-    json_response(['profile' => $profile]);
 }
 
 // GET /api/reports/weight-timeline — 体重グラフの横スクロール用時系列データ

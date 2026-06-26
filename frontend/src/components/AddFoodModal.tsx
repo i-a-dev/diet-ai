@@ -70,7 +70,6 @@ function makeInitialProgress(): FoodSearchProgress {
     state: "idle",
     steps: INITIAL_STEPS.map((step) => ({ ...step })),
     result: null,
-    quota: null,
   };
 }
 

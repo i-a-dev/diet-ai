@@ -253,29 +253,6 @@ export function estimateCalories(
   });
 }
 
-export interface FoodNormalizeItem {
-  name: string;
-  amount: number;
-  unit: string;
-}
-
-export interface FoodNormalizeResponse {
-  items: FoodNormalizeItem[];
-}
-
-export function normalizeFoodInput(foodName: string) {
-  return request<FoodNormalizeResponse>("/foods/normalize", {
-    method: "POST",
-    body: JSON.stringify({ foodName }),
-  });
-}
-
-export interface UserProfile {
-  targetWeightKg: number | null;
-  heightCm: number | null;
-  updatedAt: string | null;
-}
-
 export interface WeightChartPoint {
   label: string;
   value: number | null;
@@ -326,18 +303,4 @@ export function fetchMetricTimeline(
     visibleDays: String(visibleDays),
   });
   return request<MetricTimelineResponse>(`/reports/metric-timeline?${query}`);
-}
-
-export function fetchProfile() {
-  return request<{ profile: UserProfile }>("/profile");
-}
-
-export function updateProfile(fields: {
-  targetWeightKg?: number | null;
-  heightCm?: number | null;
-}) {
-  return request<{ profile: UserProfile }>("/profile", {
-    method: "PATCH",
-    body: JSON.stringify(fields),
-  });
 }
