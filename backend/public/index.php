@@ -12,13 +12,11 @@ require_once __DIR__ . '/../src/Database.php';
 require_once __DIR__ . '/../src/WeightRepository.php';
 require_once __DIR__ . '/../src/MealEntryRepository.php';
 require_once __DIR__ . '/../src/ActivityRepository.php';
-require_once __DIR__ . '/../src/MockRepository.php';
 require_once __DIR__ . '/../src/CalorieEstimateService.php';
 require_once __DIR__ . '/../src/FoodNormalizeService.php';
 require_once __DIR__ . '/../src/ExerciseMetEstimateService.php';
 require_once __DIR__ . '/../src/UserProfileRepository.php';
 
-$repository = new MockRepository();
 $weightRepository = new WeightRepository();
 $userProfileRepository = new UserProfileRepository();
 $mealEntryRepository = new MealEntryRepository();
@@ -82,40 +80,7 @@ function composeExerciseEstimateNote(string $source, string $inputExercise, stri
     return $trimmedRawNote !== '' ? $base . '。' . $trimmedRawNote : $base;
 }
 
-// GET /api/chat/messages — チャット履歴を取得
-if ($requestMethod === 'GET' && $requestPath === '/api/chat/messages') {
-    json_response(['messages' => $repository->getChatMessages()]);
-}
-
-// POST /api/chat/messages — チャットメッセージを送信（固定返信）
-if ($requestMethod === 'POST' && $requestPath === '/api/chat/messages') {
-    $body = json_decode(file_get_contents('php://input') ?: '{}', true);
-    $text = trim((string) ($body['text'] ?? ''));
-
-    if ($text === '') {
-        json_response(['message' => 'text is required'], 422);
-    }
-
-    $now = (new DateTimeImmutable('now', new DateTimeZone('Asia/Tokyo')))->format(DateTimeInterface::ATOM);
-    $replyText = 'ナイス記録です。明日は朝食を高タンパクにして、夜は軽めに調整しましょう。';
-
-    json_response([
-        'userMessage' => [
-            'id' => 'u-' . bin2hex(random_bytes(6)),
-            'role' => 'user',
-            'text' => $text,
-            'sentAt' => $now,
-        ],
-        'assistantMessage' => [
-            'id' => 'a-' . bin2hex(random_bytes(6)),
-            'role' => 'assistant',
-            'text' => $replyText,
-            'sentAt' => $now,
-        ],
-    ]);
-}
-
-// GET /api/records/daily — 記録画面用の日次データ（体重は DB から取得）
+// GET /api/records/daily — 記録画面用の日次データ
 if ($requestMethod === 'GET' && $requestPath === '/api/records/daily') {
     $date = trim((string) ($_GET['date'] ?? WeightRepository::todayDate()));
 
@@ -123,21 +88,19 @@ if ($requestMethod === 'GET' && $requestPath === '/api/records/daily') {
         json_response(['message' => 'date must be YYYY-MM-DD'], 422);
     }
 
-    $record = $repository->getDailyRecord();
     $weightSummary = $weightRepository->getSummaryForDate($date);
     $mealSections = $mealEntryRepository->getSectionsForDate($date);
     $stepsSummary = $activityRepository->getStepsForDate($date);
     $exerciseSummary = $activityRepository->getExercisesForDate($date);
 
-    // モックの weight を DB の値で上書き
-    $record['date'] = $weightSummary['dateLabel'] ?? WeightRepository::formatDateLabel($date);
-    $record['recordedOn'] = $date;
-    $record['weight'] = $weightSummary;
-    $record['meals'] = $mealSections;
-    $record['steps'] = $stepsSummary;
-    $record['exercises'] = $exerciseSummary;
-
-    json_response($record);
+    json_response([
+        'date' => $weightSummary['dateLabel'] ?? WeightRepository::formatDateLabel($date),
+        'recordedOn' => $date,
+        'weight' => $weightSummary,
+        'meals' => $mealSections,
+        'steps' => $stepsSummary,
+        'exercises' => $exerciseSummary,
+    ]);
 }
 
 // POST /api/records/steps — 歩数を登録・更新
@@ -435,69 +398,6 @@ if ($requestMethod === 'PATCH' && $requestPath === '/api/profile') {
     }
 
     json_response(['profile' => $profile]);
-}
-
-// GET /api/reports/weekly — グラフ画面用の週次レポート（体重は DB から取得）
-if ($requestMethod === 'GET' && $requestPath === '/api/reports/weekly') {
-    $endDate = trim((string) ($_GET['endDate'] ?? WeightRepository::todayDate()));
-
-    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $endDate)) {
-        json_response(['message' => 'endDate must be YYYY-MM-DD'], 422);
-    }
-
-    $report = $repository->getWeeklyReport();
-    $points = $weightRepository->getPointsEndingOn($endDate, 7);
-    $profile = $userProfileRepository->get();
-    $targetWeightKg = $profile['targetWeightKg'];
-
-    $values = array_values(array_filter(
-        array_map(static fn (array $point): ?float => $point['value'], $points),
-        static fn (?float $value): bool => $value !== null
-    ));
-
-    $timezone = new DateTimeZone('Asia/Tokyo');
-    $end = new DateTimeImmutable($endDate, $timezone);
-    $start = $end->modify('-6 days');
-    $weekdays = ['日', '月', '火', '水', '木', '金', '土'];
-    $startWeekday = $weekdays[(int) $start->format('w')];
-    $endWeekday = $weekdays[(int) $end->format('w')];
-
-    $report['rangeLabel'] = sprintf(
-        '%s（%s）〜 %s（%s）',
-        $start->format('n/j'),
-        $startWeekday,
-        $end->format('n/j'),
-        $endWeekday
-    );
-
-    $periodMin = $values !== [] ? min($values) : null;
-    $chartBounds = $weightRepository->computeChartBounds($targetWeightKg, $periodMin);
-    $first = $values !== [] ? $values[0] : null;
-    $last = $values !== [] ? $values[count($values) - 1] : null;
-
-    $report['weight'] = [
-        'points' => array_map(
-            static fn (array $point): array => [
-                'label' => $point['label'],
-                'value' => $point['value'],
-            ],
-            $points
-        ),
-        'weeklyAverage' => $values !== []
-            ? round(array_sum($values) / count($values), 1)
-            : null,
-        'weeklyDiff' => ($first !== null && $last !== null)
-            ? round($last - $first, 1)
-            : null,
-        'targetWeightKg' => $targetWeightKg,
-        'targetDiff' => ($targetWeightKg !== null && $last !== null)
-            ? round($targetWeightKg - $last, 1)
-            : null,
-        'chartMin' => $chartBounds['min'],
-        'chartMax' => $chartBounds['max'],
-    ];
-
-    json_response($report);
 }
 
 // GET /api/reports/weight-timeline — 体重グラフの横スクロール用時系列データ

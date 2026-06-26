@@ -104,51 +104,6 @@ final class WeightRepository
     }
 
     /**
-     * グラフ用に、終了日から遡った N 日分の枠を返す。
-     * 記録がない日は value を null にする（日付ラベルは常に N 日分）。
-     *
-     * @return array<int, array{label: string, value: float|null, date: string}>
-     */
-    public function getPointsEndingOn(string $endDate, int $days = 7): array
-    {
-        $timezone = new DateTimeZone('Asia/Tokyo');
-        $end = new DateTimeImmutable($endDate, $timezone);
-        $start = $end->modify(sprintf('-%d days', $days - 1))->format('Y-m-d');
-
-        $statement = $this->db->prepare(
-            'SELECT recorded_on, weight_kg
-             FROM weight_entries
-             WHERE recorded_on BETWEEN :start AND :end
-             ORDER BY recorded_on ASC'
-        );
-        $statement->execute([
-            'start' => $start,
-            'end' => $endDate,
-        ]);
-
-        /** @var array<string, float> $byDate 日付をキーにした体重の連想配列 */
-        $byDate = [];
-
-        foreach ($statement->fetchAll() as $row) {
-            $byDate[(string) $row['recorded_on']] = (float) $row['weight_kg'];
-        }
-
-        $points = [];
-
-        for ($index = $days - 1; $index >= 0; $index--) {
-            $date = $end->modify(sprintf('-%d days', $index))->format('Y-m-d');
-
-            $points[] = [
-                'label' => self::formatShortLabel($date),
-                'value' => $byDate[$date] ?? null,
-                'date' => $date,
-            ];
-        }
-
-        return $points;
-    }
-
-    /**
      * 指定期間（開始日〜終了日）の体重点列を返す。
      * 記録がない日は value を null にする。
      *

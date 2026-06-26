@@ -1,4 +1,4 @@
-import { Bike, Camera, Footprints, History, Moon, Sun, Sunset, Users } from 'lucide-react'
+import { Bike, Camera, Footprints, Moon, Sun, Sunset, Users } from 'lucide-react'
 import { BubbleCoach } from '../BubbleCoach.tsx'
 import { BubbleUser } from '../BubbleUser.tsx'
 import { CoachAvatar } from '../CoachAvatar.tsx'
@@ -9,7 +9,7 @@ import { ORANGE } from '../../constants.ts'
 export function ChatScreen() {
   return (
     <>
-      <TopNav title="AIコーチと相談" rightIcon={<History size={22} color="#C0C0C0" />} />
+      <TopNav title="AIコーチと相談" />
       <div style={{ flex: 1, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 14, overflowY: 'auto', background: '#fff' }}>
         <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
           <CoachAvatar />

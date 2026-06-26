@@ -285,21 +285,6 @@ export interface WeightTimelinePoint extends WeightChartPoint {
   date: string;
 }
 
-export interface WeeklyWeightReport {
-  points: WeightChartPoint[];
-  weeklyAverage: number | null;
-  weeklyDiff: number | null;
-  targetWeightKg: number | null;
-  targetDiff: number | null;
-  chartMin: number;
-  chartMax: number;
-}
-
-export interface WeeklyReportResponse {
-  rangeLabel: string;
-  weight: WeeklyWeightReport;
-}
-
 export interface WeightTimelineResponse {
   weight: {
     points: WeightTimelinePoint[];
@@ -308,11 +293,6 @@ export interface WeightTimelineResponse {
     chartMax: number;
     scrollFloor: string;
   };
-}
-
-export function fetchWeeklyReport(endDate?: string) {
-  const query = endDate ? `?endDate=${encodeURIComponent(endDate)}` : "";
-  return request<WeeklyReportResponse>(`/reports/weekly${query}`);
 }
 
 export function fetchWeightTimeline(endDate: string, visibleDays: number) {

@@ -28,10 +28,9 @@ docker compose up --build
 
 ## API エンドポイント
 
-- `GET /api/chat/messages`
-- `POST /api/chat/messages`
 - `GET /api/records/daily`
-- `GET /api/reports/weekly`
+- `GET /api/reports/weight-timeline`
+- `GET /api/reports/metric-timeline`
 
 ## ディレクトリ構成
 
@@ -42,7 +41,7 @@ docker compose up --build
 │   │   └── index.php
 │   └── src
 │       ├── Http.php
-│       └── MockRepository.php
+│       └── WeightRepository.php
 ├── frontend
 │   └── src
 │       ├── api

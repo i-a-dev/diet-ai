@@ -1,5 +1,4 @@
 import type { ReactNode } from "react";
-import { Menu } from "lucide-react";
 
 interface TopNavProps {
   title: string;
@@ -19,7 +18,7 @@ export function TopNav({ title, rightIcon }: TopNavProps) {
         borderBottom: "1px solid #F0F0F0",
       }}
     >
-      <Menu size={22} color="#C0C0C0" style={{ display: "block" }} />
+      <span style={{ width: 22 }} />
       <span
         style={{
           fontSize: 17,
