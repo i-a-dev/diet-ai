@@ -148,6 +148,16 @@ function getTimelineLatestAlignment(
   };
 }
 
+function clampTimelineScrollLeft(
+  scrollLeft: number,
+  alignment: ReturnType<typeof getTimelineLatestAlignment>,
+) {
+  return Math.min(
+    Math.max(scrollLeft, alignment.minScrollLeft),
+    alignment.targetScrollLeft,
+  );
+}
+
 function valueToY(value: number, max: number) {
   if (max <= 0) {
     return CHART_HEIGHT;
@@ -775,23 +785,16 @@ function BarGraphCard({
         scrollFloorIndex,
       );
       const maxStart = Math.max(0, points.length - visibleCount);
-      const maxScrollLeft = Math.max(
-        0,
-        element.scrollWidth - element.clientWidth,
+      const clampedScrollLeft = clampTimelineScrollLeft(
+        element.scrollLeft,
+        alignment,
       );
-      if (element.scrollLeft < alignment.minScrollLeft) {
-        element.scrollLeft = alignment.minScrollLeft;
+      if (clampedScrollLeft !== element.scrollLeft) {
+        element.scrollLeft = clampedScrollLeft;
       }
-      const isNearRightEdge = element.scrollLeft >= maxScrollLeft - 1;
-      const anchoredScrollLeft = alignment.targetScrollLeft;
-      if (isNearRightEdge) {
-        element.scrollLeft = anchoredScrollLeft;
-      }
-      const rawStart = isNearRightEdge
-        ? Math.round(anchoredScrollLeft / alignment.slotWidth) -
-          alignment.leadingPadSlots
-        : Math.round(element.scrollLeft / alignment.slotWidth) -
-          alignment.leadingPadSlots;
+      const rawStart =
+        Math.round(clampedScrollLeft / alignment.slotWidth) -
+        alignment.leadingPadSlots;
       const startIndex = Math.min(
         maxStart,
         Math.max(scrollFloorIndex, rawStart),
@@ -818,15 +821,15 @@ function BarGraphCard({
 
       event.preventDefault();
       event.stopPropagation();
-      const { minScrollLeft: wheelMinScrollLeft } = getTimelineLatestAlignment(
+      const wheelAlignment = getTimelineLatestAlignment(
         element.clientWidth,
         effectiveVisibleDays,
         points.length,
         scrollFloorIndex,
       );
-      element.scrollLeft = Math.max(
-        wheelMinScrollLeft,
+      element.scrollLeft = clampTimelineScrollLeft(
         element.scrollLeft + dominantDelta,
+        wheelAlignment,
       );
     };
 
@@ -1232,23 +1235,16 @@ function WeightGraphCard({
         scrollFloorIndex,
       );
       const maxStart = Math.max(0, timelinePoints.length - visibleCount);
-      const maxScrollLeft = Math.max(
-        0,
-        element.scrollWidth - element.clientWidth,
+      const clampedScrollLeft = clampTimelineScrollLeft(
+        element.scrollLeft,
+        alignment,
       );
-      if (element.scrollLeft < alignment.minScrollLeft) {
-        element.scrollLeft = alignment.minScrollLeft;
+      if (clampedScrollLeft !== element.scrollLeft) {
+        element.scrollLeft = clampedScrollLeft;
       }
-      const isNearRightEdge = element.scrollLeft >= maxScrollLeft - 1;
-      const anchoredScrollLeft = alignment.targetScrollLeft;
-      if (isNearRightEdge) {
-        element.scrollLeft = anchoredScrollLeft;
-      }
-      const rawStart = isNearRightEdge
-        ? Math.round(anchoredScrollLeft / alignment.slotWidth) -
-          alignment.leadingPadSlots
-        : Math.round(element.scrollLeft / alignment.slotWidth) -
-          alignment.leadingPadSlots;
+      const rawStart =
+        Math.round(clampedScrollLeft / alignment.slotWidth) -
+        alignment.leadingPadSlots;
       const startIndex = Math.min(
         maxStart,
         Math.max(scrollFloorIndex, rawStart),
@@ -1276,15 +1272,15 @@ function WeightGraphCard({
       // ブラウザの履歴スワイプを抑止して、グラフ横スクロールに専念させる
       event.preventDefault();
       event.stopPropagation();
-      const { minScrollLeft: wheelMinScrollLeft } = getTimelineLatestAlignment(
+      const wheelAlignment = getTimelineLatestAlignment(
         element.clientWidth,
         effectiveVisibleDays,
         timelinePoints.length,
         scrollFloorIndex,
       );
-      element.scrollLeft = Math.max(
-        wheelMinScrollLeft,
+      element.scrollLeft = clampTimelineScrollLeft(
         element.scrollLeft + dominantDelta,
+        wheelAlignment,
       );
     };
 
