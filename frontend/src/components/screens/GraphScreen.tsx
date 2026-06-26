@@ -5,7 +5,6 @@ import {
   useRef,
   useState,
   type ReactNode,
-  type Ref,
 } from "react";
 import {
   Calendar,
@@ -33,7 +32,6 @@ const STEP_GREEN_BG = "#D6F5E8";
 const STEP_GREEN_LIGHT = "#EDF9F3";
 
 const BAR_WIDTH = 13;
-const BAR_MIN_SLOT_WIDTH = 20;
 const CHART_HEIGHT = 130;
 const CHART_PLOT_WIDTH = 310;
 const Y_AXIS_WIDTH = 30;
@@ -151,20 +149,6 @@ function getTimelineLatestAlignment(
   };
 }
 
-function buildChartGridLines(
-  dayCount: number,
-  horizontalTicks: number[],
-  plotWidth = CHART_PLOT_WIDTH,
-) {
-  const columnWidth = plotWidth / dayCount;
-  const verticalLines = Array.from(
-    { length: dayCount + 1 },
-    (_, index) => index * columnWidth,
-  );
-
-  return { horizontalTicks, verticalLines };
-}
-
 function valueToY(value: number, max: number) {
   if (max <= 0) {
     return CHART_HEIGHT;
@@ -187,41 +171,85 @@ function buildValueAxis(
   return { yAxisLabels, yAxisTicks };
 }
 
-function buildBarLayout(dayCount: number, plotWidth: number) {
-  const columnWidth = plotWidth / dayCount;
-  const barWidth = Math.min(BAR_WIDTH, Math.max(4, columnWidth * 0.55));
-  const xs = Array.from(
-    { length: dayCount },
-    (_, index) => index * columnWidth + (columnWidth - barWidth) / 2,
-  );
-
-  return { barWidth, xs };
-}
-
-function getDateLabelStep(dayCount: number) {
-  if (dayCount <= 7) {
+function getTimelineDateLabelStep(
+  visibleWindowDays: number,
+  effectiveVisibleDays: number,
+) {
+  if (visibleWindowDays <= 7) {
     return 1;
   }
-  if (dayCount <= 30) {
-    return 5;
+  if (visibleWindowDays <= 30) {
+    return 4;
   }
-  if (dayCount <= 90) {
-    return 10;
+  if (visibleWindowDays <= 90) {
+    return 13;
   }
-  if (dayCount <= 180) {
-    return 15;
+  if (visibleWindowDays <= 180) {
+    return 26;
   }
-  if (dayCount <= 365) {
-    return 30;
+  if (visibleWindowDays <= 365) {
+    return Math.max(1, Math.floor((effectiveVisibleDays - 1) / 7));
   }
-  return 60;
+  return Math.max(1, Math.floor((effectiveVisibleDays - 1) / 4));
 }
 
-function buildDateLabels(points: { label: string }[]) {
-  const labelStep = getDateLabelStep(points.length);
-  return points.map((point, index) =>
-    index % labelStep === 0 || index === points.length - 1 ? point.label : "",
+function getTimelineRightLabelOffset(
+  visibleWindowDays: number,
+  dateLabelStep: number,
+) {
+  if (visibleWindowDays <= 7) {
+    return 0;
+  }
+  if (visibleWindowDays <= 90) {
+    return 5;
+  }
+  if (visibleWindowDays <= 180) {
+    return 10;
+  }
+  if (visibleWindowDays <= 365) {
+    return 15;
+  }
+  return Math.min(60, dateLabelStep - 1);
+}
+
+function shouldShowTimelineDateLabel(
+  index: number,
+  viewport: { startIndex: number; endIndex: number },
+  dateLabelPhase: number,
+  dateLabelStep: number,
+) {
+  if (index < viewport.startIndex || index > viewport.endIndex) {
+    return false;
+  }
+  return (index - dateLabelPhase) % dateLabelStep === 0;
+}
+
+function buildTimelineVerticalLines(
+  pointCount: number,
+  shouldShowDateLabel: (index: number) => boolean,
+  leadingPadSlots: number,
+  slotWidth: number,
+) {
+  return Array.from({ length: pointCount }, (_, index) => index).flatMap(
+    (index) =>
+      shouldShowDateLabel(index)
+        ? [leadingPadSlots * slotWidth + index * slotWidth + slotWidth / 2]
+        : [],
   );
+}
+
+function getTimelineBarLayout(
+  index: number,
+  leadingPadSlots: number,
+  slotWidth: number,
+) {
+  const barWidth = Math.min(BAR_WIDTH, Math.max(4, slotWidth * 0.55));
+  const x =
+    leadingPadSlots * slotWidth +
+    index * slotWidth +
+    (slotWidth - barWidth) / 2;
+
+  return { barWidth, x };
 }
 
 function formatCalorieAxisLabel(value: number) {
@@ -632,213 +660,382 @@ function ChartGrid({
   );
 }
 
-function GraphChart({
-  children,
-  days,
-  yAxisLabels,
-  yAxisTicks,
-  goalOverlay,
-  plotMarkers,
-  plotWidth = CHART_PLOT_WIDTH,
-  scrollRef,
+function BarGraphCard({
+  icon,
+  label,
+  points,
+  chartMax,
+  average,
+  visibleWindowDays,
+  formatAxisLabel,
+  formatAverage,
+  accent = ORANGE,
+  boxBg = "#FFF5EB",
 }: {
-  children: ReactNode;
-  days: string[];
-  yAxisLabels?: string[];
-  yAxisTicks?: number[];
-  goalOverlay?: { label: string; color: string; y: number };
-  plotMarkers?: { x: number; y: number; color: string }[];
-  plotWidth?: number;
-  scrollRef?: Ref<HTMLDivElement>;
+  icon: ReactNode;
+  label: string;
+  points: { label: string; value: number; date: string }[];
+  chartMax: number;
+  average: number | null;
+  visibleWindowDays: number;
+  formatAxisLabel: (value: number) => string;
+  formatAverage: (value: number | null) => string;
+  accent?: string;
+  boxBg?: string;
 }) {
-  const showYAxis = Boolean(
-    yAxisLabels && yAxisTicks && yAxisLabels.length === yAxisTicks.length,
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const dateScrollRef = useRef<HTMLDivElement | null>(null);
+  const [viewport, setViewport] = useState({ startIndex: 0, endIndex: 0 });
+  const [dateLabelPhase, setDateLabelPhase] = useState(0);
+  const [viewportWidth, setViewportWidth] = useState(CHART_PLOT_WIDTH);
+  const scrollFloorIndex = 0;
+  const effectiveVisibleDays = Math.max(1, visibleWindowDays);
+  const latestAlignment = useMemo(
+    () =>
+      getTimelineLatestAlignment(
+        viewportWidth,
+        effectiveVisibleDays,
+        points.length,
+        scrollFloorIndex,
+      ),
+    [effectiveVisibleDays, points.length, viewportWidth],
   );
-
-  const dateRow = (
-    <div
-      style={{
-        display: "flex",
-        width: plotWidth,
-        minWidth: "100%",
-      }}
-    >
-      {days.map((day, index) => (
-        <span
-          key={`${day}-${index}`}
-          style={{
-            fontSize: 11,
-            color: "#888",
-            flex: 1,
-            textAlign: "center",
-            fontWeight: 500,
-          }}
-        >
-          {day}
-        </span>
-      ))}
-    </div>
+  const { leftInset, slotWidth, leadingPadSlots, chartSlotCount } =
+    latestAlignment;
+  const chartWidth = chartSlotCount * slotWidth;
+  const dateLabelStep = useMemo(
+    () => getTimelineDateLabelStep(visibleWindowDays, effectiveVisibleDays),
+    [effectiveVisibleDays, visibleWindowDays],
   );
-
-  const chartSvg = (
-    <svg
-      width="100%"
-      height="100%"
-      viewBox={`0 0 ${plotWidth} ${CHART_HEIGHT}`}
-      preserveAspectRatio="none"
-      style={{ display: "block" }}
-    >
-      {children}
-    </svg>
+  const rightLabelOffset = useMemo(
+    () => getTimelineRightLabelOffset(visibleWindowDays, dateLabelStep),
+    [dateLabelStep, visibleWindowDays],
   );
+  const { yAxisLabels, yAxisTicks } = buildValueAxis(chartMax, formatAxisLabel);
 
-  const scrollablePlot = (
-    <div
-      ref={scrollRef}
-      style={{
-        flex: 1,
-        minHeight: 0,
-        minWidth: 0,
-        overflowX: plotWidth > CHART_PLOT_WIDTH ? "auto" : "hidden",
-        overflowY: "hidden",
-        display: "flex",
-        flexDirection: "column",
-      }}
-    >
-      <div
-        style={{
-          width: plotWidth,
-          minWidth: "100%",
-          flex: 1,
-          minHeight: 0,
-          position: "relative",
-        }}
-      >
-        {goalOverlay && (
-          <div
-            style={{
-              position: "absolute",
-              right: 4,
-              top: `${(goalOverlay.y / CHART_HEIGHT) * 100}%`,
-              transform: "translateY(3px)",
-              textAlign: "right",
-              zIndex: 1,
-              pointerEvents: "none",
-              lineHeight: 1.3,
-            }}
-          >
-            <div style={{ fontSize: 9, color: goalOverlay.color }}>目標</div>
-            <div
-              style={{
-                fontSize: 10,
-                color: goalOverlay.color,
-                fontWeight: 600,
-              }}
-            >
-              {goalOverlay.label}
-            </div>
-          </div>
-        )}
-        {chartSvg}
-        {plotMarkers?.map((marker, index) => (
-          <div
-            key={index}
-            style={{
-              position: "absolute",
-              left: `${(marker.x / plotWidth) * 100}%`,
-              top: `${(marker.y / CHART_HEIGHT) * 100}%`,
-              transform: "translate(-50%, -50%)",
-              width: 7,
-              height: 7,
-              borderRadius: "50%",
-              background: "#fff",
-              border: `2px solid ${marker.color}`,
-              boxSizing: "border-box",
-              pointerEvents: "none",
-            }}
-          />
-        ))}
-      </div>
-      <div style={{ paddingTop: 2, flexShrink: 0 }}>{dateRow}</div>
-    </div>
-  );
+  useLayoutEffect(() => {
+    const element = scrollRef.current;
+    if (!element || points.length === 0) {
+      return;
+    }
 
-  if (!showYAxis) {
-    return (
-      <div
-        style={{
-          flex: 1,
-          display: "flex",
-          flexDirection: "column",
-          minHeight: 0,
-          width: "100%",
-        }}
-      >
-        <div style={{ flex: 1, minHeight: 0, width: "100%" }}>
-          <svg
-            width="100%"
-            height="100%"
-            viewBox={`0 0 ${plotWidth} ${CHART_HEIGHT}`}
-            preserveAspectRatio="xMidYMid meet"
-            style={{ display: "block", overflow: "visible" }}
-          >
-            {children}
-          </svg>
-        </div>
-        {dateRow}
-      </div>
+    const nextViewportWidth = Math.max(1, element.clientWidth);
+    const visibleCount = Math.max(1, effectiveVisibleDays);
+    const alignment = getTimelineLatestAlignment(
+      nextViewportWidth,
+      visibleCount,
+      points.length,
+      scrollFloorIndex,
     );
-  }
+    const maxStart = Math.max(0, points.length - visibleCount);
+    const endIndex = Math.min(
+      points.length - 1,
+      maxStart + effectiveVisibleDays - 1,
+    );
+    const preferredRightLabelIndex = Math.max(0, endIndex - rightLabelOffset);
+    const nextDateLabelPhase = preferredRightLabelIndex % dateLabelStep;
+    const nextScrollLeft = alignment.targetScrollLeft;
+    const startIndex = Math.min(
+      maxStart,
+      Math.max(
+        scrollFloorIndex,
+        Math.round(nextScrollLeft / alignment.slotWidth) -
+          alignment.leadingPadSlots,
+      ),
+    );
+
+    setViewportWidth(nextViewportWidth);
+    setDateLabelPhase(nextDateLabelPhase);
+    element.scrollLeft = nextScrollLeft;
+    if (dateScrollRef.current) {
+      dateScrollRef.current.scrollLeft = nextScrollLeft;
+    }
+    setViewport({
+      startIndex,
+      endIndex: Math.min(points.length - 1, startIndex + visibleCount - 1),
+    });
+  }, [
+    dateLabelStep,
+    effectiveVisibleDays,
+    points,
+    rightLabelOffset,
+    leadingPadSlots,
+  ]);
+
+  useEffect(() => {
+    const element = scrollRef.current;
+    if (!element || points.length === 0) {
+      return;
+    }
+
+    const updateViewport = () => {
+      const nextViewportWidth = Math.max(1, element.clientWidth);
+      setViewportWidth(nextViewportWidth);
+      const visibleCount = Math.max(1, effectiveVisibleDays);
+      const alignment = getTimelineLatestAlignment(
+        nextViewportWidth,
+        visibleCount,
+        points.length,
+        scrollFloorIndex,
+      );
+      const maxStart = Math.max(0, points.length - visibleCount);
+      const maxScrollLeft = Math.max(
+        0,
+        element.scrollWidth - element.clientWidth,
+      );
+      if (element.scrollLeft < alignment.minScrollLeft) {
+        element.scrollLeft = alignment.minScrollLeft;
+      }
+      const isNearRightEdge = element.scrollLeft >= maxScrollLeft - 1;
+      const anchoredScrollLeft = alignment.targetScrollLeft;
+      if (isNearRightEdge) {
+        element.scrollLeft = anchoredScrollLeft;
+      }
+      const rawStart = isNearRightEdge
+        ? Math.round(anchoredScrollLeft / alignment.slotWidth) -
+          alignment.leadingPadSlots
+        : Math.round(element.scrollLeft / alignment.slotWidth) -
+          alignment.leadingPadSlots;
+      const startIndex = Math.min(
+        maxStart,
+        Math.max(scrollFloorIndex, rawStart),
+      );
+      const endIndex = Math.min(
+        points.length - 1,
+        startIndex + visibleCount - 1,
+      );
+      setViewport({ startIndex, endIndex });
+      if (dateScrollRef.current) {
+        dateScrollRef.current.scrollLeft = element.scrollLeft;
+      }
+    };
+
+    const onWheel = (event: WheelEvent) => {
+      const dominantDelta =
+        Math.abs(event.deltaX) >= Math.abs(event.deltaY)
+          ? event.deltaX
+          : event.deltaY;
+
+      if (Math.abs(dominantDelta) < 0.5) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      const { minScrollLeft: wheelMinScrollLeft } = getTimelineLatestAlignment(
+        element.clientWidth,
+        effectiveVisibleDays,
+        points.length,
+        scrollFloorIndex,
+      );
+      element.scrollLeft = Math.max(
+        wheelMinScrollLeft,
+        element.scrollLeft + dominantDelta,
+      );
+    };
+
+    element.addEventListener("scroll", updateViewport, { passive: true });
+    element.addEventListener("wheel", onWheel, { passive: false });
+    window.addEventListener("resize", updateViewport);
+
+    return () => {
+      element.removeEventListener("scroll", updateViewport);
+      element.removeEventListener("wheel", onWheel);
+      window.removeEventListener("resize", updateViewport);
+    };
+  }, [effectiveVisibleDays, points]);
+
+  const shouldShowDateLabel = (index: number) =>
+    shouldShowTimelineDateLabel(
+      index,
+      viewport,
+      dateLabelPhase,
+      dateLabelStep,
+    );
+  const verticalLines = buildTimelineVerticalLines(
+    points.length,
+    shouldShowDateLabel,
+    leadingPadSlots,
+    slotWidth,
+  );
 
   return (
-    <div
-      style={{
-        flex: 1,
-        display: "flex",
-        flexDirection: "column",
-        minHeight: 0,
-        width: "100%",
-      }}
-    >
+    <CardShell>
+      <CardHeader icon={icon} label={label} />
+
       <div
         style={{
           flex: 1,
           minHeight: 0,
           width: "100%",
           display: "flex",
-          gap: CHART_AXIS_GAP,
+          flexDirection: "column",
         }}
       >
         <div
           style={{
-            width: Y_AXIS_WIDTH,
-            position: "relative",
-            flexShrink: 0,
-            alignSelf: "stretch",
+            flex: 1,
+            minHeight: 0,
+            width: "100%",
+            display: "flex",
+            gap: CHART_AXIS_GAP,
+            minWidth: 0,
           }}
         >
-          {yAxisLabels!.map((label, index) => (
-            <span
-              key={`${label}-${index}`}
+          <div
+            style={{
+              width: Y_AXIS_WIDTH,
+              position: "relative",
+              flexShrink: 0,
+            }}
+          >
+            {yAxisLabels.map((axisLabel, index) => (
+              <span
+                key={`${axisLabel}-${index}`}
+                style={{
+                  position: "absolute",
+                  paddingLeft: 2,
+                  top: `${(yAxisTicks[index] / CHART_HEIGHT) * 100}%`,
+                  transform: "translateY(-50%)",
+                  fontSize: yAxisLabels.length > 5 ? 9 : 11,
+                  color: "#7A7A7A",
+                  fontWeight: 500,
+                  lineHeight: 1,
+                }}
+              >
+                {axisLabel}
+              </span>
+            ))}
+          </div>
+          <div
+            style={{ flex: 1, minHeight: 0, minWidth: 0, position: "relative" }}
+          >
+            <div
+              ref={scrollRef}
               style={{
-                position: "absolute",
-                paddingLeft: 2,
-                top: `${(yAxisTicks![index] / CHART_HEIGHT) * 100}%`,
-                transform: "translateY(-50%)",
-                fontSize: yAxisLabels!.length > 5 ? 9 : 11,
-                color: "#7A7A7A",
-                fontWeight: 500,
-                lineHeight: 1,
-                textAlign: "right",
+                width: "100%",
+                height: "100%",
+                overflowX: "auto",
+                overflowY: "hidden",
+                WebkitOverflowScrolling: "touch",
+                scrollbarWidth: "thin",
+                position: "relative",
+                overscrollBehaviorX: "contain",
+                overscrollBehaviorY: "contain",
+                paddingLeft: leftInset,
+                boxSizing: "border-box",
               }}
             >
-              {label}
-            </span>
-          ))}
+              <div
+                style={{
+                  position: "relative",
+                  width: chartWidth,
+                  height: "100%",
+                }}
+              >
+                <svg
+                  width={chartWidth}
+                  height="100%"
+                  viewBox={`0 0 ${chartWidth} ${CHART_HEIGHT}`}
+                  preserveAspectRatio="none"
+                  style={{ display: "block" }}
+                >
+                  <ChartGrid
+                    horizontalTicks={yAxisTicks}
+                    verticalLines={verticalLines}
+                    plotWidth={chartWidth}
+                  />
+                  {points.map((point, index) => {
+                    const barHeight = (point.value / chartMax) * CHART_HEIGHT;
+                    const { barWidth, x } = getTimelineBarLayout(
+                      index,
+                      leadingPadSlots,
+                      slotWidth,
+                    );
+                    return (
+                      <rect
+                        key={point.date}
+                        x={x}
+                        y={CHART_BOTTOM_Y - barHeight}
+                        width={barWidth}
+                        height={barHeight}
+                        rx="2"
+                        fill={accent}
+                      />
+                    );
+                  })}
+                </svg>
+              </div>
+            </div>
+          </div>
         </div>
-        {scrollablePlot}
+        <div
+          style={{
+            display: "flex",
+            gap: CHART_AXIS_GAP,
+            flexShrink: 0,
+            paddingTop: 2,
+          }}
+        >
+          <div
+            style={{ width: Y_AXIS_WIDTH, flexShrink: 0 }}
+            aria-hidden="true"
+          />
+          <div
+            ref={dateScrollRef}
+            style={{
+              flex: 1,
+              minWidth: 0,
+              overflowX: "auto",
+              overflowY: "hidden",
+              scrollbarWidth: "none",
+              pointerEvents: "none",
+              paddingLeft: leftInset,
+              boxSizing: "border-box",
+            }}
+          >
+            <div
+              style={{
+                width: chartWidth,
+                position: "relative",
+                height: 20,
+              }}
+            >
+              {points.map((point, index) => (
+                <span
+                  key={`${point.date}-${index}`}
+                  style={{
+                    position: "absolute",
+                    left:
+                      leadingPadSlots * slotWidth +
+                      index * slotWidth +
+                      slotWidth / 2,
+                    transform: "translateX(-50%)",
+                    fontSize: 11,
+                    color: "#888",
+                    fontWeight: 500,
+                    lineHeight: "20px",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {shouldShowDateLabel(index)
+                    ? visibleWindowDays > 365
+                      ? formatFullDateLabel(point.date)
+                      : point.label
+                    : ""}
+                </span>
+              ))}
+            </div>
+          </div>
+        </div>
       </div>
-    </div>
+
+      <StatBoxes
+        accent={accent}
+        boxBg={boxBg}
+        items={[{ value: formatAverage(average), label: "平均" }]}
+      />
+    </CardShell>
   );
 }
 
@@ -900,34 +1097,14 @@ function WeightGraphCard({
   );
   const { leftInset, slotWidth, leadingPadSlots, chartSlotCount } =
     latestAlignment;
-  const dateLabelStep = useMemo(() => {
-    if (visibleWindowDays <= 7) return 1;
-    if (visibleWindowDays <= 30) return 4;
-    if (visibleWindowDays <= 90) return 13;
-    if (visibleWindowDays <= 180) return 26;
-    if (visibleWindowDays <= 365) {
-      // 1画面内で8つ前後（7区間）になるように動的計算
-      return Math.max(1, Math.floor((effectiveVisibleDays - 1) / 7));
-    }
-    // 3年は1画面内で5つ前後（4区間）になるように動的計算
-    return Math.max(1, Math.floor((effectiveVisibleDays - 1) / 4));
-  }, [effectiveVisibleDays, visibleWindowDays]);
-  const rightLabelOffset = useMemo(() => {
-    if (visibleWindowDays <= 7) {
-      return 0;
-    }
-    if (visibleWindowDays <= 90) {
-      return 5;
-    }
-    if (visibleWindowDays <= 180) {
-      return 10;
-    }
-    if (visibleWindowDays <= 365) {
-      return 15;
-    }
-    // 3年は最新日付表示を今日から60日前に寄せる
-    return Math.min(60, dateLabelStep - 1);
-  }, [dateLabelStep, visibleWindowDays]);
+  const dateLabelStep = useMemo(
+    () => getTimelineDateLabelStep(visibleWindowDays, effectiveVisibleDays),
+    [effectiveVisibleDays, visibleWindowDays],
+  );
+  const rightLabelOffset = useMemo(
+    () => getTimelineRightLabelOffset(visibleWindowDays, dateLabelStep),
+    [dateLabelStep, visibleWindowDays],
+  );
 
   const chart = useMemo(() => {
     if (!timelineBounds || timelinePoints.length === 0) {
@@ -1197,18 +1374,19 @@ function WeightGraphCard({
     );
   }
 
-  const shouldShowDateLabel = (index: number) => {
-    if (index < viewport.startIndex || index > viewport.endIndex) {
-      return false;
-    }
-    return (index - dateLabelPhase) % dateLabelStep === 0;
-  };
-  const verticalLines = timelinePoints.flatMap((_, index) => {
-    if (!shouldShowDateLabel(index)) {
-      return [];
-    }
-    return [leadingPadSlots * slotWidth + index * slotWidth + slotWidth / 2];
-  });
+  const shouldShowDateLabel = (index: number) =>
+    shouldShowTimelineDateLabel(
+      index,
+      viewport,
+      dateLabelPhase,
+      dateLabelStep,
+    );
+  const verticalLines = buildTimelineVerticalLines(
+    timelinePoints.length,
+    shouldShowDateLabel,
+    leadingPadSlots,
+    slotWidth,
+  );
 
   return (
     <CardShell>
@@ -1455,121 +1633,6 @@ function WeightGraphCard({
   );
 }
 
-function GoalLineSvg({
-  y,
-  color,
-  plotWidth = CHART_PLOT_WIDTH,
-}: {
-  y: number;
-  color: string;
-  plotWidth?: number;
-}) {
-  return (
-    <line
-      x1="0"
-      y1={y}
-      x2={plotWidth}
-      y2={y}
-      stroke={color}
-      strokeWidth="1"
-      strokeDasharray="4 3"
-      opacity="0.5"
-    />
-  );
-}
-
-function BarGraphCard({
-  icon,
-  label,
-  points,
-  chartMax,
-  average,
-  formatAxisLabel,
-  formatAverage,
-  accent = ORANGE,
-  boxBg = "#FFF5EB",
-  goalLine,
-}: {
-  icon: ReactNode;
-  label: string;
-  points: { label: string; value: number; date: string }[];
-  chartMax: number;
-  average: number | null;
-  formatAxisLabel: (value: number) => string;
-  formatAverage: (value: number | null) => string;
-  accent?: string;
-  boxBg?: string;
-  goalLine?: { value: number; max: number; label: string };
-}) {
-  const scrollRef = useRef<HTMLDivElement | null>(null);
-  const dayCount = Math.max(points.length, 1);
-  const plotWidth = Math.max(
-    CHART_PLOT_WIDTH,
-    dayCount * BAR_MIN_SLOT_WIDTH,
-  );
-  const goalY = goalLine ? valueToY(goalLine.value, goalLine.max) : undefined;
-  const { yAxisLabels, yAxisTicks } = buildValueAxis(chartMax, formatAxisLabel);
-  const grid = buildChartGridLines(dayCount, yAxisTicks, plotWidth);
-  const { barWidth, xs } = buildBarLayout(dayCount, plotWidth);
-  const dayLabels = buildDateLabels(points);
-
-  useLayoutEffect(() => {
-    const element = scrollRef.current;
-    if (!element) {
-      return;
-    }
-    element.scrollLeft = element.scrollWidth;
-  }, [points, plotWidth]);
-
-  return (
-    <CardShell>
-      <CardHeader icon={icon} label={label} />
-
-      <GraphChart
-        days={dayLabels}
-        yAxisLabels={yAxisLabels}
-        yAxisTicks={yAxisTicks}
-        plotWidth={plotWidth}
-        scrollRef={scrollRef}
-        goalOverlay={
-          goalLine && goalY !== undefined
-            ? { label: goalLine.label, color: accent, y: goalY }
-            : undefined
-        }
-      >
-        <ChartGrid
-          horizontalTicks={grid.horizontalTicks}
-          verticalLines={grid.verticalLines}
-          plotWidth={plotWidth}
-        />
-        {goalLine && goalY !== undefined && (
-          <GoalLineSvg y={goalY} color={accent} plotWidth={plotWidth} />
-        )}
-        {points.map((point, index) => {
-          const barHeight = (point.value / chartMax) * CHART_HEIGHT;
-          return (
-            <rect
-              key={point.date}
-              x={xs[index]}
-              y={CHART_BOTTOM_Y - barHeight}
-              width={barWidth}
-              height={barHeight}
-              rx="2"
-              fill={accent}
-            />
-          );
-        })}
-      </GraphChart>
-
-      <StatBoxes
-        accent={accent}
-        boxBg={boxBg}
-        items={[{ value: formatAverage(average), label: "平均" }]}
-      />
-    </CardShell>
-  );
-}
-
 function MetricBarGraphCard({
   metric,
   visibleWindowDays,
@@ -1646,6 +1709,7 @@ function MetricBarGraphCard({
       points={points}
       chartMax={chartMax}
       average={average}
+      visibleWindowDays={visibleWindowDays}
       formatAxisLabel={formatAxisLabel}
       formatAverage={formatAverage}
       accent={accent}
