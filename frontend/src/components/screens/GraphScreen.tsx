@@ -5,6 +5,7 @@ import {
   useRef,
   useState,
   type ReactNode,
+  type Ref,
 } from "react";
 import {
   Calendar,
@@ -17,7 +18,9 @@ import { SecIcon } from "../SecIcon.tsx";
 import { TopNav } from "../TopNav.tsx";
 import { ORANGE } from "../../constants.ts";
 import {
+  fetchMetricTimeline,
   fetchWeightTimeline,
+  type MetricTimelineResponse,
   type WeightTimelinePoint,
   type WeightTimelineResponse,
 } from "../../api/client.ts";
@@ -29,17 +32,15 @@ const STEP_GREEN = "#2EAA72";
 const STEP_GREEN_BG = "#D6F5E8";
 const STEP_GREEN_LIGHT = "#EDF9F3";
 
-const kcalH = [44, 60, 38, 52, 36, 66, 54];
-const exerciseH = [28, 42, 20, 36, 24, 48, 32];
-const stepH = [48, 64, 34, 56, 42, 68, 52];
 const BAR_WIDTH = 13;
+const BAR_MIN_SLOT_WIDTH = 20;
 const CHART_HEIGHT = 130;
 const CHART_PLOT_WIDTH = 310;
 const Y_AXIS_WIDTH = 30;
 const CHART_AXIS_GAP = 2;
 const CHART_BOTTOM_Y = CHART_HEIGHT;
-const KCAL_AXIS_TICKS = [0, 43, 86, CHART_HEIGHT] as const;
-const STEP_AXIS_TICKS = [0, 43, 86, CHART_HEIGHT] as const;
+const DEFAULT_CALORIE_CHART_MAX = 3000;
+const DEFAULT_STEP_CHART_MAX = 12000;
 
 const CHART_GRID_COLOR = "#ECECEC";
 const WEIGHT_AXIS_STEP_THRESHOLD_KG = 15;
@@ -150,8 +151,12 @@ function getTimelineLatestAlignment(
   };
 }
 
-function buildChartGridLines(dayCount: number, horizontalTicks: number[]) {
-  const columnWidth = CHART_PLOT_WIDTH / dayCount;
+function buildChartGridLines(
+  dayCount: number,
+  horizontalTicks: number[],
+  plotWidth = CHART_PLOT_WIDTH,
+) {
+  const columnWidth = plotWidth / dayCount;
   const verticalLines = Array.from(
     { length: dayCount + 1 },
     (_, index) => index * columnWidth,
@@ -160,11 +165,85 @@ function buildChartGridLines(dayCount: number, horizontalTicks: number[]) {
   return { horizontalTicks, verticalLines };
 }
 
-const mockDays = ["4/18", "4/19", "4/20", "4/21", "4/22", "4/23", "4/24"];
-const xsBar = [22.5, 65.5, 108.5, 151.5, 194.5, 237.5, 280.5];
-
 function valueToY(value: number, max: number) {
+  if (max <= 0) {
+    return CHART_HEIGHT;
+  }
   return CHART_HEIGHT - (value / max) * CHART_HEIGHT;
+}
+
+function buildValueAxis(
+  chartMax: number,
+  formatLabel: (value: number) => string,
+) {
+  const steps = 3;
+  const yAxisTicks = Array.from({ length: steps + 1 }, (_, index) =>
+    valueToY((chartMax * (steps - index)) / steps, chartMax),
+  );
+  const yAxisLabels = Array.from({ length: steps + 1 }, (_, index) =>
+    formatLabel(Math.round((chartMax * (steps - index)) / steps)),
+  );
+
+  return { yAxisLabels, yAxisTicks };
+}
+
+function buildBarLayout(dayCount: number, plotWidth: number) {
+  const columnWidth = plotWidth / dayCount;
+  const barWidth = Math.min(BAR_WIDTH, Math.max(4, columnWidth * 0.55));
+  const xs = Array.from(
+    { length: dayCount },
+    (_, index) => index * columnWidth + (columnWidth - barWidth) / 2,
+  );
+
+  return { barWidth, xs };
+}
+
+function getDateLabelStep(dayCount: number) {
+  if (dayCount <= 7) {
+    return 1;
+  }
+  if (dayCount <= 30) {
+    return 5;
+  }
+  if (dayCount <= 90) {
+    return 10;
+  }
+  if (dayCount <= 180) {
+    return 15;
+  }
+  if (dayCount <= 365) {
+    return 30;
+  }
+  return 60;
+}
+
+function buildDateLabels(points: { label: string }[]) {
+  const labelStep = getDateLabelStep(points.length);
+  return points.map((point, index) =>
+    index % labelStep === 0 || index === points.length - 1 ? point.label : "",
+  );
+}
+
+function formatCalorieAxisLabel(value: number) {
+  return value.toLocaleString();
+}
+
+function formatStepAxisLabel(value: number) {
+  return value.toLocaleString();
+}
+
+function formatCalorieAverage(value: number | null) {
+  if (value === null) {
+    return "--";
+  }
+  return `${value.toLocaleString()} kcal`;
+}
+
+function formatStepAverage(value: number | null) {
+  if (value === null) {
+    return "--";
+  }
+  return `${value.toLocaleString()} 歩`;
 }
 
 function weightToY(weight: number, min: number, max: number) {
@@ -418,9 +497,15 @@ export function GraphScreen() {
               }}
             />
           )}
-          {metricTab === 1 && <MealGraphCard />}
-          {metricTab === 2 && <ExerciseGraphCard />}
-          {metricTab === 3 && <StepsGraphCard />}
+          {metricTab === 1 && (
+            <MealGraphCard visibleWindowDays={visibleWindowDays} />
+          )}
+          {metricTab === 2 && (
+            <ExerciseGraphCard visibleWindowDays={visibleWindowDays} />
+          )}
+          {metricTab === 3 && (
+            <StepsGraphCard visibleWindowDays={visibleWindowDays} />
+          )}
         </div>
       </div>
     </div>
@@ -554,6 +639,8 @@ function GraphChart({
   yAxisTicks,
   goalOverlay,
   plotMarkers,
+  plotWidth = CHART_PLOT_WIDTH,
+  scrollRef,
 }: {
   children: ReactNode;
   days: string[];
@@ -561,6 +648,8 @@ function GraphChart({
   yAxisTicks?: number[];
   goalOverlay?: { label: string; color: string; y: number };
   plotMarkers?: { x: number; y: number; color: string }[];
+  plotWidth?: number;
+  scrollRef?: Ref<HTMLDivElement>;
 }) {
   const showYAxis = Boolean(
     yAxisLabels && yAxisTicks && yAxisLabels.length === yAxisTicks.length,
@@ -570,8 +659,8 @@ function GraphChart({
     <div
       style={{
         display: "flex",
-        flex: 1,
-        minWidth: 0,
+        width: plotWidth,
+        minWidth: "100%",
       }}
     >
       {days.map((day, index) => (
@@ -591,6 +680,89 @@ function GraphChart({
     </div>
   );
 
+  const chartSvg = (
+    <svg
+      width="100%"
+      height="100%"
+      viewBox={`0 0 ${plotWidth} ${CHART_HEIGHT}`}
+      preserveAspectRatio="none"
+      style={{ display: "block" }}
+    >
+      {children}
+    </svg>
+  );
+
+  const scrollablePlot = (
+    <div
+      ref={scrollRef}
+      style={{
+        flex: 1,
+        minHeight: 0,
+        minWidth: 0,
+        overflowX: plotWidth > CHART_PLOT_WIDTH ? "auto" : "hidden",
+        overflowY: "hidden",
+        display: "flex",
+        flexDirection: "column",
+      }}
+    >
+      <div
+        style={{
+          width: plotWidth,
+          minWidth: "100%",
+          flex: 1,
+          minHeight: 0,
+          position: "relative",
+        }}
+      >
+        {goalOverlay && (
+          <div
+            style={{
+              position: "absolute",
+              right: 4,
+              top: `${(goalOverlay.y / CHART_HEIGHT) * 100}%`,
+              transform: "translateY(3px)",
+              textAlign: "right",
+              zIndex: 1,
+              pointerEvents: "none",
+              lineHeight: 1.3,
+            }}
+          >
+            <div style={{ fontSize: 9, color: goalOverlay.color }}>目標</div>
+            <div
+              style={{
+                fontSize: 10,
+                color: goalOverlay.color,
+                fontWeight: 600,
+              }}
+            >
+              {goalOverlay.label}
+            </div>
+          </div>
+        )}
+        {chartSvg}
+        {plotMarkers?.map((marker, index) => (
+          <div
+            key={index}
+            style={{
+              position: "absolute",
+              left: `${(marker.x / plotWidth) * 100}%`,
+              top: `${(marker.y / CHART_HEIGHT) * 100}%`,
+              transform: "translate(-50%, -50%)",
+              width: 7,
+              height: 7,
+              borderRadius: "50%",
+              background: "#fff",
+              border: `2px solid ${marker.color}`,
+              boxSizing: "border-box",
+              pointerEvents: "none",
+            }}
+          />
+        ))}
+      </div>
+      <div style={{ paddingTop: 2, flexShrink: 0 }}>{dateRow}</div>
+    </div>
+  );
+
   if (!showYAxis) {
     return (
       <div
@@ -606,7 +778,7 @@ function GraphChart({
           <svg
             width="100%"
             height="100%"
-            viewBox={`0 0 ${CHART_PLOT_WIDTH} ${CHART_HEIGHT}`}
+            viewBox={`0 0 ${plotWidth} ${CHART_HEIGHT}`}
             preserveAspectRatio="xMidYMid meet"
             style={{ display: "block", overflow: "visible" }}
           >
@@ -664,74 +836,7 @@ function GraphChart({
             </span>
           ))}
         </div>
-        <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
-          {goalOverlay && (
-            <div
-              style={{
-                position: "absolute",
-                right: 4,
-                top: `${(goalOverlay.y / CHART_HEIGHT) * 100}%`,
-                transform: "translateY(3px)",
-                textAlign: "right",
-                zIndex: 1,
-                pointerEvents: "none",
-                lineHeight: 1.3,
-              }}
-            >
-              <div style={{ fontSize: 9, color: goalOverlay.color }}>目標</div>
-              <div
-                style={{
-                  fontSize: 10,
-                  color: goalOverlay.color,
-                  fontWeight: 600,
-                }}
-              >
-                {goalOverlay.label}
-              </div>
-            </div>
-          )}
-          <svg
-            width="100%"
-            height="100%"
-            viewBox={`0 0 ${CHART_PLOT_WIDTH} ${CHART_HEIGHT}`}
-            preserveAspectRatio="none"
-            style={{ display: "block" }}
-          >
-            {children}
-          </svg>
-          {plotMarkers?.map((marker, index) => (
-            <div
-              key={index}
-              style={{
-                position: "absolute",
-                left: `${(marker.x / CHART_PLOT_WIDTH) * 100}%`,
-                top: `${(marker.y / CHART_HEIGHT) * 100}%`,
-                transform: "translate(-50%, -50%)",
-                width: 7,
-                height: 7,
-                borderRadius: "50%",
-                background: "#fff",
-                border: `2px solid ${marker.color}`,
-                boxSizing: "border-box",
-                pointerEvents: "none",
-              }}
-            />
-          ))}
-        </div>
-      </div>
-      <div
-        style={{
-          display: "flex",
-          gap: CHART_AXIS_GAP,
-          flexShrink: 0,
-          paddingTop: 2,
-        }}
-      >
-        <div
-          style={{ width: Y_AXIS_WIDTH, flexShrink: 0 }}
-          aria-hidden="true"
-        />
-        {dateRow}
+        {scrollablePlot}
       </div>
     </div>
   );
@@ -1350,12 +1455,20 @@ function WeightGraphCard({
   );
 }
 
-function GoalLineSvg({ y, color }: { y: number; color: string }) {
+function GoalLineSvg({
+  y,
+  color,
+  plotWidth = CHART_PLOT_WIDTH,
+}: {
+  y: number;
+  color: string;
+  plotWidth?: number;
+}) {
   return (
     <line
       x1="0"
       y1={y}
-      x2={CHART_PLOT_WIDTH}
+      x2={plotWidth}
       y2={y}
       stroke={color}
       strokeWidth="1"
@@ -1368,35 +1481,56 @@ function GoalLineSvg({ y, color }: { y: number; color: string }) {
 function BarGraphCard({
   icon,
   label,
-  barHeights,
-  statItems,
-  yAxisLabels,
-  yAxisTicks,
+  points,
+  chartMax,
+  average,
+  formatAxisLabel,
+  formatAverage,
   accent = ORANGE,
   boxBg = "#FFF5EB",
   goalLine,
 }: {
   icon: ReactNode;
   label: string;
-  barHeights: number[];
-  statItems: { value: string; label: string; highlight?: boolean }[];
-  yAxisLabels: string[];
-  yAxisTicks: number[];
+  points: { label: string; value: number; date: string }[];
+  chartMax: number;
+  average: number | null;
+  formatAxisLabel: (value: number) => string;
+  formatAverage: (value: number | null) => string;
   accent?: string;
   boxBg?: string;
   goalLine?: { value: number; max: number; label: string };
 }) {
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const dayCount = Math.max(points.length, 1);
+  const plotWidth = Math.max(
+    CHART_PLOT_WIDTH,
+    dayCount * BAR_MIN_SLOT_WIDTH,
+  );
   const goalY = goalLine ? valueToY(goalLine.value, goalLine.max) : undefined;
-  const grid = buildChartGridLines(barHeights.length, yAxisTicks);
+  const { yAxisLabels, yAxisTicks } = buildValueAxis(chartMax, formatAxisLabel);
+  const grid = buildChartGridLines(dayCount, yAxisTicks, plotWidth);
+  const { barWidth, xs } = buildBarLayout(dayCount, plotWidth);
+  const dayLabels = buildDateLabels(points);
+
+  useLayoutEffect(() => {
+    const element = scrollRef.current;
+    if (!element) {
+      return;
+    }
+    element.scrollLeft = element.scrollWidth;
+  }, [points, plotWidth]);
 
   return (
     <CardShell>
       <CardHeader icon={icon} label={label} />
 
       <GraphChart
-        days={mockDays}
+        days={dayLabels}
         yAxisLabels={yAxisLabels}
         yAxisTicks={yAxisTicks}
+        plotWidth={plotWidth}
+        scrollRef={scrollRef}
         goalOverlay={
           goalLine && goalY !== undefined
             ? { label: goalLine.label, color: accent, y: goalY }
@@ -1406,91 +1540,186 @@ function BarGraphCard({
         <ChartGrid
           horizontalTicks={grid.horizontalTicks}
           verticalLines={grid.verticalLines}
+          plotWidth={plotWidth}
         />
         {goalLine && goalY !== undefined && (
-          <GoalLineSvg y={goalY} color={accent} />
+          <GoalLineSvg y={goalY} color={accent} plotWidth={plotWidth} />
         )}
-        {barHeights.map((height, index) => (
-          <rect
-            key={mockDays[index]}
-            x={xsBar[index]}
-            y={CHART_BOTTOM_Y - height * 1.4}
-            width={BAR_WIDTH}
-            height={height * 1.4}
-            rx="2"
-            fill={accent}
-          />
-        ))}
+        {points.map((point, index) => {
+          const barHeight = (point.value / chartMax) * CHART_HEIGHT;
+          return (
+            <rect
+              key={point.date}
+              x={xs[index]}
+              y={CHART_BOTTOM_Y - barHeight}
+              width={barWidth}
+              height={barHeight}
+              rx="2"
+              fill={accent}
+            />
+          );
+        })}
       </GraphChart>
 
-      <StatBoxes accent={accent} boxBg={boxBg} items={statItems} />
+      <StatBoxes
+        accent={accent}
+        boxBg={boxBg}
+        items={[{ value: formatAverage(average), label: "平均" }]}
+      />
     </CardShell>
   );
 }
 
-function MealGraphCard() {
+function MetricBarGraphCard({
+  metric,
+  visibleWindowDays,
+  icon,
+  label,
+  accent = ORANGE,
+  boxBg = "#FFF5EB",
+  defaultChartMax,
+  formatAxisLabel,
+  formatAverage,
+}: {
+  metric: MetricTimelineResponse["metric"];
+  visibleWindowDays: number;
+  icon: ReactNode;
+  label: string;
+  accent?: string;
+  boxBg?: string;
+  defaultChartMax: number;
+  formatAxisLabel: (value: number) => string;
+  formatAverage: (value: number | null) => string;
+}) {
+  const [data, setData] = useState<MetricTimelineResponse | null>(null);
+  const todayYmdRef = useRef(formatDateToYmd(new Date()));
+
+  useEffect(() => {
+    let cancelled = false;
+
+    fetchMetricTimeline(metric, todayYmdRef.current, visibleWindowDays)
+      .then((response) => {
+        if (!cancelled) {
+          setData(response);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setData(null);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [metric, visibleWindowDays]);
+
+  const points = data?.points ?? [];
+  const chartMax = data?.chartMax ?? defaultChartMax;
+  const average = data?.average ?? null;
+
+  if (!data) {
+    return (
+      <CardShell>
+        <CardHeader icon={icon} label={label} />
+        <div
+          style={{
+            flex: 1,
+            minHeight: 120,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            color: "#AAA",
+            fontSize: 13,
+          }}
+        >
+          読み込み中...
+        </div>
+      </CardShell>
+    );
+  }
+
   return (
     <BarGraphCard
+      icon={icon}
+      label={label}
+      points={points}
+      chartMax={chartMax}
+      average={average}
+      formatAxisLabel={formatAxisLabel}
+      formatAverage={formatAverage}
+      accent={accent}
+      boxBg={boxBg}
+    />
+  );
+}
+
+function MealGraphCard({
+  visibleWindowDays,
+}: {
+  visibleWindowDays: number;
+}) {
+  return (
+    <MetricBarGraphCard
+      metric="meals"
+      visibleWindowDays={visibleWindowDays}
       icon={
         <SecIcon bg="#FDE8C8" color={ORANGE} size={26}>
           <UtensilsCrossed size={14} />
         </SecIcon>
       }
       label="食事"
-      goalLine={{ value: 1800, max: 3000, label: "1,800kcal" }}
-      barHeights={kcalH}
-      yAxisLabels={["3000", "2000", "1000", "0"]}
-      yAxisTicks={[...KCAL_AXIS_TICKS]}
-      statItems={[
-        { value: "1,582 kcal", label: "平均" },
-        { value: "-218 kcal", label: "目標差", highlight: true },
-        { value: "85%", label: "達成率", highlight: true },
-      ]}
+      defaultChartMax={DEFAULT_CALORIE_CHART_MAX}
+      formatAxisLabel={formatCalorieAxisLabel}
+      formatAverage={formatCalorieAverage}
     />
   );
 }
 
-function ExerciseGraphCard() {
+function ExerciseGraphCard({
+  visibleWindowDays,
+}: {
+  visibleWindowDays: number;
+}) {
   return (
-    <BarGraphCard
+    <MetricBarGraphCard
+      metric="exercise"
+      visibleWindowDays={visibleWindowDays}
       icon={
         <SecIcon bg={STEP_GREEN_BG} color={STEP_GREEN} size={26}>
           <PersonStanding size={14} />
         </SecIcon>
       }
       label="運動"
-      barHeights={exerciseH}
-      yAxisLabels={["3000", "2000", "1000", "0"]}
-      yAxisTicks={[...KCAL_AXIS_TICKS]}
+      defaultChartMax={DEFAULT_CALORIE_CHART_MAX}
+      formatAxisLabel={formatCalorieAxisLabel}
+      formatAverage={formatCalorieAverage}
       accent={STEP_GREEN}
       boxBg={STEP_GREEN_LIGHT}
-      statItems={[
-        { value: "180 kcal", label: "平均" },
-        { value: "-120 kcal", label: "目標差", highlight: true },
-        { value: "60%", label: "達成率", highlight: true },
-      ]}
     />
   );
 }
 
-function StepsGraphCard() {
+function StepsGraphCard({
+  visibleWindowDays,
+}: {
+  visibleWindowDays: number;
+}) {
   return (
-    <BarGraphCard
+    <MetricBarGraphCard
+      metric="steps"
+      visibleWindowDays={visibleWindowDays}
       icon={
         <SecIcon bg={STEP_GREEN_BG} color={STEP_GREEN} size={26}>
           <Footprints size={14} />
         </SecIcon>
       }
       label="歩数"
-      barHeights={stepH}
-      yAxisLabels={["12000", "8000", "4000", "0"]}
-      yAxisTicks={[...STEP_AXIS_TICKS]}
+      defaultChartMax={DEFAULT_STEP_CHART_MAX}
+      formatAxisLabel={formatStepAxisLabel}
+      formatAverage={formatStepAverage}
       accent={STEP_GREEN}
       boxBg={STEP_GREEN_LIGHT}
-      statItems={[
-        { value: "6,240 歩", label: "平均" },
-        { value: "8,122 歩", label: "最高", highlight: true },
-      ]}
     />
   );
 }

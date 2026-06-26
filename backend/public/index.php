@@ -538,5 +538,86 @@ if ($requestMethod === 'GET' && $requestPath === '/api/reports/weight-timeline')
     ]);
 }
 
+/**
+ * 棒グラフ用の日次メトリクス上限を、見やすい目盛りに切り上げる。
+ */
+function computeCalorieChartMax(int $maxValue): int
+{
+    if ($maxValue <= 0) {
+        return 3000;
+    }
+
+    $step = 1000;
+    $rounded = (int) (ceil($maxValue / $step) * $step);
+
+    return max($step, $rounded);
+}
+
+/**
+ * 棒グラフ用の歩数目盛り上限を、見やすい値に切り上げる。
+ */
+function computeStepChartMax(int $maxValue): int
+{
+    if ($maxValue <= 0) {
+        return 12000;
+    }
+
+    $candidates = [4000, 8000, 12000, 16000, 20000, 24000, 30000];
+    foreach ($candidates as $candidate) {
+        if ($maxValue <= $candidate) {
+            return $candidate;
+        }
+    }
+
+    return (int) (ceil($maxValue / 4000) * 4000);
+}
+
+// GET /api/reports/metric-timeline — 食事・運動・歩数の棒グラフ用日次データ
+if ($requestMethod === 'GET' && $requestPath === '/api/reports/metric-timeline') {
+    $metric = trim((string) ($_GET['metric'] ?? ''));
+    $endDate = trim((string) ($_GET['endDate'] ?? WeightRepository::todayDate()));
+    $visibleDays = (int) ($_GET['visibleDays'] ?? 7);
+
+    if (!in_array($metric, ['meals', 'exercise', 'steps'], true)) {
+        json_response(['message' => 'metric must be meals|exercise|steps'], 422);
+    }
+
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $endDate)) {
+        json_response(['message' => 'endDate must be YYYY-MM-DD'], 422);
+    }
+
+    if ($visibleDays < 1 || $visibleDays > 3660) {
+        json_response(['message' => 'visibleDays must be between 1 and 3660'], 422);
+    }
+
+    $timezone = new DateTimeZone('Asia/Tokyo');
+    $end = new DateTimeImmutable($endDate, $timezone);
+    $startDate = $end->modify(sprintf('-%d days', max(0, $visibleDays - 1)))->format('Y-m-d');
+
+    if ($metric === 'meals') {
+        $points = $mealEntryRepository->getDailyTotalsBetween($startDate, $endDate);
+    } elseif ($metric === 'exercise') {
+        $points = $activityRepository->getDailyExerciseCaloriesBetween($startDate, $endDate);
+    } else {
+        $points = $activityRepository->getDailyStepsBetween($startDate, $endDate);
+    }
+
+    $values = array_column($points, 'value');
+    $maxValue = $values !== [] ? max($values) : 0;
+    $chartMax = $metric === 'steps'
+        ? computeStepChartMax($maxValue)
+        : computeCalorieChartMax($maxValue);
+    $average = $values !== []
+        ? (int) round(array_sum($values) / count($values))
+        : null;
+
+    json_response([
+        'metric' => $metric,
+        'points' => $points,
+        'chartMax' => $chartMax,
+        'average' => $average,
+    ]);
+}
+
 // どのルートにも一致しなかった場合
 json_response(['message' => 'Not Found'], 404);

@@ -320,6 +320,34 @@ export function fetchWeightTimeline(endDate: string, visibleDays: number) {
   return request<WeightTimelineResponse>(`/reports/weight-timeline${query}`);
 }
 
+export type MetricTimelineType = "meals" | "exercise" | "steps";
+
+export interface MetricTimelinePoint {
+  label: string;
+  value: number;
+  date: string;
+}
+
+export interface MetricTimelineResponse {
+  metric: MetricTimelineType;
+  points: MetricTimelinePoint[];
+  chartMax: number;
+  average: number | null;
+}
+
+export function fetchMetricTimeline(
+  metric: MetricTimelineType,
+  endDate: string,
+  visibleDays: number,
+) {
+  const query = new URLSearchParams({
+    metric,
+    endDate,
+    visibleDays: String(visibleDays),
+  });
+  return request<MetricTimelineResponse>(`/reports/metric-timeline?${query}`);
+}
+
 export function fetchProfile() {
   return request<{ profile: UserProfile }>("/profile");
 }

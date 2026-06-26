@@ -299,6 +299,81 @@ final class ActivityRepository
         return $history;
     }
 
+    /**
+     * 指定期間の日別運動消費カロリー合計を返す（記録なしの日は 0）。
+     *
+     * @return array<int, array{label: string, value: int, date: string}>
+     */
+    public function getDailyExerciseCaloriesBetween(string $startDate, string $endDate): array
+    {
+        return $this->buildDailyPointsBetween(
+            $startDate,
+            $endDate,
+            'SELECT recorded_on, COALESCE(SUM(burned_calories_kcal), 0) AS total_value
+             FROM exercise_entries
+             WHERE recorded_on BETWEEN :start AND :end
+             GROUP BY recorded_on
+             ORDER BY recorded_on ASC',
+        );
+    }
+
+    /**
+     * 指定期間の日別歩数を返す（記録なしの日は 0）。
+     *
+     * @return array<int, array{label: string, value: int, date: string}>
+     */
+    public function getDailyStepsBetween(string $startDate, string $endDate): array
+    {
+        return $this->buildDailyPointsBetween(
+            $startDate,
+            $endDate,
+            'SELECT recorded_on, step_count AS total_value
+             FROM step_entries
+             WHERE recorded_on BETWEEN :start AND :end
+             ORDER BY recorded_on ASC',
+        );
+    }
+
+    /**
+     * @return array<int, array{label: string, value: int, date: string}>
+     */
+    private function buildDailyPointsBetween(string $startDate, string $endDate, string $sql): array
+    {
+        $timezone = new DateTimeZone('Asia/Tokyo');
+        $start = new DateTimeImmutable($startDate, $timezone);
+        $end = new DateTimeImmutable($endDate, $timezone);
+
+        if ($start > $end) {
+            return [];
+        }
+
+        $statement = $this->db->prepare($sql);
+        $statement->execute([
+            'start' => $startDate,
+            'end' => $endDate,
+        ]);
+
+        /** @var array<string, int> $byDate */
+        $byDate = [];
+        foreach ($statement->fetchAll() as $row) {
+            $byDate[(string) $row['recorded_on']] = (int) $row['total_value'];
+        }
+
+        $points = [];
+        $cursor = $start;
+        while ($cursor <= $end) {
+            $date = $cursor->format('Y-m-d');
+            $points[] = [
+                'label' => WeightRepository::formatShortLabel($date),
+                'value' => $byDate[$date] ?? 0,
+                'date' => $date,
+            ];
+            $cursor = $cursor->modify('+1 day');
+        }
+
+        return $points;
+    }
+
     private function estimateStepCalories(int $count): int
     {
         return (int) round($count * 0.04);
