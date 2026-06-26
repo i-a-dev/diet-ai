@@ -614,7 +614,6 @@ export function RecordScreen() {
               +
             </button>
           </div>
-          <div style={{ fontSize: 14, color: "#AAA" }}>今日はケーキを食べちゃった</div>
         </div>
       </div>
 
