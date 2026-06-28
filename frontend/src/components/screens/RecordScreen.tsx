@@ -16,6 +16,7 @@ import {
   type ExerciseEntrySummary,
   type MealSectionSummary,
   fetchDailyRecord,
+  fetchUserProfile,
   saveExercise,
   saveMeal,
   saveSteps,
@@ -78,6 +79,10 @@ function parseKcal(kcal: string) {
 
 function formatKcal(value: number) {
   return value.toLocaleString();
+}
+
+function formatDailyGoalKcal(goalKcal: number | null) {
+  return goalKcal !== null ? `${formatKcal(goalKcal)}kcal` : "—";
 }
 
 function formatWeightDiff(diff: number | null) {
@@ -152,6 +157,27 @@ export function RecordScreen() {
   const [exercises, setExercises] = useState<ExerciseEntrySummary[]>([]);
   const [exerciseNotice, setExerciseNotice] = useState<string | null>(null);
   const [activeExerciseNote, setActiveExerciseNote] = useState<ExerciseEntrySummary | null>(null);
+  const [dailyIntakeGoalKcal, setDailyIntakeGoalKcal] = useState<number | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    void fetchUserProfile()
+      .then((response) => {
+        if (!cancelled) {
+          setDailyIntakeGoalKcal(response.calorieGoal.dailyIntakeGoalKcal);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setDailyIntakeGoalKcal(null);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -505,7 +531,7 @@ export function RecordScreen() {
               食事
             </div>
             <span style={{ fontSize: 13, fontWeight: 700, color: ORANGE }}>
-              {formatKcal(totalMealKcal)} / 1,800kcal
+              {formatKcal(totalMealKcal)} / {formatDailyGoalKcal(dailyIntakeGoalKcal)}
             </span>
           </div>
           {(Object.entries(meals) as [MealKey, MealSectionData][]).map(([key, meal]) => (
@@ -679,7 +705,7 @@ export function RecordScreen() {
         suggestions={MEAL_SUGGESTIONS}
         currentMealKcal={activeMealKey ? mealTotals[activeMealKey] : 0}
         currentTotalKcal={totalMealKcal}
-        dailyGoalKcal={1800}
+        dailyGoalKcal={dailyIntakeGoalKcal}
         onClose={() => {
           setMealSheetOpen(false);
           setActiveMealKey(null);

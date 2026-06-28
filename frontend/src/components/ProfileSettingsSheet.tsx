@@ -57,7 +57,7 @@ const DIET_GOAL_OPTIONS: { value: DietGoal; label: string }[] = [
   { value: "health", label: "健康維持" },
 ];
 
-const COACH_NOTES_MAX_LENGTH = 100;
+const PROFILE_TEXT_MAX_LENGTH = 100;
 
 const DEFAULT_PROFILE: UserProfile = {
   gender: null,
@@ -96,6 +96,26 @@ function applyNumericDefaults(profile: UserProfile): UserProfile {
     targetPaceKgPerMonth:
       profile.targetPaceKgPerMonth ?? DEFAULT_NUMERIC.targetPaceKgPerMonth,
   };
+}
+
+function trimProfileText(value: string): string | null {
+  const trimmed = value.slice(0, PROFILE_TEXT_MAX_LENGTH);
+  return trimmed || null;
+}
+
+function CharCounter({ value }: { value: string }) {
+  return (
+    <div
+      style={{
+        marginTop: 6,
+        fontSize: 11,
+        color: "#999",
+        textAlign: "right",
+      }}
+    >
+      {value.length}/{PROFILE_TEXT_MAX_LENGTH}
+    </div>
+  );
 }
 
 function isRequiredComplete(profile: UserProfile) {
@@ -758,82 +778,82 @@ export function ProfileSettingsSheet({
               icon={<Heart size={18} color={ORANGE} strokeWidth={2.2} />}
               iconBg={ORANGE_BG}
               label="やりたいダイエット方法"
-              hint="AIコーチのアドバイス精度向上に使用"
             >
               <textarea
                 value={profile.desiredDietMethod ?? ""}
+                maxLength={PROFILE_TEXT_MAX_LENGTH}
                 onChange={(event) =>
-                  updateField("desiredDietMethod", event.target.value || null)
+                  updateField(
+                    "desiredDietMethod",
+                    trimProfileText(event.target.value),
+                  )
                 }
                 placeholder="例：リバウンドしにくく、ある程度筋力をつけて、健康に痩せたい"
                 rows={3}
                 style={textareaStyle}
               />
+              <CharCounter value={profile.desiredDietMethod ?? ""} />
             </FieldCard>
 
             <FieldCard
               icon={<User size={18} color={BLUE} strokeWidth={2.2} />}
               iconBg={BLUE_BG}
               label="アレルギー・苦手食材"
-              hint="AIコーチのアドバイス精度向上に使用"
             >
               <textarea
                 value={profile.allergiesDislikes ?? ""}
+                maxLength={PROFILE_TEXT_MAX_LENGTH}
                 onChange={(event) =>
-                  updateField("allergiesDislikes", event.target.value || null)
+                  updateField(
+                    "allergiesDislikes",
+                    trimProfileText(event.target.value),
+                  )
                 }
                 placeholder="例：えびアレルギー、きのこが苦手"
                 rows={3}
                 style={textareaStyle}
               />
+              <CharCounter value={profile.allergiesDislikes ?? ""} />
             </FieldCard>
 
             <FieldCard
               icon={<User size={18} color={PURPLE} strokeWidth={2.2} />}
               iconBg={PURPLE_BG}
               label="過去のダイエット経験"
-              hint="AIコーチの提案精度向上に使用"
             >
               <textarea
                 value={profile.pastDietExperience ?? ""}
+                maxLength={PROFILE_TEXT_MAX_LENGTH}
                 onChange={(event) =>
-                  updateField("pastDietExperience", event.target.value || null)
+                  updateField(
+                    "pastDietExperience",
+                    trimProfileText(event.target.value),
+                  )
                 }
                 placeholder="例：糖質制限を3ヶ月続けたがリバウンドした"
                 rows={3}
                 style={textareaStyle}
               />
+              <CharCounter value={profile.pastDietExperience ?? ""} />
             </FieldCard>
 
             <FieldCard
               icon={<User size={18} color={GREEN} strokeWidth={2.2} />}
               iconBg={GREEN_BG}
               label="AIコーチに伝えておきたいこと"
-              hint="100文字まで"
+              hint="AIコーチの提案精度向上に使用"
             >
               <textarea
                 value={profile.coachNotes ?? ""}
-                maxLength={COACH_NOTES_MAX_LENGTH}
+                maxLength={PROFILE_TEXT_MAX_LENGTH}
                 onChange={(event) =>
-                  updateField(
-                    "coachNotes",
-                    event.target.value.slice(0, COACH_NOTES_MAX_LENGTH) || null,
-                  )
+                  updateField("coachNotes", trimProfileText(event.target.value))
                 }
                 placeholder="例：週末だけ外食が多い"
                 rows={2}
                 style={textareaStyle}
               />
-              <div
-                style={{
-                  marginTop: 6,
-                  fontSize: 11,
-                  color: "#999",
-                  textAlign: "right",
-                }}
-              >
-                {(profile.coachNotes ?? "").length}/{COACH_NOTES_MAX_LENGTH}
-              </div>
+              <CharCounter value={profile.coachNotes ?? ""} />
             </FieldCard>
 
             {error && (

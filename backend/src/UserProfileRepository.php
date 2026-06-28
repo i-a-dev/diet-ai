@@ -315,9 +315,9 @@ final class UserProfileRepository
             throw new InvalidArgumentException('targetPaceKgPerMonth must be between 0 and 20');
         }
 
-        $this->validateTextLength('desiredDietMethod', $profile['desiredDietMethod']);
-        $this->validateTextLength('allergiesDislikes', $profile['allergiesDislikes']);
-        $this->validateTextLength('pastDietExperience', $profile['pastDietExperience']);
+        $this->validateTextLength('desiredDietMethod', $profile['desiredDietMethod'], 100);
+        $this->validateTextLength('allergiesDislikes', $profile['allergiesDislikes'], 100);
+        $this->validateTextLength('pastDietExperience', $profile['pastDietExperience'], 100);
         $this->validateTextLength('coachNotes', $profile['coachNotes'], 100);
     }
 

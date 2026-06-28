@@ -35,7 +35,7 @@ interface AddFoodModalProps {
   suggestions: MealItemInput[];
   currentMealKcal: number;
   currentTotalKcal: number;
-  dailyGoalKcal: number;
+  dailyGoalKcal: number | null;
   onClose: () => void;
   onSave: (item: MealItemInput) => Promise<void> | void;
 }
@@ -156,7 +156,10 @@ export function AddFoodModal({
     if (!completedResult) return null;
     const nextMealTotal = currentMealKcal + completedResult.calories;
     const nextTotal = currentTotalKcal + completedResult.calories;
-    const remaining = Math.max(dailyGoalKcal - nextTotal, 0);
+    const remaining =
+      dailyGoalKcal !== null
+        ? Math.max(dailyGoalKcal - nextTotal, 0)
+        : null;
     return { nextMealTotal, nextTotal, remaining };
   }, [completedResult, currentMealKcal, currentTotalKcal, dailyGoalKcal]);
   const isWebSearchFallback =
@@ -418,9 +421,11 @@ export function AddFoodModal({
           <div style={completedMetaStyle}>
             今日の合計: {completedSummary.nextTotal}kcal
           </div>
-          <div style={completedMetaStyle}>
-            今日の残り: {completedSummary.remaining}kcal
-          </div>
+          {completedSummary.remaining !== null && (
+            <div style={completedMetaStyle}>
+              今日の残り: {completedSummary.remaining}kcal
+            </div>
+          )}
           <button
             type="button"
             onClick={onClose}
