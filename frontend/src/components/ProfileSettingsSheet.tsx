@@ -8,6 +8,7 @@ import {
 import {
   Calendar,
   ChevronLeft,
+  Flame,
   Heart,
   Scale,
   Target,
@@ -22,6 +23,10 @@ import {
   type UserProfile,
 } from "../api/client.ts";
 import { ORANGE } from "../constants.ts";
+import {
+  calculateCalorieGoal,
+  isCalorieGoalInputReady,
+} from "../utils/calorieGoal.ts";
 import { StepperButton } from "./StepperButton.tsx";
 
 const GREEN = "#48B868";
@@ -101,6 +106,95 @@ function isRequiredComplete(profile: UserProfile) {
     effective.heightCm !== null &&
     effective.currentWeightKg !== null &&
     effective.targetWeightKg !== null
+  );
+}
+
+function CalorieGoalCard({ profile }: { profile: UserProfile }) {
+  const effective = applyNumericDefaults(profile);
+  const calorieInput: UserProfile = {
+    ...profile,
+    heightCm: effective.heightCm,
+    currentWeightKg: effective.currentWeightKg,
+    targetPaceKgPerMonth: effective.targetPaceKgPerMonth,
+  };
+  const ready = isCalorieGoalInputReady(calorieInput);
+  const calorieGoal = calculateCalorieGoal(calorieInput);
+
+  return (
+    <div
+      style={{
+        marginBottom: 16,
+        padding: "18px 16px",
+        borderRadius: 16,
+        background: ready ? ORANGE_BG : "#F8F8F8",
+        border: ready ? `1.5px solid ${ORANGE}` : "1px solid #ECECEC",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <div
+          style={{
+            width: 36,
+            height: 36,
+            borderRadius: 10,
+            background: ready ? "#fff" : "#EFEFEF",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            flexShrink: 0,
+          }}
+        >
+          <Flame size={18} color={ready ? ORANGE : "#AAA"} strokeWidth={2.2} />
+        </div>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: "#111" }}>
+            目標推定カロリー
+          </div>
+          {ready && calorieGoal.dailyIntakeGoalKcal !== null ? (
+            <>
+              <div
+                style={{
+                  marginTop: 6,
+                  fontSize: 28,
+                  fontWeight: 800,
+                  color: ORANGE,
+                  lineHeight: 1.1,
+                }}
+              >
+                {calorieGoal.dailyIntakeGoalKcal.toLocaleString()}
+                <span
+                  style={{ fontSize: 14, fontWeight: 600, marginLeft: 4 }}
+                >
+                  kcal/日
+                </span>
+              </div>
+              <p
+                style={{
+                  margin: "8px 0 0",
+                  fontSize: 12,
+                  color: "#888",
+                  lineHeight: 1.6,
+                }}
+              >
+                推定基礎代謝 {calorieGoal.bmrKcal?.toLocaleString()} kcal
+                {" · "}
+                推定消費 {calorieGoal.tdeeKcal?.toLocaleString()} kcal
+              </p>
+            </>
+          ) : (
+            <p
+              style={{
+                margin: "6px 0 0",
+                fontSize: 12,
+                color: "#999",
+                lineHeight: 1.6,
+              }}
+            >
+              性別・生年月日・身長・現在の体重・目標ペースを入力すると表示されます
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -618,6 +712,8 @@ export function ProfileSettingsSheet({
               step={0.1}
               onChange={(value) => updateField("targetWeightKg", value)}
             />
+
+            <CalorieGoalCard profile={profile} />
 
             <div style={{ height: 8 }} />
 

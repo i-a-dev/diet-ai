@@ -314,6 +314,15 @@ export type ActivityLevel =
   | "very_active";
 export type DietGoal = "weight_loss" | "maintenance" | "muscle_gain" | "health";
 
+export interface CalorieGoal {
+  ageYears: number | null;
+  bmrKcal: number | null;
+  tdeeKcal: number | null;
+  dailyDeficitKcal: number | null;
+  dailyIntakeGoalKcal: number | null;
+  isComplete: boolean;
+}
+
 export interface UserProfile {
   gender: Gender | null;
   birthDate: string | null;
@@ -347,14 +356,19 @@ export type UserProfileUpdate = {
 };
 
 export function fetchUserProfile() {
-  return request<{ profile: UserProfile }>("/user/profile");
+  return request<{ profile: UserProfile; calorieGoal: CalorieGoal }>(
+    "/user/profile",
+  );
 }
 
 export function updateUserProfile(fields: UserProfileUpdate) {
-  return request<{ profile: UserProfile }>("/user/profile", {
-    method: "PUT",
-    body: JSON.stringify(fields),
-  });
+  return request<{ profile: UserProfile; calorieGoal: CalorieGoal }>(
+    "/user/profile",
+    {
+      method: "PUT",
+      body: JSON.stringify(fields),
+    },
+  );
 }
 
 export type ChatRole = "user" | "assistant";

@@ -91,7 +91,11 @@ function composeExerciseEstimateNote(string $source, string $inputExercise, stri
 
 // GET /api/user/profile — ユーザープロフィールの取得
 if ($requestMethod === 'GET' && $requestPath === '/api/user/profile') {
-    json_response(['profile' => $userProfileRepository->get()]);
+    $profile = $userProfileRepository->get();
+    json_response([
+        'profile' => $profile,
+        'calorieGoal' => CalorieGoalCalculator::calculate($profile),
+    ]);
 }
 
 // PUT /api/user/profile — ユーザープロフィールの更新
@@ -154,7 +158,10 @@ if ($requestMethod === 'PUT' && $requestPath === '/api/user/profile') {
         json_response(['message' => $exception->getMessage()], 422);
     }
 
-    json_response(['profile' => $profile]);
+    json_response([
+        'profile' => $profile,
+        'calorieGoal' => CalorieGoalCalculator::calculate($profile),
+    ]);
 }
 
 // GET /api/chat/messages — チャット履歴の取得
