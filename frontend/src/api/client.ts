@@ -304,3 +304,23 @@ export function fetchMetricTimeline(
   });
   return request<MetricTimelineResponse>(`/reports/metric-timeline?${query}`);
 }
+
+export interface UserProfile {
+  targetWeightKg: number | null;
+  heightCm: number | null;
+  updatedAt: string | null;
+}
+
+export function fetchUserProfile() {
+  return request<{ profile: UserProfile }>("/user/profile");
+}
+
+export function updateUserProfile(fields: {
+  targetWeightKg?: number | null;
+  heightCm?: number | null;
+}) {
+  return request<{ profile: UserProfile }>("/user/profile", {
+    method: "PUT",
+    body: JSON.stringify(fields),
+  });
+}

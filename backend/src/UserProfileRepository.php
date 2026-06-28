@@ -53,4 +53,48 @@ final class UserProfileRepository
             'updatedAt' => isset($row['updated_at']) ? (string) $row['updated_at'] : null,
         ];
     }
+
+    /**
+     * 身長・目標体重を更新する。未指定の項目は現在値を維持する。
+     *
+     * @param array{targetWeightKg?: float|null, heightCm?: float|null} $fields
+     * @return array{
+     *   targetWeightKg: float|null,
+     *   heightCm: float|null,
+     *   updatedAt: string|null
+     * }
+     */
+    public function update(array $fields): array
+    {
+        $current = $this->get();
+        $targetWeightKg = array_key_exists('targetWeightKg', $fields)
+            ? $fields['targetWeightKg']
+            : $current['targetWeightKg'];
+        $heightCm = array_key_exists('heightCm', $fields)
+            ? $fields['heightCm']
+            : $current['heightCm'];
+
+        if ($targetWeightKg !== null && ($targetWeightKg <= 0 || $targetWeightKg > 300)) {
+            throw new InvalidArgumentException('targetWeightKg must be between 0 and 300');
+        }
+
+        if ($heightCm !== null && ($heightCm <= 0 || $heightCm > 300)) {
+            throw new InvalidArgumentException('heightCm must be between 0 and 300');
+        }
+
+        $statement = $this->db->prepare(
+            'UPDATE user_profile
+             SET target_weight_kg = :target_weight_kg,
+                 height_cm = :height_cm,
+                 updated_at = datetime(\'now\')
+             WHERE id = :id'
+        );
+        $statement->execute([
+            'target_weight_kg' => $targetWeightKg,
+            'height_cm' => $heightCm,
+            'id' => self::PROFILE_ID,
+        ]);
+
+        return $this->get();
+    }
 }

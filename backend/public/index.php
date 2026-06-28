@@ -78,6 +78,45 @@ function composeExerciseEstimateNote(string $source, string $inputExercise, stri
     return $trimmedRawNote !== '' ? $base . '。' . $trimmedRawNote : $base;
 }
 
+// GET /api/user/profile — ユーザープロフィール（身長・目標体重）の取得
+if ($requestMethod === 'GET' && $requestPath === '/api/user/profile') {
+    json_response(['profile' => $userProfileRepository->get()]);
+}
+
+// PUT /api/user/profile — ユーザープロフィール（身長・目標体重）の更新
+if ($requestMethod === 'PUT' && $requestPath === '/api/user/profile') {
+    $body = json_decode(file_get_contents('php://input') ?: '{}', true);
+    $fields = [];
+
+    if (array_key_exists('targetWeightKg', $body)) {
+        $targetWeightKg = $body['targetWeightKg'];
+        if ($targetWeightKg !== null && !is_numeric($targetWeightKg)) {
+            json_response(['message' => 'targetWeightKg must be a number or null'], 422);
+        }
+        $fields['targetWeightKg'] = $targetWeightKg === null ? null : round((float) $targetWeightKg, 1);
+    }
+
+    if (array_key_exists('heightCm', $body)) {
+        $heightCm = $body['heightCm'];
+        if ($heightCm !== null && !is_numeric($heightCm)) {
+            json_response(['message' => 'heightCm must be a number or null'], 422);
+        }
+        $fields['heightCm'] = $heightCm === null ? null : round((float) $heightCm, 1);
+    }
+
+    if ($fields === []) {
+        json_response(['message' => 'targetWeightKg or heightCm is required'], 422);
+    }
+
+    try {
+        $profile = $userProfileRepository->update($fields);
+    } catch (InvalidArgumentException $exception) {
+        json_response(['message' => $exception->getMessage()], 422);
+    }
+
+    json_response(['profile' => $profile]);
+}
+
 // GET /api/records/daily — 記録画面用の日次データ
 if ($requestMethod === 'GET' && $requestPath === '/api/records/daily') {
     $date = trim((string) ($_GET['date'] ?? WeightRepository::todayDate()));
