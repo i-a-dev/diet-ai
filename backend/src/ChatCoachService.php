@@ -170,8 +170,17 @@ TEXT;
         $lines[] = '';
 
         $lines[] = '■ プロフィール';
+        $lines[] = '性別: ' . $this->formatGender($profile['gender'] ?? null);
+        $lines[] = '生年月日: ' . ($profile['birthDate'] ?? '未設定');
         $lines[] = '身長: ' . $this->formatNullableNumber($profile['heightCm'], 'cm');
+        $lines[] = '現在の体重: ' . $this->formatNullableNumber($profile['currentWeightKg'], 'kg');
         $lines[] = '目標体重: ' . $this->formatNullableNumber($profile['targetWeightKg'], 'kg');
+        $lines[] = '活動レベル: ' . $this->formatActivityLevel($profile['activityLevel'] ?? null);
+        $lines[] = '目標ペース: ' . $this->formatNullableNumber($profile['targetPaceKgPerMonth'], 'kg/月');
+        $lines[] = 'ダイエット目的: ' . $this->formatDietGoal($profile['dietGoal'] ?? null);
+        $lines[] = '食事制限の仕方: ' . $this->formatDietaryRestrictions($profile['dietaryRestrictions'] ?? []);
+        $lines[] = 'アレルギー・苦手食材: ' . ($profile['allergiesDislikes'] ?? '未設定');
+        $lines[] = '過去のダイエット経験: ' . ($profile['pastDietExperience'] ?? '未設定');
         $lines[] = '';
 
         $lines[] = '■ 今日の記録 (' . $today . ')';
@@ -338,6 +347,61 @@ TEXT;
     private function formatNullableNumber(?float $value, string $unit): string
     {
         return $value === null ? '未設定' : $value . $unit;
+    }
+
+    private function formatGender(?string $gender): string
+    {
+        return match ($gender) {
+            'male' => '男性',
+            'female' => '女性',
+            'other' => 'その他',
+            default => '未設定',
+        };
+    }
+
+    private function formatActivityLevel(?string $level): string
+    {
+        return match ($level) {
+            'sedentary' => 'ほとんど運動しない',
+            'light' => '軽い運動（週1〜2回）',
+            'moderate' => '中程度の運動（週3〜5回）',
+            'active' => '激しい運動（週6〜7回）',
+            'very_active' => '非常に激しい運動',
+            default => '未設定',
+        };
+    }
+
+    private function formatDietGoal(?string $goal): string
+    {
+        return match ($goal) {
+            'weight_loss' => '減量',
+            'maintenance' => '体型維持',
+            'muscle_gain' => '筋肉増量',
+            'health' => '健康維持',
+            default => '未設定',
+        };
+    }
+
+    /**
+     * @param list<string> $restrictions
+     */
+    private function formatDietaryRestrictions(array $restrictions): string
+    {
+        if ($restrictions === []) {
+            return '未設定';
+        }
+
+        $labels = array_map(
+            static fn (string $restriction): string => match ($restriction) {
+                'carb' => '糖質制限',
+                'fat' => '脂質制限',
+                'calorie' => 'カロリー制限',
+                default => $restriction,
+            },
+            $restrictions
+        );
+
+        return implode('、', $labels);
     }
 
     /**

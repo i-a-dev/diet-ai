@@ -1,17 +1,44 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { SBar } from './components/SBar.tsx'
 import { TabBar } from './components/TabBar.tsx'
+import { ProfileSettingsSheet } from './components/ProfileSettingsSheet.tsx'
 import { ChatScreen } from './components/screens/ChatScreen.tsx'
 import { GraphScreen } from './components/screens/GraphScreen.tsx'
 import { RecordScreen } from './components/screens/RecordScreen.tsx'
+import { fetchUserProfile } from './api/client.ts'
 import { useMediaQuery } from './hooks/useMediaQuery.ts'
 
 const fontFamily = "-apple-system,BlinkMacSystemFont,'Hiragino Sans','Noto Sans JP',sans-serif"
 
 export default function App() {
   const [tab, setTab] = useState<number>(0)
+  const [onboardingOpen, setOnboardingOpen] = useState(false)
+  const [profileChecked, setProfileChecked] = useState(false)
   const isDesktopPreview = useMediaQuery('(min-width: 768px)')
   const screens = [<ChatScreen key="chat" />, <RecordScreen key="record" />, <GraphScreen key="graph" />]
+
+  useEffect(() => {
+    let cancelled = false
+
+    fetchUserProfile()
+      .then((response) => {
+        if (!cancelled && !response.profile.isComplete) {
+          setOnboardingOpen(true)
+        }
+      })
+      .catch(() => {
+        // API 未接続時はオンボーディングをスキップしてアプリを表示
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setProfileChecked(true)
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const appShell = (
     <>
@@ -20,8 +47,33 @@ export default function App() {
         {screens[tab]}
       </div>
       <TabBar active={tab} onChange={setTab} />
+      <ProfileSettingsSheet
+        open={onboardingOpen}
+        mode="onboarding"
+        onClose={() => setOnboardingOpen(false)}
+        onSaved={() => setOnboardingOpen(false)}
+      />
     </>
   )
+
+  if (!profileChecked) {
+    return (
+      <div
+        style={{
+          fontFamily,
+          background: '#fff',
+          height: '100dvh',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          color: '#888',
+          fontSize: 14,
+        }}
+      >
+        読み込み中...
+      </div>
+    )
+  }
 
   if (isDesktopPreview) {
     return (

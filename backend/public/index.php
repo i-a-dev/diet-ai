@@ -88,34 +88,69 @@ function composeExerciseEstimateNote(string $source, string $inputExercise, stri
     return $trimmedRawNote !== '' ? $base . '。' . $trimmedRawNote : $base;
 }
 
-// GET /api/user/profile — ユーザープロフィール（身長・目標体重）の取得
+// GET /api/user/profile — ユーザープロフィールの取得
 if ($requestMethod === 'GET' && $requestPath === '/api/user/profile') {
     json_response(['profile' => $userProfileRepository->get()]);
 }
 
-// PUT /api/user/profile — ユーザープロフィール（身長・目標体重）の更新
+// PUT /api/user/profile — ユーザープロフィールの更新
 if ($requestMethod === 'PUT' && $requestPath === '/api/user/profile') {
     $body = json_decode(file_get_contents('php://input') ?: '{}', true);
-    $fields = [];
-
-    if (array_key_exists('targetWeightKg', $body)) {
-        $targetWeightKg = $body['targetWeightKg'];
-        if ($targetWeightKg !== null && !is_numeric($targetWeightKg)) {
-            json_response(['message' => 'targetWeightKg must be a number or null'], 422);
-        }
-        $fields['targetWeightKg'] = $targetWeightKg === null ? null : round((float) $targetWeightKg, 1);
+    if (!is_array($body)) {
+        json_response(['message' => 'Invalid JSON body'], 422);
     }
 
-    if (array_key_exists('heightCm', $body)) {
-        $heightCm = $body['heightCm'];
-        if ($heightCm !== null && !is_numeric($heightCm)) {
-            json_response(['message' => 'heightCm must be a number or null'], 422);
+    $fields = [];
+    $numericFields = [
+        'heightCm',
+        'currentWeightKg',
+        'targetWeightKg',
+        'targetPaceKgPerMonth',
+    ];
+
+    foreach ($numericFields as $field) {
+        if (!array_key_exists($field, $body)) {
+            continue;
         }
-        $fields['heightCm'] = $heightCm === null ? null : round((float) $heightCm, 1);
+
+        $value = $body[$field];
+        if ($value !== null && !is_numeric($value)) {
+            json_response(['message' => sprintf('%s must be a number or null', $field)], 422);
+        }
+        $fields[$field] = $value === null ? null : round((float) $value, 1);
+    }
+
+    $stringFields = [
+        'gender',
+        'birthDate',
+        'activityLevel',
+        'dietGoal',
+        'allergiesDislikes',
+        'pastDietExperience',
+    ];
+
+    foreach ($stringFields as $field) {
+        if (!array_key_exists($field, $body)) {
+            continue;
+        }
+
+        $value = $body[$field];
+        if ($value !== null && !is_string($value)) {
+            json_response(['message' => sprintf('%s must be a string or null', $field)], 422);
+        }
+        $fields[$field] = $value;
+    }
+
+    if (array_key_exists('dietaryRestrictions', $body)) {
+        $restrictions = $body['dietaryRestrictions'];
+        if (!is_array($restrictions)) {
+            json_response(['message' => 'dietaryRestrictions must be an array'], 422);
+        }
+        $fields['dietaryRestrictions'] = $restrictions;
     }
 
     if ($fields === []) {
-        json_response(['message' => 'targetWeightKg or heightCm is required'], 422);
+        json_response(['message' => 'At least one profile field is required'], 422);
     }
 
     try {

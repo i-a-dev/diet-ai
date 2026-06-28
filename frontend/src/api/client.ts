@@ -305,20 +305,51 @@ export function fetchMetricTimeline(
   return request<MetricTimelineResponse>(`/reports/metric-timeline?${query}`);
 }
 
+export type Gender = "male" | "female" | "other";
+export type ActivityLevel =
+  | "sedentary"
+  | "light"
+  | "moderate"
+  | "active"
+  | "very_active";
+export type DietGoal = "weight_loss" | "maintenance" | "muscle_gain" | "health";
+export type DietaryRestriction = "carb" | "fat" | "calorie";
+
 export interface UserProfile {
-  targetWeightKg: number | null;
+  gender: Gender | null;
+  birthDate: string | null;
   heightCm: number | null;
+  currentWeightKg: number | null;
+  targetWeightKg: number | null;
+  activityLevel: ActivityLevel | null;
+  targetPaceKgPerMonth: number | null;
+  dietGoal: DietGoal | null;
+  dietaryRestrictions: DietaryRestriction[];
+  allergiesDislikes: string | null;
+  pastDietExperience: string | null;
+  isComplete: boolean;
   updatedAt: string | null;
 }
+
+export type UserProfileUpdate = {
+  gender?: Gender | null;
+  birthDate?: string | null;
+  heightCm?: number | null;
+  currentWeightKg?: number | null;
+  targetWeightKg?: number | null;
+  activityLevel?: ActivityLevel | null;
+  targetPaceKgPerMonth?: number | null;
+  dietGoal?: DietGoal | null;
+  dietaryRestrictions?: DietaryRestriction[];
+  allergiesDislikes?: string | null;
+  pastDietExperience?: string | null;
+};
 
 export function fetchUserProfile() {
   return request<{ profile: UserProfile }>("/user/profile");
 }
 
-export function updateUserProfile(fields: {
-  targetWeightKg?: number | null;
-  heightCm?: number | null;
-}) {
+export function updateUserProfile(fields: UserProfileUpdate) {
   return request<{ profile: UserProfile }>("/user/profile", {
     method: "PUT",
     body: JSON.stringify(fields),

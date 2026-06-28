@@ -85,7 +85,7 @@ export function SideMenu({ open, onClose, onOpenProfileSettings }: SideMenuProps
             }}
           >
             <Settings size={20} color="#666" />
-            <span style={{ fontSize: 15, color: '#111', fontWeight: 500 }}>身長・目標体重</span>
+            <span style={{ fontSize: 15, color: '#111', fontWeight: 500 }}>プロフィール</span>
           </button>
         </div>
       </div>

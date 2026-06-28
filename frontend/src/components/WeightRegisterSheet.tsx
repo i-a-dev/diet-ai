@@ -1,5 +1,6 @@
-import { useEffect, useState, type CSSProperties } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { BottomSheet } from './BottomSheet.tsx'
+import { StepperButton } from './StepperButton.tsx'
 import { ORANGE } from '../constants.ts'
 
 interface WeightRegisterSheetProps {
@@ -31,34 +32,38 @@ export function WeightRegisterSheet({
     if (open) setValue(initialValue)
   }, [open, initialValue])
 
-  const adjust = (delta: number) => {
-    setValue((prev) => roundWeight(Math.max(20, Math.min(200, prev + delta))))
-  }
+  const decrease = useCallback(() => {
+    setValue((prev) => roundWeight(Math.max(20, Math.min(200, prev - 0.1))))
+  }, [])
+
+  const increase = useCallback(() => {
+    setValue((prev) => roundWeight(Math.max(20, Math.min(200, prev + 0.1))))
+  }, [])
 
   return (
     <BottomSheet open={open} title="体重を記録" onClose={onClose}>
       <div style={{ textAlign: 'center', padding: '8px 0 24px' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 20 }}>
-          <button
-            type="button"
-            onClick={() => adjust(-0.1)}
-            style={stepperBtnStyle}
-            aria-label="0.1kg減らす"
+          <StepperButton
+            ariaLabel="0.1kg減らす"
+            onStep={decrease}
+            disabled={isSaving}
+            style={{ fontSize: 24, color: ORANGE }}
           >
             −
-          </button>
+          </StepperButton>
           <div>
             <span style={{ fontSize: 48, fontWeight: 700, color: '#111', lineHeight: 1 }}>{value.toFixed(1)}</span>
             <span style={{ fontSize: 20, color: '#888', marginLeft: 6 }}>kg</span>
           </div>
-          <button
-            type="button"
-            onClick={() => adjust(0.1)}
-            style={stepperBtnStyle}
-            aria-label="0.1kg増やす"
+          <StepperButton
+            ariaLabel="0.1kg増やす"
+            onStep={increase}
+            disabled={isSaving}
+            style={{ fontSize: 24, color: ORANGE }}
           >
             ＋
-          </button>
+          </StepperButton>
         </div>
         <div style={{ fontSize: 13, color: '#AAA', marginTop: 12 }}>
           {dateLabel ? `${dateLabel}の記録` : '今日の記録'}
@@ -91,22 +96,7 @@ export function WeightRegisterSheet({
   )
 }
 
-const stepperBtnStyle: CSSProperties = {
-  width: 44,
-  height: 44,
-  borderRadius: '50%',
-  border: '1px solid #E8E8E8',
-  background: '#fff',
-  fontSize: 24,
-  color: ORANGE,
-  cursor: 'pointer',
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  lineHeight: 1,
-}
-
-const secondaryBtnStyle: CSSProperties = {
+const secondaryBtnStyle = {
   flex: 1,
   padding: '14px 0',
   borderRadius: 12,
@@ -118,7 +108,7 @@ const secondaryBtnStyle: CSSProperties = {
   cursor: 'pointer',
 }
 
-const primaryBtnStyle: CSSProperties = {
+const primaryBtnStyle = {
   flex: 1,
   padding: '14px 0',
   borderRadius: 12,

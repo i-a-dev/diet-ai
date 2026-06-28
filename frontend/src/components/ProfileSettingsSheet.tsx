@@ -1,26 +1,120 @@
-import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
-import { ChevronLeft, Target, User, X } from 'lucide-react'
-import { fetchUserProfile, updateUserProfile } from '../api/client.ts'
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import {
+  Activity,
+  Calendar,
+  ChevronLeft,
+  Heart,
+  Scale,
+  Target,
+  User,
+  X,
+} from 'lucide-react'
+import {
+  fetchUserProfile,
+  updateUserProfile,
+  type ActivityLevel,
+  type DietaryRestriction,
+  type DietGoal,
+  type Gender,
+  type UserProfile,
+} from '../api/client.ts'
 import { ORANGE } from '../constants.ts'
+import { StepperButton } from './StepperButton.tsx'
 
 const GREEN = '#48B868'
 const GREEN_BG = '#E8F7ED'
 const ORANGE_BG = '#FFF3E6'
+const BLUE = '#3B82F6'
+const BLUE_BG = '#EFF6FF'
+const PURPLE = '#8B5CF6'
+const PURPLE_BG = '#F3E8FF'
 
 interface ProfileSettingsSheetProps {
   open: boolean
   onClose: () => void
   onSaved?: () => void
+  mode?: 'settings' | 'onboarding'
+}
+
+const GENDER_OPTIONS: { value: Gender; label: string }[] = [
+  { value: 'male', label: '男性' },
+  { value: 'female', label: '女性' },
+  { value: 'other', label: 'その他' },
+]
+
+const ACTIVITY_OPTIONS: { value: ActivityLevel; label: string; description: string }[] = [
+  { value: 'sedentary', label: 'ほとんど運動しない', description: 'デスクワーク中心' },
+  { value: 'light', label: '軽い運動', description: '週1〜2回' },
+  { value: 'moderate', label: '中程度の運動', description: '週3〜5回' },
+  { value: 'active', label: '激しい運動', description: '週6〜7回' },
+  { value: 'very_active', label: '非常に激しい運動', description: '肉体労働・毎日ハードトレ' },
+]
+
+const DIET_GOAL_OPTIONS: { value: DietGoal; label: string }[] = [
+  { value: 'weight_loss', label: '減量' },
+  { value: 'maintenance', label: '体型維持' },
+  { value: 'muscle_gain', label: '筋肉増量' },
+  { value: 'health', label: '健康維持' },
+]
+
+const DIETARY_RESTRICTION_OPTIONS: { value: DietaryRestriction; label: string }[] = [
+  { value: 'carb', label: '糖質制限' },
+  { value: 'fat', label: '脂質制限' },
+  { value: 'calorie', label: 'カロリー制限' },
+]
+
+const DEFAULT_PROFILE: UserProfile = {
+  gender: null,
+  birthDate: null,
+  heightCm: null,
+  currentWeightKg: null,
+  targetWeightKg: null,
+  activityLevel: null,
+  targetPaceKgPerMonth: null,
+  dietGoal: null,
+  dietaryRestrictions: [],
+  allergiesDislikes: null,
+  pastDietExperience: null,
+  isComplete: false,
+  updatedAt: null,
 }
 
 function roundOneDecimal(value: number) {
   return Math.round(value * 10) / 10
 }
 
+const DEFAULT_NUMERIC = {
+  heightCm: 160,
+  currentWeightKg: 60,
+  targetWeightKg: 57,
+} as const
+
+function applyNumericDefaults(profile: UserProfile): UserProfile {
+  return {
+    ...profile,
+    heightCm: profile.heightCm ?? DEFAULT_NUMERIC.heightCm,
+    currentWeightKg: profile.currentWeightKg ?? DEFAULT_NUMERIC.currentWeightKg,
+    targetWeightKg: profile.targetWeightKg ?? DEFAULT_NUMERIC.targetWeightKg,
+  }
+}
+
+function isRequiredComplete(profile: UserProfile) {
+  const effective = applyNumericDefaults(profile)
+  return (
+    effective.gender !== null &&
+    effective.birthDate !== null &&
+    effective.heightCm !== null &&
+    effective.currentWeightKg !== null &&
+    effective.targetWeightKg !== null &&
+    effective.activityLevel !== null
+  )
+}
+
 function SettingCard({
   icon,
   iconBg,
   label,
+  hint,
   value,
   unit,
   min,
@@ -31,6 +125,7 @@ function SettingCard({
   icon: ReactNode
   iconBg: string
   label: string
+  hint?: string
   value: number
   unit: string
   min: number
@@ -38,61 +133,186 @@ function SettingCard({
   step: number
   onChange: (value: number) => void
 }) {
+  const valueRef = useRef(value)
+  valueRef.current = value
+
   const adjust = (delta: number) => {
-    onChange(roundOneDecimal(Math.max(min, Math.min(max, value + delta))))
+    onChange(roundOneDecimal(Math.max(min, Math.min(max, valueRef.current + delta))))
   }
 
   return (
     <div style={cardStyle}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
-        <div
-          style={{
-            width: 36,
-            height: 36,
-            borderRadius: 10,
-            background: iconBg,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            flexShrink: 0,
-          }}
-        >
-          {icon}
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: hint ? 8 : 20 }}>
+        <div style={iconWrapStyle(iconBg)}>{icon}</div>
+        <div>
+          <span style={{ fontSize: 16, fontWeight: 700, color: '#111' }}>{label}</span>
+          {hint && (
+            <p style={{ margin: '4px 0 0', fontSize: 12, color: '#999', lineHeight: 1.5 }}>{hint}</p>
+          )}
         </div>
-        <span style={{ fontSize: 16, fontWeight: 700, color: '#111' }}>{label}</span>
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 24 }}>
-        <button
-          type="button"
-          onClick={() => adjust(-step)}
-          style={stepperBtnStyle}
-          aria-label={`${label}を${step}減らす`}
-        >
+        <StepperButton ariaLabel={`${label}を${step}減らす`} onStep={() => adjust(-step)}>
           −
-        </button>
+        </StepperButton>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
           <span style={{ fontSize: 44, fontWeight: 700, color: '#111', lineHeight: 1 }}>
             {value.toFixed(1)}
           </span>
           <span style={{ fontSize: 18, color: '#999', fontWeight: 500 }}>{unit}</span>
         </div>
-        <button
-          type="button"
-          onClick={() => adjust(step)}
-          style={stepperBtnStyle}
-          aria-label={`${label}を${step}増やす`}
-        >
+        <StepperButton ariaLabel={`${label}を${step}増やす`} onStep={() => adjust(step)}>
           ＋
-        </button>
+        </StepperButton>
       </div>
     </div>
   )
 }
 
-export function ProfileSettingsSheet({ open, onClose, onSaved }: ProfileSettingsSheetProps) {
-  const [heightCm, setHeightCm] = useState(160)
-  const [targetWeightKg, setTargetWeightKg] = useState(57)
+function SectionHeader({ title, optional }: { title: string; optional?: boolean }) {
+  return (
+    <div style={{ margin: '0 0 12px', display: 'flex', alignItems: 'center', gap: 8 }}>
+      <span style={{ fontSize: 13, fontWeight: 700, color: '#333', letterSpacing: '0.02em' }}>
+        {title}
+      </span>
+      {optional && (
+        <span
+          style={{
+            fontSize: 11,
+            fontWeight: 600,
+            color: '#999',
+            background: '#F0F0F0',
+            borderRadius: 6,
+            padding: '2px 8px',
+          }}
+        >
+          任意
+        </span>
+      )}
+    </div>
+  )
+}
+
+function FieldCard({
+  icon,
+  iconBg,
+  label,
+  hint,
+  children,
+}: {
+  icon: ReactNode
+  iconBg: string
+  label: string
+  hint?: string
+  children: ReactNode
+}) {
+  return (
+    <div style={cardStyle}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: 14 }}>
+        <div style={iconWrapStyle(iconBg)}>{icon}</div>
+        <div>
+          <span style={{ fontSize: 16, fontWeight: 700, color: '#111' }}>{label}</span>
+          {hint && (
+            <p style={{ margin: '4px 0 0', fontSize: 12, color: '#999', lineHeight: 1.5 }}>{hint}</p>
+          )}
+        </div>
+      </div>
+      {children}
+    </div>
+  )
+}
+
+function OptionPills<T extends string>({
+  options,
+  value,
+  onChange,
+}: {
+  options: { value: T; label: string }[]
+  value: T | null
+  onChange: (value: T) => void
+}) {
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+      {options.map((option) => {
+        const selected = value === option.value
+        return (
+          <button
+            key={option.value}
+            type="button"
+            onClick={() => onChange(option.value)}
+            style={{
+              padding: '10px 16px',
+              borderRadius: 999,
+              border: selected ? `1.5px solid ${ORANGE}` : '1px solid #E8E8E8',
+              background: selected ? ORANGE_BG : '#fff',
+              color: selected ? ORANGE : '#555',
+              fontSize: 14,
+              fontWeight: selected ? 700 : 500,
+              cursor: 'pointer',
+            }}
+          >
+            {option.label}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+function MultiOptionPills<T extends string>({
+  options,
+  values,
+  onChange,
+}: {
+  options: { value: T; label: string }[]
+  values: T[]
+  onChange: (values: T[]) => void
+}) {
+  const toggle = (value: T) => {
+    if (values.includes(value)) {
+      onChange(values.filter((item) => item !== value))
+      return
+    }
+    onChange([...values, value])
+  }
+
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+      {options.map((option) => {
+        const selected = values.includes(option.value)
+        return (
+          <button
+            key={option.value}
+            type="button"
+            onClick={() => toggle(option.value)}
+            style={{
+              padding: '10px 16px',
+              borderRadius: 999,
+              border: selected ? `1.5px solid ${GREEN}` : '1px solid #E8E8E8',
+              background: selected ? GREEN_BG : '#fff',
+              color: selected ? GREEN : '#555',
+              fontSize: 14,
+              fontWeight: selected ? 700 : 500,
+              cursor: 'pointer',
+            }}
+          >
+            {option.label}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+export function ProfileSettingsSheet({
+  open,
+  onClose,
+  onSaved,
+  mode = 'settings',
+}: ProfileSettingsSheetProps) {
+  const isOnboarding = mode === 'onboarding'
+  const [profile, setProfile] = useState<UserProfile>(DEFAULT_PROFILE)
   const [isLoading, setIsLoading] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -111,8 +331,7 @@ export function ProfileSettingsSheet({ open, onClose, onSaved }: ProfileSettings
         if (cancelled) {
           return
         }
-        setHeightCm(response.profile.heightCm ?? 160)
-        setTargetWeightKg(response.profile.targetWeightKg ?? 57)
+        setProfile(applyNumericDefaults(response.profile))
       })
       .catch((fetchError: Error) => {
         if (!cancelled) {
@@ -130,12 +349,35 @@ export function ProfileSettingsSheet({ open, onClose, onSaved }: ProfileSettings
     }
   }, [open])
 
+  const updateField = <K extends keyof UserProfile>(key: K, value: UserProfile[K]) => {
+    setProfile((prev) => ({ ...prev, [key]: value }))
+  }
+
   const handleSave = async () => {
+    if (!isRequiredComplete(profile)) {
+      setError('必須項目をすべて入力してください')
+      return
+    }
+
     setIsSaving(true)
     setError(null)
 
     try {
-      await updateUserProfile({ heightCm, targetWeightKg })
+      const effective = applyNumericDefaults(profile)
+      const response = await updateUserProfile({
+        gender: effective.gender,
+        birthDate: effective.birthDate,
+        heightCm: effective.heightCm,
+        currentWeightKg: effective.currentWeightKg,
+        targetWeightKg: effective.targetWeightKg,
+        activityLevel: effective.activityLevel,
+        targetPaceKgPerMonth: profile.targetPaceKgPerMonth,
+        dietGoal: profile.dietGoal,
+        dietaryRestrictions: profile.dietaryRestrictions,
+        allergiesDislikes: profile.allergiesDislikes,
+        pastDietExperience: profile.pastDietExperience,
+      })
+      setProfile(response.profile)
       onSaved?.()
       onClose()
     } catch (saveError) {
@@ -148,6 +390,11 @@ export function ProfileSettingsSheet({ open, onClose, onSaved }: ProfileSettings
   if (!open) {
     return null
   }
+
+  const heightCm = profile.heightCm ?? DEFAULT_NUMERIC.heightCm
+  const currentWeightKg = profile.currentWeightKg ?? DEFAULT_NUMERIC.currentWeightKg
+  const targetWeightKg = profile.targetWeightKg ?? DEFAULT_NUMERIC.targetWeightKg
+  const targetPaceKgPerMonth = profile.targetPaceKgPerMonth ?? 2
 
   return (
     <div
@@ -173,23 +420,23 @@ export function ProfileSettingsSheet({ open, onClose, onSaved }: ProfileSettings
           flexShrink: 0,
         }}
       >
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="戻る"
-          style={headerBtnStyle}
-        >
-          <ChevronLeft size={24} color="#111" />
-        </button>
-        <span style={{ fontSize: 16, fontWeight: 700, color: '#111' }}>身長・目標体重を登録</span>
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="閉じる"
-          style={headerBtnStyle}
-        >
-          <X size={22} color="#AAA" />
-        </button>
+        {!isOnboarding ? (
+          <button type="button" onClick={onClose} aria-label="戻る" style={headerBtnStyle}>
+            <ChevronLeft size={24} color="#111" />
+          </button>
+        ) : (
+          <span style={{ width: 32 }} />
+        )}
+        <span style={{ fontSize: 16, fontWeight: 700, color: '#111' }}>
+          {isOnboarding ? 'プロフィール登録' : 'プロフィール'}
+        </span>
+        {!isOnboarding ? (
+          <button type="button" onClick={onClose} aria-label="閉じる" style={headerBtnStyle}>
+            <X size={22} color="#AAA" />
+          </button>
+        ) : (
+          <span style={{ width: 32 }} />
+        )}
       </div>
 
       <div
@@ -208,9 +455,19 @@ export function ProfileSettingsSheet({ open, onClose, onSaved }: ProfileSettings
             textAlign: 'center',
           }}
         >
-          あなたに最適なアドバイスや目標設定のために、
-          <br />
-          現在の身長と目標体重を登録しましょう。
+          {isOnboarding ? (
+            <>
+              はじめに、あなたの基本情報を登録しましょう。
+              <br />
+              カロリー目標やAIコーチのアドバイス精度向上に使います。
+            </>
+          ) : (
+            <>
+              あなたに最適なアドバイスや目標設定のために、
+              <br />
+              プロフィールを登録・更新できます。
+            </>
+          )}
         </p>
 
         {isLoading ? (
@@ -219,29 +476,181 @@ export function ProfileSettingsSheet({ open, onClose, onSaved }: ProfileSettings
           </div>
         ) : (
           <>
+            <SectionHeader title="基本情報" />
+            <p style={{ margin: '0 0 14px', fontSize: 12, color: '#999', lineHeight: 1.6 }}>
+              基礎代謝・カロリー目標の計算に使用します（必須）
+            </p>
+
+            <FieldCard
+              icon={<User size={18} color={GREEN} strokeWidth={2.2} />}
+              iconBg={GREEN_BG}
+              label="性別"
+              hint="基礎代謝・カロリー目標の計算に使用"
+            >
+              <OptionPills
+                options={GENDER_OPTIONS}
+                value={profile.gender}
+                onChange={(value) => updateField('gender', value)}
+              />
+            </FieldCard>
+
+            <FieldCard
+              icon={<Calendar size={18} color={BLUE} strokeWidth={2.2} />}
+              iconBg={BLUE_BG}
+              label="生年月日"
+              hint="年齢による基礎代謝の差に使用"
+            >
+              <input
+                type="date"
+                value={profile.birthDate ?? ''}
+                max={new Date().toISOString().slice(0, 10)}
+                onChange={(event) => updateField('birthDate', event.target.value || null)}
+                style={dateInputStyle}
+              />
+            </FieldCard>
+
             <SettingCard
               icon={<User size={18} color={GREEN} strokeWidth={2.2} />}
               iconBg={GREEN_BG}
               label="身長"
+              hint="BMI・目標体重の計算に使用"
               value={heightCm}
               unit="cm"
               min={100}
               max={220}
               step={0.1}
-              onChange={setHeightCm}
+              onChange={(value) => updateField('heightCm', value)}
+            />
+
+            <SettingCard
+              icon={<Scale size={18} color={BLUE} strokeWidth={2.2} />}
+              iconBg={BLUE_BG}
+              label="現在の体重"
+              hint="基礎代謝・消費カロリーの計算に使用"
+              value={currentWeightKg}
+              unit="kg"
+              min={20}
+              max={200}
+              step={0.1}
+              onChange={(value) => updateField('currentWeightKg', value)}
             />
 
             <SettingCard
               icon={<Target size={18} color={ORANGE} strokeWidth={2.2} />}
               iconBg={ORANGE_BG}
               label="目標体重"
+              hint="1日の摂取カロリー目標の計算に使用"
               value={targetWeightKg}
               unit="kg"
               min={20}
               max={200}
               step={0.1}
-              onChange={setTargetWeightKg}
+              onChange={(value) => updateField('targetWeightKg', value)}
             />
+
+            <FieldCard
+              icon={<Activity size={18} color={PURPLE} strokeWidth={2.2} />}
+              iconBg={PURPLE_BG}
+              label="活動レベル"
+              hint="消費カロリーの計算に使用"
+            >
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {ACTIVITY_OPTIONS.map((option) => {
+                  const selected = profile.activityLevel === option.value
+                  return (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => updateField('activityLevel', option.value)}
+                      style={{
+                        width: '100%',
+                        textAlign: 'left',
+                        padding: '12px 14px',
+                        borderRadius: 12,
+                        border: selected ? `1.5px solid ${PURPLE}` : '1px solid #E8E8E8',
+                        background: selected ? PURPLE_BG : '#fff',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      <div style={{ fontSize: 14, fontWeight: selected ? 700 : 600, color: '#111' }}>
+                        {option.label}
+                      </div>
+                      <div style={{ fontSize: 12, color: '#999', marginTop: 2 }}>{option.description}</div>
+                    </button>
+                  )
+                })}
+              </div>
+            </FieldCard>
+
+            <div style={{ height: 8 }} />
+
+            <SectionHeader title="詳細設定" optional />
+            <p style={{ margin: '0 0 14px', fontSize: 12, color: '#999', lineHeight: 1.6 }}>
+              あとから設定・変更できます
+            </p>
+
+            <SettingCard
+              icon={<Target size={18} color={ORANGE} strokeWidth={2.2} />}
+              iconBg={ORANGE_BG}
+              label="目標ペース"
+              hint="月に何kg落とすか"
+              value={targetPaceKgPerMonth}
+              unit="kg/月"
+              min={0}
+              max={10}
+              step={0.1}
+              onChange={(value) => updateField('targetPaceKgPerMonth', value)}
+            />
+
+            <FieldCard
+              icon={<Heart size={18} color={GREEN} strokeWidth={2.2} />}
+              iconBg={GREEN_BG}
+              label="ダイエット目的"
+            >
+              <OptionPills
+                options={DIET_GOAL_OPTIONS}
+                value={profile.dietGoal}
+                onChange={(value) => updateField('dietGoal', value)}
+              />
+            </FieldCard>
+
+            <FieldCard icon={<Heart size={18} color={ORANGE} strokeWidth={2.2} />} iconBg={ORANGE_BG} label="食事制限の仕方">
+              <MultiOptionPills
+                options={DIETARY_RESTRICTION_OPTIONS}
+                values={profile.dietaryRestrictions}
+                onChange={(values) => updateField('dietaryRestrictions', values)}
+              />
+            </FieldCard>
+
+            <FieldCard
+              icon={<User size={18} color={BLUE} strokeWidth={2.2} />}
+              iconBg={BLUE_BG}
+              label="アレルギー・苦手食材"
+              hint="AIコーチのアドバイス精度向上に使用"
+            >
+              <textarea
+                value={profile.allergiesDislikes ?? ''}
+                onChange={(event) => updateField('allergiesDislikes', event.target.value || null)}
+                placeholder="例：えびアレルギー、きのこが苦手"
+                rows={3}
+                style={textareaStyle}
+              />
+            </FieldCard>
+
+            <FieldCard
+              icon={<User size={18} color={PURPLE} strokeWidth={2.2} />}
+              iconBg={PURPLE_BG}
+              label="過去のダイエット経験"
+              hint="AIコーチの提案精度向上に使用"
+            >
+              <textarea
+                value={profile.pastDietExperience ?? ''}
+                onChange={(event) => updateField('pastDietExperience', event.target.value || null)}
+                placeholder="例：糖質制限を3ヶ月続けたがリバウンドした"
+                rows={3}
+                style={textareaStyle}
+              />
+            </FieldCard>
 
             {error && (
               <div style={{ fontSize: 13, color: '#DC2626', textAlign: 'center', marginBottom: 12 }}>
@@ -253,18 +662,20 @@ export function ProfileSettingsSheet({ open, onClose, onSaved }: ProfileSettings
               <button
                 type="button"
                 onClick={() => void handleSave()}
-                disabled={isSaving}
+                disabled={isSaving || !isRequiredComplete(profile)}
                 style={{
                   ...primaryBtnStyle,
-                  opacity: isSaving ? 0.7 : 1,
-                  cursor: isSaving ? 'not-allowed' : 'pointer',
+                  opacity: isSaving || !isRequiredComplete(profile) ? 0.7 : 1,
+                  cursor: isSaving || !isRequiredComplete(profile) ? 'not-allowed' : 'pointer',
                 }}
               >
-                {isSaving ? '保存中...' : '保存する'}
+                {isSaving ? '保存中...' : isOnboarding ? '登録してはじめる' : '保存する'}
               </button>
-              <button type="button" onClick={onClose} disabled={isSaving} style={secondaryBtnStyle}>
-                キャンセル
-              </button>
+              {!isOnboarding && (
+                <button type="button" onClick={onClose} disabled={isSaving} style={secondaryBtnStyle}>
+                  キャンセル
+                </button>
+              )}
             </div>
           </>
         )}
@@ -272,6 +683,17 @@ export function ProfileSettingsSheet({ open, onClose, onSaved }: ProfileSettings
     </div>
   )
 }
+
+const iconWrapStyle = (background: string): CSSProperties => ({
+  width: 36,
+  height: 36,
+  borderRadius: 10,
+  background,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  flexShrink: 0,
+})
 
 const headerBtnStyle: CSSProperties = {
   width: 32,
@@ -293,20 +715,30 @@ const cardStyle: CSSProperties = {
   marginBottom: 14,
 }
 
-const stepperBtnStyle: CSSProperties = {
-  width: 44,
-  height: 44,
-  borderRadius: '50%',
+const dateInputStyle: CSSProperties = {
+  width: '100%',
+  padding: '12px 14px',
+  borderRadius: 12,
   border: '1px solid #E8E8E8',
   background: '#fff',
-  fontSize: 22,
-  color: '#888',
-  cursor: 'pointer',
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  lineHeight: 1,
-  flexShrink: 0,
+  fontSize: 16,
+  color: '#111',
+  boxSizing: 'border-box',
+}
+
+const textareaStyle: CSSProperties = {
+  width: '100%',
+  padding: '12px 14px',
+  borderRadius: 12,
+  border: '1px solid #E8E8E8',
+  background: '#fff',
+  fontSize: 14,
+  color: '#111',
+  lineHeight: 1.6,
+  resize: 'vertical',
+  minHeight: 88,
+  boxSizing: 'border-box',
+  fontFamily: 'inherit',
 }
 
 const primaryBtnStyle: CSSProperties = {
