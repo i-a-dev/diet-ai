@@ -414,7 +414,7 @@ export function ProfileSettingsSheet({
           alignItems: 'center',
           justifyContent: 'space-between',
           minHeight: 44,
-          padding: '0 16px',
+          padding: '0 20px',
           background: '#fff',
           borderBottom: '1px solid #F0F0F0',
           flexShrink: 0,
@@ -422,20 +422,27 @@ export function ProfileSettingsSheet({
       >
         {!isOnboarding ? (
           <button type="button" onClick={onClose} aria-label="戻る" style={headerBtnStyle}>
-            <ChevronLeft size={24} color="#111" />
+            <ChevronLeft size={22} color="#111" strokeWidth={2} />
           </button>
         ) : (
-          <span style={{ width: 32 }} />
+          <span style={{ width: 22 }} />
         )}
-        <span style={{ fontSize: 16, fontWeight: 700, color: '#111' }}>
+        <span
+          style={{
+            fontSize: 17,
+            fontWeight: 600,
+            color: '#111',
+            lineHeight: '22px',
+          }}
+        >
           {isOnboarding ? 'プロフィール登録' : 'プロフィール'}
         </span>
         {!isOnboarding ? (
           <button type="button" onClick={onClose} aria-label="閉じる" style={headerBtnStyle}>
-            <X size={22} color="#AAA" />
+            <X size={22} color="#AAA" strokeWidth={2} />
           </button>
         ) : (
-          <span style={{ width: 32 }} />
+          <span style={{ width: 22 }} />
         )}
       </div>
 
@@ -485,7 +492,7 @@ export function ProfileSettingsSheet({
               icon={<User size={18} color={GREEN} strokeWidth={2.2} />}
               iconBg={GREEN_BG}
               label="性別"
-              hint="基礎代謝・カロリー目標の計算に使用"
+              hint="目標摂取カロリーの計算に使用"
             >
               <OptionPills
                 options={GENDER_OPTIONS}
@@ -498,7 +505,7 @@ export function ProfileSettingsSheet({
               icon={<Calendar size={18} color={BLUE} strokeWidth={2.2} />}
               iconBg={BLUE_BG}
               label="生年月日"
-              hint="年齢による基礎代謝の差に使用"
+              hint="目標摂取カロリーの計算に使用"
             >
               <input
                 type="date"
@@ -513,7 +520,7 @@ export function ProfileSettingsSheet({
               icon={<User size={18} color={GREEN} strokeWidth={2.2} />}
               iconBg={GREEN_BG}
               label="身長"
-              hint="BMI・目標体重の計算に使用"
+              hint="目標摂取カロリーの計算に使用"
               value={heightCm}
               unit="cm"
               min={100}
@@ -526,7 +533,7 @@ export function ProfileSettingsSheet({
               icon={<Scale size={18} color={BLUE} strokeWidth={2.2} />}
               iconBg={BLUE_BG}
               label="現在の体重"
-              hint="基礎代謝・消費カロリーの計算に使用"
+              hint="目標摂取カロリーの計算に使用"
               value={currentWeightKg}
               unit="kg"
               min={20}
@@ -539,7 +546,7 @@ export function ProfileSettingsSheet({
               icon={<Target size={18} color={ORANGE} strokeWidth={2.2} />}
               iconBg={ORANGE_BG}
               label="目標体重"
-              hint="1日の摂取カロリー目標の計算に使用"
+              hint="目標摂取カロリーの計算に使用"
               value={targetWeightKg}
               unit="kg"
               min={20}
@@ -593,7 +600,7 @@ export function ProfileSettingsSheet({
               icon={<Target size={18} color={ORANGE} strokeWidth={2.2} />}
               iconBg={ORANGE_BG}
               label="目標ペース"
-              hint="月に何kg落とすか"
+              hint="目標摂取カロリーの計算に使用"
               value={targetPaceKgPerMonth}
               unit="kg/月"
               min={0}
@@ -696,8 +703,8 @@ const iconWrapStyle = (background: string): CSSProperties => ({
 })
 
 const headerBtnStyle: CSSProperties = {
-  width: 32,
-  height: 32,
+  width: 22,
+  height: 22,
   border: 'none',
   background: 'transparent',
   padding: 0,
