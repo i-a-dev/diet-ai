@@ -16,6 +16,8 @@ export function BubbleCoach({ children }: BubbleCoachProps) {
         fontSize: 13,
         lineHeight: 1.65,
         color: '#222',
+        minWidth: 0,
+        maxWidth: '100%',
       }}
     >
       {children}

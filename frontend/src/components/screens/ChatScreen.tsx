@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { BubbleCoach } from "../BubbleCoach.tsx";
 import { BubbleUser } from "../BubbleUser.tsx";
+import { ChatMarkdown } from "../ChatMarkdown.tsx";
 import { CoachAvatar } from "../CoachAvatar.tsx";
 import { TopNav } from "../TopNav.tsx";
 import { ORANGE } from "../../constants.ts";
@@ -39,7 +40,7 @@ function buildWelcomeMessage(targetWeightKg: number | null): string {
   return `あなた専属のAIコーチです！\nいつでも気軽に相談してくださいね！\n${goalLine}\n記録した体重・食事・運動・歩数を見ながら、一緒に考えます。`;
 }
 
-function renderMessageContent(content: string) {
+function renderPlainText(content: string) {
   return content.split("\n").map((line, index, lines) => (
     <span key={`${index}-${line}`}>
       {line}
@@ -182,13 +183,17 @@ export function ChatScreen() {
                   display: "flex",
                   flexDirection: "column",
                   gap: 4,
-                  maxWidth: 260,
+                  flex: 1,
+                  minWidth: 0,
+                  maxWidth: "calc(100% - 50px)",
                 }}
               >
                 <span style={{ fontSize: 11, color: ORANGE, fontWeight: 600 }}>
                   AIコーチ {formatTime(message.createdAtDate)}
                 </span>
-                <BubbleCoach>{renderMessageContent(message.content)}</BubbleCoach>
+                <BubbleCoach>
+                  <ChatMarkdown content={message.content} />
+                </BubbleCoach>
               </div>
             </div>
           ) : (
@@ -201,7 +206,7 @@ export function ChatScreen() {
                 gap: 3,
               }}
             >
-              <BubbleUser>{renderMessageContent(message.content)}</BubbleUser>
+              <BubbleUser>{renderPlainText(message.content)}</BubbleUser>
               <span style={{ fontSize: 11, color: "#C0C0C0" }}>
                 {formatTime(message.createdAtDate)}
               </span>
@@ -217,7 +222,9 @@ export function ChatScreen() {
                 display: "flex",
                 flexDirection: "column",
                 gap: 4,
-                maxWidth: 260,
+                flex: 1,
+                minWidth: 0,
+                maxWidth: "calc(100% - 50px)",
               }}
             >
               <span style={{ fontSize: 11, color: ORANGE, fontWeight: 600 }}>
