@@ -26,7 +26,6 @@ final class UserProfileRepository
         'heightCm',
         'currentWeightKg',
         'targetWeightKg',
-        'activityLevel',
     ];
 
     private PDO $db;
@@ -49,6 +48,7 @@ final class UserProfileRepository
      *   desiredDietMethod: string|null,
      *   allergiesDislikes: string|null,
      *   pastDietExperience: string|null,
+     *   coachNotes: string|null,
      *   isComplete: bool,
      *   updatedAt: string|null
      * }
@@ -58,7 +58,7 @@ final class UserProfileRepository
         $statement = $this->db->prepare(
             'SELECT gender, birth_date, height_cm, current_weight_kg, target_weight_kg,
                     activity_level, target_pace_kg_per_month, diet_goal, desired_diet_method,
-                    allergies_dislikes, past_diet_experience, updated_at
+                    allergies_dislikes, past_diet_experience, coach_notes, updated_at
              FROM user_profile
              WHERE id = :id
              LIMIT 1'
@@ -89,6 +89,7 @@ final class UserProfileRepository
      *   desiredDietMethod: string|null,
      *   allergiesDislikes: string|null,
      *   pastDietExperience: string|null,
+     *   coachNotes: string|null,
      *   isComplete: bool,
      *   updatedAt: string|null
      * }
@@ -112,6 +113,7 @@ final class UserProfileRepository
                  desired_diet_method = :desired_diet_method,
                  allergies_dislikes = :allergies_dislikes,
                  past_diet_experience = :past_diet_experience,
+                 coach_notes = :coach_notes,
                  updated_at = datetime(\'now\')
              WHERE id = :id'
         );
@@ -127,6 +129,7 @@ final class UserProfileRepository
             'desired_diet_method' => $merged['desiredDietMethod'],
             'allergies_dislikes' => $merged['allergiesDislikes'],
             'past_diet_experience' => $merged['pastDietExperience'],
+            'coach_notes' => $merged['coachNotes'],
             'id' => self::PROFILE_ID,
         ]);
 
@@ -147,6 +150,7 @@ final class UserProfileRepository
      *   desiredDietMethod: string|null,
      *   allergiesDislikes: string|null,
      *   pastDietExperience: string|null,
+     *   coachNotes: string|null,
      *   isComplete: bool,
      *   updatedAt: string|null
      * }
@@ -165,6 +169,7 @@ final class UserProfileRepository
             'desiredDietMethod' => $this->nullableTrimmedText($row['desired_diet_method'] ?? null),
             'allergiesDislikes' => $this->nullableTrimmedText($row['allergies_dislikes'] ?? null),
             'pastDietExperience' => $this->nullableTrimmedText($row['past_diet_experience'] ?? null),
+            'coachNotes' => $this->nullableTrimmedText($row['coach_notes'] ?? null),
             'updatedAt' => isset($row['updated_at']) ? (string) $row['updated_at'] : null,
         ];
         $profile['isComplete'] = $this->computeIsComplete($profile);
@@ -185,6 +190,7 @@ final class UserProfileRepository
      *   desiredDietMethod: string|null,
      *   allergiesDislikes: string|null,
      *   pastDietExperience: string|null,
+     *   coachNotes: string|null,
      *   isComplete: bool,
      *   updatedAt: string|null
      * }
@@ -203,6 +209,7 @@ final class UserProfileRepository
             'desiredDietMethod' => null,
             'allergiesDislikes' => null,
             'pastDietExperience' => null,
+            'coachNotes' => null,
             'updatedAt' => null,
         ];
         $profile['isComplete'] = false;
@@ -243,6 +250,9 @@ final class UserProfileRepository
             'pastDietExperience' => array_key_exists('pastDietExperience', $fields)
                 ? $fields['pastDietExperience']
                 : $current['pastDietExperience'],
+            'coachNotes' => array_key_exists('coachNotes', $fields)
+                ? $fields['coachNotes']
+                : $current['coachNotes'],
         ];
 
         if ($merged['gender'] === '') {
@@ -265,6 +275,9 @@ final class UserProfileRepository
         }
         if ($merged['pastDietExperience'] === '') {
             $merged['pastDietExperience'] = null;
+        }
+        if ($merged['coachNotes'] === '') {
+            $merged['coachNotes'] = null;
         }
 
         return $merged;
@@ -305,6 +318,7 @@ final class UserProfileRepository
         $this->validateTextLength('desiredDietMethod', $profile['desiredDietMethod']);
         $this->validateTextLength('allergiesDislikes', $profile['allergiesDislikes']);
         $this->validateTextLength('pastDietExperience', $profile['pastDietExperience']);
+        $this->validateTextLength('coachNotes', $profile['coachNotes'], 100);
     }
 
     private function validateWeight(string $field, mixed $value): void
@@ -318,14 +332,14 @@ final class UserProfileRepository
         }
     }
 
-    private function validateTextLength(string $field, mixed $value): void
+    private function validateTextLength(string $field, mixed $value, int $max = 1000): void
     {
         if ($value === null) {
             return;
         }
 
-        if (!is_string($value) || mb_strlen($value) > 1000) {
-            throw new InvalidArgumentException(sprintf('%s must be 1000 characters or less', $field));
+        if (!is_string($value) || mb_strlen($value) > $max) {
+            throw new InvalidArgumentException(sprintf('%s must be %d characters or less', $field, $max));
         }
     }
 

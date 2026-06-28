@@ -1,6 +1,11 @@
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import {
-  Activity,
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
+import {
   Calendar,
   ChevronLeft,
   Heart,
@@ -8,53 +13,46 @@ import {
   Target,
   User,
   X,
-} from 'lucide-react'
+} from "lucide-react";
 import {
   fetchUserProfile,
   updateUserProfile,
-  type ActivityLevel,
   type DietGoal,
   type Gender,
   type UserProfile,
-} from '../api/client.ts'
-import { ORANGE } from '../constants.ts'
-import { StepperButton } from './StepperButton.tsx'
+} from "../api/client.ts";
+import { ORANGE } from "../constants.ts";
+import { StepperButton } from "./StepperButton.tsx";
 
-const GREEN = '#48B868'
-const GREEN_BG = '#E8F7ED'
-const ORANGE_BG = '#FFF3E6'
-const BLUE = '#3B82F6'
-const BLUE_BG = '#EFF6FF'
-const PURPLE = '#8B5CF6'
-const PURPLE_BG = '#F3E8FF'
+const GREEN = "#48B868";
+const GREEN_BG = "#E8F7ED";
+const ORANGE_BG = "#FFF3E6";
+const BLUE = "#3B82F6";
+const BLUE_BG = "#EFF6FF";
+const PURPLE = "#8B5CF6";
+const PURPLE_BG = "#F3E8FF";
 
 interface ProfileSettingsSheetProps {
-  open: boolean
-  onClose: () => void
-  onSaved?: () => void
-  mode?: 'settings' | 'onboarding'
+  open: boolean;
+  onClose: () => void;
+  onSaved?: () => void;
+  mode?: "settings" | "onboarding";
 }
 
 const GENDER_OPTIONS: { value: Gender; label: string }[] = [
-  { value: 'male', label: '男性' },
-  { value: 'female', label: '女性' },
-  { value: 'other', label: 'その他' },
-]
-
-const ACTIVITY_OPTIONS: { value: ActivityLevel; label: string; description: string }[] = [
-  { value: 'sedentary', label: 'ほとんど運動しない', description: 'デスクワーク中心' },
-  { value: 'light', label: '軽い運動', description: '週1〜2回' },
-  { value: 'moderate', label: '中程度の運動', description: '週3〜5回' },
-  { value: 'active', label: '激しい運動', description: '週6〜7回' },
-  { value: 'very_active', label: '非常に激しい運動', description: '肉体労働・毎日ハードトレ' },
-]
+  { value: "male", label: "男性" },
+  { value: "female", label: "女性" },
+  { value: "other", label: "その他" },
+];
 
 const DIET_GOAL_OPTIONS: { value: DietGoal; label: string }[] = [
-  { value: 'weight_loss', label: '減量' },
-  { value: 'maintenance', label: '体型維持' },
-  { value: 'muscle_gain', label: '筋肉増量' },
-  { value: 'health', label: '健康維持' },
-]
+  { value: "weight_loss", label: "減量" },
+  { value: "maintenance", label: "体型維持" },
+  { value: "muscle_gain", label: "筋肉増量" },
+  { value: "health", label: "健康維持" },
+];
+
+const COACH_NOTES_MAX_LENGTH = 100;
 
 const DEFAULT_PROFILE: UserProfile = {
   gender: null,
@@ -68,12 +66,13 @@ const DEFAULT_PROFILE: UserProfile = {
   desiredDietMethod: null,
   allergiesDislikes: null,
   pastDietExperience: null,
+  coachNotes: null,
   isComplete: false,
   updatedAt: null,
-}
+};
 
 function roundOneDecimal(value: number) {
-  return Math.round(value * 10) / 10
+  return Math.round(value * 10) / 10;
 }
 
 const DEFAULT_NUMERIC = {
@@ -81,7 +80,7 @@ const DEFAULT_NUMERIC = {
   currentWeightKg: 60,
   targetWeightKg: 57,
   targetPaceKgPerMonth: 2,
-} as const
+} as const;
 
 function applyNumericDefaults(profile: UserProfile): UserProfile {
   return {
@@ -89,20 +88,20 @@ function applyNumericDefaults(profile: UserProfile): UserProfile {
     heightCm: profile.heightCm ?? DEFAULT_NUMERIC.heightCm,
     currentWeightKg: profile.currentWeightKg ?? DEFAULT_NUMERIC.currentWeightKg,
     targetWeightKg: profile.targetWeightKg ?? DEFAULT_NUMERIC.targetWeightKg,
-    targetPaceKgPerMonth: profile.targetPaceKgPerMonth ?? DEFAULT_NUMERIC.targetPaceKgPerMonth,
-  }
+    targetPaceKgPerMonth:
+      profile.targetPaceKgPerMonth ?? DEFAULT_NUMERIC.targetPaceKgPerMonth,
+  };
 }
 
 function isRequiredComplete(profile: UserProfile) {
-  const effective = applyNumericDefaults(profile)
+  const effective = applyNumericDefaults(profile);
   return (
     effective.gender !== null &&
     effective.birthDate !== null &&
     effective.heightCm !== null &&
     effective.currentWeightKg !== null &&
-    effective.targetWeightKg !== null &&
-    effective.activityLevel !== null
-  )
+    effective.targetWeightKg !== null
+  );
 }
 
 function SettingCard({
@@ -117,58 +116,120 @@ function SettingCard({
   step,
   onChange,
 }: {
-  icon: ReactNode
-  iconBg: string
-  label: string
-  hint?: string
-  value: number
-  unit: string
-  min: number
-  max: number
-  step: number
-  onChange: (value: number) => void
+  icon: ReactNode;
+  iconBg: string;
+  label: string;
+  hint?: string;
+  value: number;
+  unit: string;
+  min: number;
+  max: number;
+  step: number;
+  onChange: (value: number) => void;
 }) {
-  const valueRef = useRef(value)
-  valueRef.current = value
+  const valueRef = useRef(value);
+  valueRef.current = value;
 
   const adjust = (delta: number) => {
-    onChange(roundOneDecimal(Math.max(min, Math.min(max, valueRef.current + delta))))
-  }
+    onChange(
+      roundOneDecimal(Math.max(min, Math.min(max, valueRef.current + delta))),
+    );
+  };
 
   return (
     <div style={cardStyle}>
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: hint ? 8 : 20 }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "flex-start",
+          gap: 10,
+          marginBottom: hint ? 8 : 20,
+        }}
+      >
         <div style={iconWrapStyle(iconBg)}>{icon}</div>
         <div>
-          <span style={{ fontSize: 16, fontWeight: 700, color: '#111' }}>{label}</span>
+          <span style={{ fontSize: 16, fontWeight: 700, color: "#111" }}>
+            {label}
+          </span>
           {hint && (
-            <p style={{ margin: '4px 0 0', fontSize: 12, color: '#999', lineHeight: 1.5 }}>{hint}</p>
+            <p
+              style={{
+                margin: "4px 0 0",
+                fontSize: 12,
+                color: "#999",
+                lineHeight: 1.5,
+              }}
+            >
+              {hint}
+            </p>
           )}
         </div>
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 24 }}>
-        <StepperButton ariaLabel={`${label}を${step}減らす`} onStep={() => adjust(-step)}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 24,
+        }}
+      >
+        <StepperButton
+          ariaLabel={`${label}を${step}減らす`}
+          onStep={() => adjust(-step)}
+        >
           −
         </StepperButton>
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-          <span style={{ fontSize: 44, fontWeight: 700, color: '#111', lineHeight: 1 }}>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+          <span
+            style={{
+              fontSize: 44,
+              fontWeight: 700,
+              color: "#111",
+              lineHeight: 1,
+            }}
+          >
             {value.toFixed(1)}
           </span>
-          <span style={{ fontSize: 18, color: '#999', fontWeight: 500 }}>{unit}</span>
+          <span style={{ fontSize: 18, color: "#999", fontWeight: 500 }}>
+            {unit}
+          </span>
         </div>
-        <StepperButton ariaLabel={`${label}を${step}増やす`} onStep={() => adjust(step)}>
+        <StepperButton
+          ariaLabel={`${label}を${step}増やす`}
+          onStep={() => adjust(step)}
+        >
           ＋
         </StepperButton>
       </div>
     </div>
-  )
+  );
 }
 
-function SectionHeader({ title, optional }: { title: string; optional?: boolean }) {
+function SectionHeader({
+  title,
+  optional,
+}: {
+  title: string;
+  optional?: boolean;
+}) {
   return (
-    <div style={{ margin: '0 0 12px', display: 'flex', alignItems: 'center', gap: 8 }}>
-      <span style={{ fontSize: 13, fontWeight: 700, color: '#333', letterSpacing: '0.02em' }}>
+    <div
+      style={{
+        margin: "0 0 12px",
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+      }}
+    >
+      <span
+        style={{
+          fontSize: 13,
+          fontWeight: 700,
+          color: "#333",
+          letterSpacing: "0.02em",
+        }}
+      >
         {title}
       </span>
       {optional && (
@@ -176,17 +237,17 @@ function SectionHeader({ title, optional }: { title: string; optional?: boolean 
           style={{
             fontSize: 11,
             fontWeight: 600,
-            color: '#999',
-            background: '#F0F0F0',
+            color: "#999",
+            background: "#F0F0F0",
             borderRadius: 6,
-            padding: '2px 8px',
+            padding: "2px 8px",
           }}
         >
           任意
         </span>
       )}
     </div>
-  )
+  );
 }
 
 function FieldCard({
@@ -196,26 +257,44 @@ function FieldCard({
   hint,
   children,
 }: {
-  icon: ReactNode
-  iconBg: string
-  label: string
-  hint?: string
-  children: ReactNode
+  icon: ReactNode;
+  iconBg: string;
+  label: string;
+  hint?: string;
+  children: ReactNode;
 }) {
   return (
     <div style={cardStyle}>
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: 14 }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "flex-start",
+          gap: 10,
+          marginBottom: 14,
+        }}
+      >
         <div style={iconWrapStyle(iconBg)}>{icon}</div>
         <div>
-          <span style={{ fontSize: 16, fontWeight: 700, color: '#111' }}>{label}</span>
+          <span style={{ fontSize: 16, fontWeight: 700, color: "#111" }}>
+            {label}
+          </span>
           {hint && (
-            <p style={{ margin: '4px 0 0', fontSize: 12, color: '#999', lineHeight: 1.5 }}>{hint}</p>
+            <p
+              style={{
+                margin: "4px 0 0",
+                fontSize: 12,
+                color: "#999",
+                lineHeight: 1.5,
+              }}
+            >
+              {hint}
+            </p>
           )}
         </div>
       </div>
       {children}
     </div>
-  )
+  );
 }
 
 function OptionPills<T extends string>({
@@ -223,155 +302,169 @@ function OptionPills<T extends string>({
   value,
   onChange,
 }: {
-  options: { value: T; label: string }[]
-  value: T | null
-  onChange: (value: T) => void
+  options: { value: T; label: string }[];
+  value: T | null;
+  onChange: (value: T) => void;
 }) {
   return (
-    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
       {options.map((option) => {
-        const selected = value === option.value
+        const selected = value === option.value;
         return (
           <button
             key={option.value}
             type="button"
             onClick={() => onChange(option.value)}
             style={{
-              padding: '10px 16px',
+              padding: "10px 16px",
               borderRadius: 999,
-              border: selected ? `1.5px solid ${ORANGE}` : '1px solid #E8E8E8',
-              background: selected ? ORANGE_BG : '#fff',
-              color: selected ? ORANGE : '#555',
+              border: selected ? `1.5px solid ${ORANGE}` : "1px solid #E8E8E8",
+              background: selected ? ORANGE_BG : "#fff",
+              color: selected ? ORANGE : "#555",
               fontSize: 14,
               fontWeight: selected ? 700 : 500,
-              cursor: 'pointer',
+              cursor: "pointer",
             }}
           >
             {option.label}
           </button>
-        )
+        );
       })}
     </div>
-  )
+  );
 }
 
 export function ProfileSettingsSheet({
   open,
   onClose,
   onSaved,
-  mode = 'settings',
+  mode = "settings",
 }: ProfileSettingsSheetProps) {
-  const isOnboarding = mode === 'onboarding'
-  const [profile, setProfile] = useState<UserProfile>(DEFAULT_PROFILE)
-  const [isLoading, setIsLoading] = useState(false)
-  const [isSaving, setIsSaving] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const isOnboarding = mode === "onboarding";
+  const [profile, setProfile] = useState<UserProfile>(DEFAULT_PROFILE);
+  const [isLoading, setIsLoading] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) {
-      return
+      return;
     }
 
-    let cancelled = false
-    setIsLoading(true)
-    setError(null)
+    let cancelled = false;
+    setIsLoading(true);
+    setError(null);
 
     fetchUserProfile()
       .then((response) => {
         if (cancelled) {
-          return
+          return;
         }
-        setProfile(applyNumericDefaults(response.profile))
+        setProfile(applyNumericDefaults(response.profile));
       })
       .catch((fetchError: Error) => {
         if (!cancelled) {
-          setError(fetchError.message)
+          setError(fetchError.message);
         }
       })
       .finally(() => {
         if (!cancelled) {
-          setIsLoading(false)
+          setIsLoading(false);
         }
-      })
+      });
 
     return () => {
-      cancelled = true
-    }
-  }, [open])
+      cancelled = true;
+    };
+  }, [open]);
 
-  const updateField = <K extends keyof UserProfile>(key: K, value: UserProfile[K]) => {
-    setProfile((prev) => ({ ...prev, [key]: value }))
-  }
+  const updateField = <K extends keyof UserProfile>(
+    key: K,
+    value: UserProfile[K],
+  ) => {
+    setProfile((prev) => ({ ...prev, [key]: value }));
+  };
 
   const handleSave = async () => {
     if (!isRequiredComplete(profile)) {
-      setError('必須項目をすべて入力してください')
-      return
+      setError("必須項目をすべて入力してください");
+      return;
     }
 
-    setIsSaving(true)
-    setError(null)
+    setIsSaving(true);
+    setError(null);
 
     try {
-      const effective = applyNumericDefaults(profile)
+      const effective = applyNumericDefaults(profile);
       const response = await updateUserProfile({
         gender: effective.gender,
         birthDate: effective.birthDate,
         heightCm: effective.heightCm,
         currentWeightKg: effective.currentWeightKg,
         targetWeightKg: effective.targetWeightKg,
-        activityLevel: effective.activityLevel,
+        activityLevel: null,
         targetPaceKgPerMonth: effective.targetPaceKgPerMonth,
         dietGoal: profile.dietGoal,
         desiredDietMethod: profile.desiredDietMethod,
         allergiesDislikes: profile.allergiesDislikes,
         pastDietExperience: profile.pastDietExperience,
-      })
-      setProfile(response.profile)
-      onSaved?.()
-      onClose()
+        coachNotes: profile.coachNotes,
+      });
+      setProfile(response.profile);
+      onSaved?.();
+      onClose();
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : '保存に失敗しました')
+      setError(
+        saveError instanceof Error ? saveError.message : "保存に失敗しました",
+      );
     } finally {
-      setIsSaving(false)
+      setIsSaving(false);
     }
-  }
+  };
 
   if (!open) {
-    return null
+    return null;
   }
 
-  const heightCm = profile.heightCm ?? DEFAULT_NUMERIC.heightCm
-  const currentWeightKg = profile.currentWeightKg ?? DEFAULT_NUMERIC.currentWeightKg
-  const targetWeightKg = profile.targetWeightKg ?? DEFAULT_NUMERIC.targetWeightKg
-  const targetPaceKgPerMonth = profile.targetPaceKgPerMonth ?? DEFAULT_NUMERIC.targetPaceKgPerMonth
+  const heightCm = profile.heightCm ?? DEFAULT_NUMERIC.heightCm;
+  const currentWeightKg =
+    profile.currentWeightKg ?? DEFAULT_NUMERIC.currentWeightKg;
+  const targetWeightKg =
+    profile.targetWeightKg ?? DEFAULT_NUMERIC.targetWeightKg;
+  const targetPaceKgPerMonth =
+    profile.targetPaceKgPerMonth ?? DEFAULT_NUMERIC.targetPaceKgPerMonth;
 
   return (
     <div
       style={{
-        position: 'fixed',
+        position: "fixed",
         inset: 0,
         zIndex: 50,
-        background: '#F5F5F7',
-        display: 'flex',
-        flexDirection: 'column',
-        overflow: 'hidden',
+        background: "#F5F5F7",
+        display: "flex",
+        flexDirection: "column",
+        overflow: "hidden",
       }}
     >
       <div
         style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
           minHeight: 44,
-          padding: '0 20px',
-          background: '#fff',
-          borderBottom: '1px solid #F0F0F0',
+          padding: "0 20px",
+          background: "#fff",
+          borderBottom: "1px solid #F0F0F0",
           flexShrink: 0,
         }}
       >
         {!isOnboarding ? (
-          <button type="button" onClick={onClose} aria-label="戻る" style={headerBtnStyle}>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="戻る"
+            style={headerBtnStyle}
+          >
             <ChevronLeft size={22} color="#111" strokeWidth={2} />
           </button>
         ) : (
@@ -381,14 +474,19 @@ export function ProfileSettingsSheet({
           style={{
             fontSize: 17,
             fontWeight: 600,
-            color: '#111',
-            lineHeight: '22px',
+            color: "#111",
+            lineHeight: "22px",
           }}
         >
-          {isOnboarding ? 'プロフィール登録' : 'プロフィール'}
+          {isOnboarding ? "プロフィール登録" : "プロフィール"}
         </span>
         {!isOnboarding ? (
-          <button type="button" onClick={onClose} aria-label="閉じる" style={headerBtnStyle}>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="閉じる"
+            style={headerBtnStyle}
+          >
             <X size={22} color="#AAA" strokeWidth={2} />
           </button>
         ) : (
@@ -399,17 +497,17 @@ export function ProfileSettingsSheet({
       <div
         style={{
           flex: 1,
-          overflowY: 'auto',
-          padding: '20px 16px 24px',
+          overflowY: "auto",
+          padding: "20px 16px 24px",
         }}
       >
         <p
           style={{
-            margin: '0 0 20px',
+            margin: "0 0 20px",
             fontSize: 14,
-            color: '#666',
+            color: "#666",
             lineHeight: 1.7,
-            textAlign: 'center',
+            textAlign: "center",
           }}
         >
           {isOnboarding ? (
@@ -428,13 +526,27 @@ export function ProfileSettingsSheet({
         </p>
 
         {isLoading ? (
-          <div style={{ textAlign: 'center', padding: '48px 0', color: '#888', fontSize: 14 }}>
+          <div
+            style={{
+              textAlign: "center",
+              padding: "48px 0",
+              color: "#888",
+              fontSize: 14,
+            }}
+          >
             読み込み中...
           </div>
         ) : (
           <>
             <SectionHeader title="基本情報" />
-            <p style={{ margin: '0 0 14px', fontSize: 12, color: '#999', lineHeight: 1.6 }}>
+            <p
+              style={{
+                margin: "0 0 14px",
+                fontSize: 12,
+                color: "#999",
+                lineHeight: 1.6,
+              }}
+            >
               基礎代謝・カロリー目標の計算に使用します（必須）
             </p>
 
@@ -447,7 +559,7 @@ export function ProfileSettingsSheet({
               <OptionPills
                 options={GENDER_OPTIONS}
                 value={profile.gender}
-                onChange={(value) => updateField('gender', value)}
+                onChange={(value) => updateField("gender", value)}
               />
             </FieldCard>
 
@@ -459,9 +571,11 @@ export function ProfileSettingsSheet({
             >
               <input
                 type="date"
-                value={profile.birthDate ?? ''}
+                value={profile.birthDate ?? ""}
                 max={new Date().toISOString().slice(0, 10)}
-                onChange={(event) => updateField('birthDate', event.target.value || null)}
+                onChange={(event) =>
+                  updateField("birthDate", event.target.value || null)
+                }
                 style={dateInputStyle}
               />
             </FieldCard>
@@ -476,7 +590,7 @@ export function ProfileSettingsSheet({
               min={100}
               max={220}
               step={0.1}
-              onChange={(value) => updateField('heightCm', value)}
+              onChange={(value) => updateField("heightCm", value)}
             />
 
             <SettingCard
@@ -489,7 +603,7 @@ export function ProfileSettingsSheet({
               min={20}
               max={200}
               step={0.1}
-              onChange={(value) => updateField('currentWeightKg', value)}
+              onChange={(value) => updateField("currentWeightKg", value)}
             />
 
             <SettingCard
@@ -502,47 +616,20 @@ export function ProfileSettingsSheet({
               min={20}
               max={200}
               step={0.1}
-              onChange={(value) => updateField('targetWeightKg', value)}
+              onChange={(value) => updateField("targetWeightKg", value)}
             />
-
-            <FieldCard
-              icon={<Activity size={18} color={PURPLE} strokeWidth={2.2} />}
-              iconBg={PURPLE_BG}
-              label="活動レベル"
-              hint="消費カロリーの計算に使用"
-            >
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {ACTIVITY_OPTIONS.map((option) => {
-                  const selected = profile.activityLevel === option.value
-                  return (
-                    <button
-                      key={option.value}
-                      type="button"
-                      onClick={() => updateField('activityLevel', option.value)}
-                      style={{
-                        width: '100%',
-                        textAlign: 'left',
-                        padding: '12px 14px',
-                        borderRadius: 12,
-                        border: selected ? `1.5px solid ${PURPLE}` : '1px solid #E8E8E8',
-                        background: selected ? PURPLE_BG : '#fff',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      <div style={{ fontSize: 14, fontWeight: selected ? 700 : 600, color: '#111' }}>
-                        {option.label}
-                      </div>
-                      <div style={{ fontSize: 12, color: '#999', marginTop: 2 }}>{option.description}</div>
-                    </button>
-                  )
-                })}
-              </div>
-            </FieldCard>
 
             <div style={{ height: 8 }} />
 
             <SectionHeader title="詳細設定" optional />
-            <p style={{ margin: '0 0 14px', fontSize: 12, color: '#999', lineHeight: 1.6 }}>
+            <p
+              style={{
+                margin: "0 0 14px",
+                fontSize: 12,
+                color: "#999",
+                lineHeight: 1.6,
+              }}
+            >
               あとから設定・変更できます
             </p>
 
@@ -556,7 +643,7 @@ export function ProfileSettingsSheet({
               min={0}
               max={10}
               step={0.1}
-              onChange={(value) => updateField('targetPaceKgPerMonth', value)}
+              onChange={(value) => updateField("targetPaceKgPerMonth", value)}
             />
 
             <FieldCard
@@ -567,7 +654,7 @@ export function ProfileSettingsSheet({
               <OptionPills
                 options={DIET_GOAL_OPTIONS}
                 value={profile.dietGoal}
-                onChange={(value) => updateField('dietGoal', value)}
+                onChange={(value) => updateField("dietGoal", value)}
               />
             </FieldCard>
 
@@ -578,8 +665,10 @@ export function ProfileSettingsSheet({
               hint="AIコーチのアドバイス精度向上に使用"
             >
               <textarea
-                value={profile.desiredDietMethod ?? ''}
-                onChange={(event) => updateField('desiredDietMethod', event.target.value || null)}
+                value={profile.desiredDietMethod ?? ""}
+                onChange={(event) =>
+                  updateField("desiredDietMethod", event.target.value || null)
+                }
                 placeholder="例：リバウンドしにくく、ある程度筋力をつけて、健康に痩せたい"
                 rows={3}
                 style={textareaStyle}
@@ -593,8 +682,10 @@ export function ProfileSettingsSheet({
               hint="AIコーチのアドバイス精度向上に使用"
             >
               <textarea
-                value={profile.allergiesDislikes ?? ''}
-                onChange={(event) => updateField('allergiesDislikes', event.target.value || null)}
+                value={profile.allergiesDislikes ?? ""}
+                onChange={(event) =>
+                  updateField("allergiesDislikes", event.target.value || null)
+                }
                 placeholder="例：えびアレルギー、きのこが苦手"
                 rows={3}
                 style={textareaStyle}
@@ -608,21 +699,68 @@ export function ProfileSettingsSheet({
               hint="AIコーチの提案精度向上に使用"
             >
               <textarea
-                value={profile.pastDietExperience ?? ''}
-                onChange={(event) => updateField('pastDietExperience', event.target.value || null)}
+                value={profile.pastDietExperience ?? ""}
+                onChange={(event) =>
+                  updateField("pastDietExperience", event.target.value || null)
+                }
                 placeholder="例：糖質制限を3ヶ月続けたがリバウンドした"
                 rows={3}
                 style={textareaStyle}
               />
             </FieldCard>
 
+            <FieldCard
+              icon={<User size={18} color={GREEN} strokeWidth={2.2} />}
+              iconBg={GREEN_BG}
+              label="AIコーチに伝えておきたいこと"
+              hint="100文字まで"
+            >
+              <textarea
+                value={profile.coachNotes ?? ""}
+                maxLength={COACH_NOTES_MAX_LENGTH}
+                onChange={(event) =>
+                  updateField(
+                    "coachNotes",
+                    event.target.value.slice(0, COACH_NOTES_MAX_LENGTH) || null,
+                  )
+                }
+                placeholder="例：週末だけ外食が多い"
+                rows={2}
+                style={textareaStyle}
+              />
+              <div
+                style={{
+                  marginTop: 6,
+                  fontSize: 11,
+                  color: "#999",
+                  textAlign: "right",
+                }}
+              >
+                {(profile.coachNotes ?? "").length}/{COACH_NOTES_MAX_LENGTH}
+              </div>
+            </FieldCard>
+
             {error && (
-              <div style={{ fontSize: 13, color: '#DC2626', textAlign: 'center', marginBottom: 12 }}>
+              <div
+                style={{
+                  fontSize: 13,
+                  color: "#DC2626",
+                  textAlign: "center",
+                  marginBottom: 12,
+                }}
+              >
                 {error}
               </div>
             )}
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 4 }}>
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: 10,
+                marginTop: 4,
+              }}
+            >
               <button
                 type="button"
                 onClick={() => void handleSave()}
@@ -630,13 +768,25 @@ export function ProfileSettingsSheet({
                 style={{
                   ...primaryBtnStyle,
                   opacity: isSaving || !isRequiredComplete(profile) ? 0.7 : 1,
-                  cursor: isSaving || !isRequiredComplete(profile) ? 'not-allowed' : 'pointer',
+                  cursor:
+                    isSaving || !isRequiredComplete(profile)
+                      ? "not-allowed"
+                      : "pointer",
                 }}
               >
-                {isSaving ? '保存中...' : isOnboarding ? '登録してはじめる' : '保存する'}
+                {isSaving
+                  ? "保存中..."
+                  : isOnboarding
+                    ? "登録してはじめる"
+                    : "保存する"}
               </button>
               {!isOnboarding && (
-                <button type="button" onClick={onClose} disabled={isSaving} style={secondaryBtnStyle}>
+                <button
+                  type="button"
+                  onClick={onClose}
+                  disabled={isSaving}
+                  style={secondaryBtnStyle}
+                >
                   キャンセル
                 </button>
               )}
@@ -645,7 +795,7 @@ export function ProfileSettingsSheet({
         )}
       </div>
     </div>
-  )
+  );
 }
 
 const iconWrapStyle = (background: string): CSSProperties => ({
@@ -653,78 +803,78 @@ const iconWrapStyle = (background: string): CSSProperties => ({
   height: 36,
   borderRadius: 10,
   background,
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
   flexShrink: 0,
-})
+});
 
 const headerBtnStyle: CSSProperties = {
   width: 22,
   height: 22,
-  border: 'none',
-  background: 'transparent',
+  border: "none",
+  background: "transparent",
   padding: 0,
-  cursor: 'pointer',
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-}
+  cursor: "pointer",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+};
 
 const cardStyle: CSSProperties = {
-  background: '#fff',
+  background: "#fff",
   borderRadius: 16,
-  border: '1px solid #EBEBEB',
-  padding: '18px 16px 16px',
+  border: "1px solid #EBEBEB",
+  padding: "18px 16px 16px",
   marginBottom: 14,
-}
+};
 
 const dateInputStyle: CSSProperties = {
-  width: '100%',
-  padding: '12px 14px',
+  width: "100%",
+  padding: "12px 14px",
   borderRadius: 12,
-  border: '1px solid #E8E8E8',
-  background: '#fff',
+  border: "1px solid #E8E8E8",
+  background: "#fff",
   fontSize: 16,
-  color: '#111',
-  boxSizing: 'border-box',
-}
+  color: "#111",
+  boxSizing: "border-box",
+};
 
 const textareaStyle: CSSProperties = {
-  width: '100%',
-  padding: '12px 14px',
+  width: "100%",
+  padding: "12px 14px",
   borderRadius: 12,
-  border: '1px solid #E8E8E8',
-  background: '#fff',
+  border: "1px solid #E8E8E8",
+  background: "#fff",
   fontSize: 14,
-  color: '#111',
+  color: "#111",
   lineHeight: 1.6,
-  resize: 'vertical',
+  resize: "vertical",
   minHeight: 88,
-  boxSizing: 'border-box',
-  fontFamily: 'inherit',
-}
+  boxSizing: "border-box",
+  fontFamily: "inherit",
+};
 
 const primaryBtnStyle: CSSProperties = {
-  width: '100%',
-  padding: '15px 0',
+  width: "100%",
+  padding: "15px 0",
   borderRadius: 12,
-  border: 'none',
+  border: "none",
   background: ORANGE,
   fontSize: 16,
   fontWeight: 700,
-  color: '#fff',
-  cursor: 'pointer',
-}
+  color: "#fff",
+  cursor: "pointer",
+};
 
 const secondaryBtnStyle: CSSProperties = {
-  width: '100%',
-  padding: '15px 0',
+  width: "100%",
+  padding: "15px 0",
   borderRadius: 12,
-  border: '1px solid #E8E8E8',
-  background: '#fff',
+  border: "1px solid #E8E8E8",
+  background: "#fff",
   fontSize: 16,
   fontWeight: 600,
-  color: '#666',
-  cursor: 'pointer',
-}
+  color: "#666",
+  cursor: "pointer",
+};

@@ -25,12 +25,13 @@ final class ChatCoachService
 - 「未設定」と明記されているプロフィール項目だけ、必要なら設定を促してください
 - アレルギー・苦手食材が「なし」などと登録されている場合も、登録内容を正として扱ってください
 - 「やりたいダイエット方法」に文章が登録されている場合、必ずその方針に沿ってアドバイスし、「やりたいダイエット方法の情報がない」とは絶対に言わないでください
+- 「その他AIコーチに伝えておきたいこと」に登録がある場合も、事実として扱い、再度聞かないでください
 - 食事制限の仕方（糖質制限・脂質制限など）ではなく、「やりたいダイエット方法」がプロフィールの正式な項目名です
 
 【回答のルール】
 - 日本語で、チャットらしい短めの文体で返答する
 - 記録データに触れるときは具体的な数値や日付を引用する
-- プロフィールの目標体重・活動レベル・目標ペース・目標摂取カロリー・やりたいダイエット方法は、登録値をそのまま使う
+- プロフィールの目標体重・目標ペース・目標摂取カロリー・やりたいダイエット方法は、登録値をそのまま使う
 - 失敗を責めず、次の一歩を一緒に考える
 - 極端な食事制限や医療行為の代替は勧めない
 - 日々の記録（今日の食事・運動など）が不足しているときだけ、記録の追加を優しく促す
@@ -197,7 +198,6 @@ TEXT;
         $lines[] = '身長: ' . $this->formatNullableNumber($profile['heightCm'], 'cm');
         $lines[] = '現在の体重: ' . $this->formatNullableNumber($profile['currentWeightKg'], 'kg');
         $lines[] = '目標体重: ' . $this->formatNullableNumber($profile['targetWeightKg'], 'kg');
-        $lines[] = '活動レベル: ' . $this->formatActivityLevel($profile['activityLevel'] ?? null);
         $lines[] = '目標ペース: ' . $this->formatNullableNumber($profile['targetPaceKgPerMonth'], 'kg/月');
         $lines[] = 'ダイエット目的: ' . $this->formatDietGoal($profile['dietGoal'] ?? null);
         $desiredDietMethod = $this->nullableProfileText($profile['desiredDietMethod'] ?? null);
@@ -211,6 +211,7 @@ TEXT;
         }
         $lines[] = 'アレルギー・苦手食材: ' . $this->formatProfileText($profile['allergiesDislikes'] ?? null);
         $lines[] = '過去のダイエット経験: ' . $this->formatProfileText($profile['pastDietExperience'] ?? null);
+        $lines[] = 'その他AIコーチに伝えておきたいこと: ' . $this->formatProfileText($profile['coachNotes'] ?? null);
         if ($calorieGoal['bmrKcal'] !== null) {
             $lines[] = '推定基礎代謝: ' . $calorieGoal['bmrKcal'] . 'kcal/日';
         }
@@ -267,7 +268,6 @@ TEXT;
 
         $lines[] = '目標体重: ' . $this->formatNullableNumber($profile['targetWeightKg'], 'kg');
         $lines[] = '目標ペース: ' . $this->formatNullableNumber($profile['targetPaceKgPerMonth'], 'kg/月');
-        $lines[] = '活動レベル: ' . $this->formatActivityLevel($profile['activityLevel'] ?? null);
 
         return implode("\n", $lines);
     }
@@ -472,18 +472,6 @@ TEXT;
             'male' => '男性',
             'female' => '女性',
             'other' => 'その他',
-            default => '未設定',
-        };
-    }
-
-    private function formatActivityLevel(?string $level): string
-    {
-        return match ($level) {
-            'sedentary' => 'ほとんど運動しない',
-            'light' => '軽い運動（週1〜2回）',
-            'moderate' => '中程度の運動（週3〜5回）',
-            'active' => '激しい運動（週6〜7回）',
-            'very_active' => '非常に激しい運動',
             default => '未設定',
         };
     }

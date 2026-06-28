@@ -46,7 +46,7 @@ final class CalorieGoalCalculator
       $profile['heightCm'] ?? null,
       $profile['currentWeightKg'] ?? null,
     );
-    $tdeeKcal = self::calculateTdee($bmrKcal, $profile['activityLevel'] ?? null);
+    $tdeeKcal = self::calculateTdee($bmrKcal, $profile['activityLevel'] ?? 'sedentary');
     $dailyDeficitKcal = self::calculateDailyDeficit($profile['targetPaceKgPerMonth'] ?? null);
     $dailyIntakeGoalKcal = $tdeeKcal !== null && $dailyDeficitKcal !== null
       ? max(1200, (int) round($tdeeKcal - $dailyDeficitKcal))
@@ -106,14 +106,12 @@ final class CalorieGoalCalculator
 
   private static function calculateTdee(?int $bmrKcal, ?string $activityLevel): ?int
   {
-    if ($bmrKcal === null || $activityLevel === null) {
+    if ($bmrKcal === null) {
       return null;
     }
 
-    $multiplier = self::ACTIVITY_MULTIPLIERS[$activityLevel] ?? null;
-    if ($multiplier === null) {
-      return null;
-    }
+    $level = $activityLevel ?? 'sedentary';
+    $multiplier = self::ACTIVITY_MULTIPLIERS[$level] ?? self::ACTIVITY_MULTIPLIERS['sedentary'];
 
     return (int) round($bmrKcal * $multiplier);
   }

@@ -326,6 +326,7 @@ export interface UserProfile {
   desiredDietMethod: string | null;
   allergiesDislikes: string | null;
   pastDietExperience: string | null;
+  coachNotes: string | null;
   isComplete: boolean;
   updatedAt: string | null;
 }
@@ -342,6 +343,7 @@ export type UserProfileUpdate = {
   desiredDietMethod?: string | null;
   allergiesDislikes?: string | null;
   pastDietExperience?: string | null;
+  coachNotes?: string | null;
 };
 
 export function fetchUserProfile() {

@@ -129,6 +129,7 @@ if ($requestMethod === 'PUT' && $requestPath === '/api/user/profile') {
         'desiredDietMethod',
         'allergiesDislikes',
         'pastDietExperience',
+        'coachNotes',
     ];
 
     foreach ($stringFields as $field) {
