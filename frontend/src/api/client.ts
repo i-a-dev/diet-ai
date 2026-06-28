@@ -313,7 +313,6 @@ export type ActivityLevel =
   | "active"
   | "very_active";
 export type DietGoal = "weight_loss" | "maintenance" | "muscle_gain" | "health";
-export type DietaryRestriction = "carb" | "fat" | "calorie";
 
 export interface UserProfile {
   gender: Gender | null;
@@ -324,7 +323,7 @@ export interface UserProfile {
   activityLevel: ActivityLevel | null;
   targetPaceKgPerMonth: number | null;
   dietGoal: DietGoal | null;
-  dietaryRestrictions: DietaryRestriction[];
+  desiredDietMethod: string | null;
   allergiesDislikes: string | null;
   pastDietExperience: string | null;
   isComplete: boolean;
@@ -340,7 +339,7 @@ export type UserProfileUpdate = {
   activityLevel?: ActivityLevel | null;
   targetPaceKgPerMonth?: number | null;
   dietGoal?: DietGoal | null;
-  dietaryRestrictions?: DietaryRestriction[];
+  desiredDietMethod?: string | null;
   allergiesDislikes?: string | null;
   pastDietExperience?: string | null;
 };

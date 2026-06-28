@@ -18,15 +18,19 @@ final class ChatCoachService
 【プロフィールの扱い（最重要）】
 - 【ユーザーの記録データ】内の「■ プロフィール（ユーザー登録・正）」は、ユーザーがアプリに登録した正式な情報です
 - プロフィールに値がある項目は、すべて事実として扱い、返信の前提にしてください
-- プロフィールに記載済みの項目について「〜ですか？」「確認したいこと」として再度聞かないでください
+- 会話履歴で以前に未設定と言っていた項目でも、プロフィールに登録済みなら必ずその登録内容を正として使ってください
+- 会話履歴の内容より、毎回付与される【ユーザーの記録データ】と【今回の返信で必ず参照するプロフィール要点】を常に優先してください
+- プロフィールに記載済みの項目について「〜ですか？」「確認したいこと」「情報がありません」として再度聞かないでください
 - プロフィールの数値や設定を疑ったり、変更の有無を確認したりしないでください
 - 「未設定」と明記されているプロフィール項目だけ、必要なら設定を促してください
 - アレルギー・苦手食材が「なし」などと登録されている場合も、登録内容を正として扱ってください
+- 「やりたいダイエット方法」に文章が登録されている場合、必ずその方針に沿ってアドバイスし、「やりたいダイエット方法の情報がない」とは絶対に言わないでください
+- 食事制限の仕方（糖質制限・脂質制限など）ではなく、「やりたいダイエット方法」がプロフィールの正式な項目名です
 
 【回答のルール】
 - 日本語で、チャットらしい短めの文体で返答する
 - 記録データに触れるときは具体的な数値や日付を引用する
-- プロフィールの目標体重・活動レベル・目標ペース・目標摂取カロリーは、登録値をそのまま使う
+- プロフィールの目標体重・活動レベル・目標ペース・目標摂取カロリー・やりたいダイエット方法は、登録値をそのまま使う
 - 失敗を責めず、次の一歩を一緒に考える
 - 極端な食事制限や医療行為の代替は勧めない
 - 日々の記録（今日の食事・運動など）が不足しているときだけ、記録の追加を優しく促す
@@ -85,6 +89,7 @@ TEXT;
         }
 
         $normalized = $this->normalizeMessages($messages);
+        $normalized = $this->injectProfileReminderIntoMessages($normalized);
         $lastMessage = $normalized[array_key_last($normalized)];
 
         if (($lastMessage['role'] ?? '') !== 'user') {
@@ -97,7 +102,10 @@ TEXT;
         }
 
         $context = $this->buildUserContext();
-        $system = self::SYSTEM_PROMPT . "\n\n【ユーザーの記録データ】\n" . $context;
+        $system = self::SYSTEM_PROMPT
+            . "\n\n【ユーザーの記録データ】\n"
+            . $context
+            . $this->buildProfileActionSummary();
 
         $payload = [
             'model' => self::MODEL,
@@ -192,7 +200,15 @@ TEXT;
         $lines[] = '活動レベル: ' . $this->formatActivityLevel($profile['activityLevel'] ?? null);
         $lines[] = '目標ペース: ' . $this->formatNullableNumber($profile['targetPaceKgPerMonth'], 'kg/月');
         $lines[] = 'ダイエット目的: ' . $this->formatDietGoal($profile['dietGoal'] ?? null);
-        $lines[] = '食事制限の仕方: ' . $this->formatDietaryRestrictions($profile['dietaryRestrictions'] ?? []);
+        $desiredDietMethod = $this->nullableProfileText($profile['desiredDietMethod'] ?? null);
+        if ($desiredDietMethod !== null) {
+            $lines[] = '';
+            $lines[] = '【やりたいダイエット方法（登録済み・必ずこの方針に沿う）】';
+            $lines[] = $desiredDietMethod;
+            $lines[] = '';
+        } else {
+            $lines[] = 'やりたいダイエット方法: 未設定';
+        }
         $lines[] = 'アレルギー・苦手食材: ' . $this->formatProfileText($profile['allergiesDislikes'] ?? null);
         $lines[] = '過去のダイエット経験: ' . $this->formatProfileText($profile['pastDietExperience'] ?? null);
         if ($calorieGoal['bmrKcal'] !== null) {
@@ -224,6 +240,62 @@ TEXT;
         $lines[] = $this->formatRecentMetric('歩数', $stepPoints, '歩');
 
         return implode("\n", $lines);
+    }
+
+    /**
+     * 会話履歴に埋もれないよう、返信直前に参照すべき要点を再度明示する。
+     */
+    private function buildProfileActionSummary(): string
+    {
+        $profile = $this->userProfileRepository->get();
+        $calorieGoal = CalorieGoalCalculator::calculate($profile);
+        $desiredDietMethod = $this->nullableProfileText($profile['desiredDietMethod'] ?? null);
+
+        $lines = [];
+        $lines[] = '';
+        $lines[] = '【今回の返信で必ず参照するプロフィール要点（会話履歴より優先）】';
+
+        if ($desiredDietMethod !== null) {
+            $lines[] = 'やりたいダイエット方法: ' . $desiredDietMethod;
+        } else {
+            $lines[] = 'やりたいダイエット方法: 未設定';
+        }
+
+        if ($calorieGoal['dailyIntakeGoalKcal'] !== null) {
+            $lines[] = '目標摂取カロリー: ' . $calorieGoal['dailyIntakeGoalKcal'] . 'kcal/日';
+        }
+
+        $lines[] = '目標体重: ' . $this->formatNullableNumber($profile['targetWeightKg'], 'kg');
+        $lines[] = '目標ペース: ' . $this->formatNullableNumber($profile['targetPaceKgPerMonth'], 'kg/月');
+        $lines[] = '活動レベル: ' . $this->formatActivityLevel($profile['activityLevel'] ?? null);
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * 直近のユーザー発言にもプロフィール要点を付与し、モデルの注意を引く。
+     *
+     * @param array<int, array{role: string, content: string}> $messages
+     * @return array<int, array{role: string, content: string}>
+     */
+    private function injectProfileReminderIntoMessages(array $messages): array
+    {
+        $profile = $this->userProfileRepository->get();
+        $desiredDietMethod = $this->nullableProfileText($profile['desiredDietMethod'] ?? null);
+        if ($desiredDietMethod === null) {
+            return $messages;
+        }
+
+        $lastIndex = array_key_last($messages);
+        if ($lastIndex === null || ($messages[$lastIndex]['role'] ?? '') !== 'user') {
+            return $messages;
+        }
+
+        $messages[$lastIndex]['content'] .= "\n\n"
+            . '【参照用・プロフィール登録済み】やりたいダイエット方法: '
+            . $desiredDietMethod;
+
+        return $messages;
     }
 
     /**
@@ -385,6 +457,15 @@ TEXT;
         return $value . '（ユーザー登録）';
     }
 
+    private function nullableProfileText(?string $value): ?string
+    {
+        if ($value === null || trim($value) === '') {
+            return null;
+        }
+
+        return trim($value);
+    }
+
     private function formatGender(?string $gender): string
     {
         return match ($gender) {
@@ -416,28 +497,6 @@ TEXT;
             'health' => '健康維持',
             default => '未設定',
         };
-    }
-
-    /**
-     * @param list<string> $restrictions
-     */
-    private function formatDietaryRestrictions(array $restrictions): string
-    {
-        if ($restrictions === []) {
-            return '未設定';
-        }
-
-        $labels = array_map(
-            static fn (string $restriction): string => match ($restriction) {
-                'carb' => '糖質制限',
-                'fat' => '脂質制限',
-                'calorie' => 'カロリー制限',
-                default => $restriction,
-            },
-            $restrictions
-        );
-
-        return implode('、', $labels);
     }
 
     /**

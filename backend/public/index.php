@@ -126,6 +126,7 @@ if ($requestMethod === 'PUT' && $requestPath === '/api/user/profile') {
         'birthDate',
         'activityLevel',
         'dietGoal',
+        'desiredDietMethod',
         'allergiesDislikes',
         'pastDietExperience',
     ];
@@ -140,14 +141,6 @@ if ($requestMethod === 'PUT' && $requestPath === '/api/user/profile') {
             json_response(['message' => sprintf('%s must be a string or null', $field)], 422);
         }
         $fields[$field] = $value;
-    }
-
-    if (array_key_exists('dietaryRestrictions', $body)) {
-        $restrictions = $body['dietaryRestrictions'];
-        if (!is_array($restrictions)) {
-            json_response(['message' => 'dietaryRestrictions must be an array'], 422);
-        }
-        $fields['dietaryRestrictions'] = $restrictions;
     }
 
     if ($fields === []) {

@@ -20,9 +20,6 @@ final class UserProfileRepository
     private const DIET_GOALS = ['weight_loss', 'maintenance', 'muscle_gain', 'health'];
 
     /** @var list<string> */
-    private const DIETARY_RESTRICTIONS = ['carb', 'fat', 'calorie'];
-
-    /** @var list<string> */
     private const REQUIRED_FIELDS = [
         'gender',
         'birthDate',
@@ -49,7 +46,7 @@ final class UserProfileRepository
      *   activityLevel: string|null,
      *   targetPaceKgPerMonth: float|null,
      *   dietGoal: string|null,
-     *   dietaryRestrictions: list<string>,
+     *   desiredDietMethod: string|null,
      *   allergiesDislikes: string|null,
      *   pastDietExperience: string|null,
      *   isComplete: bool,
@@ -60,7 +57,7 @@ final class UserProfileRepository
     {
         $statement = $this->db->prepare(
             'SELECT gender, birth_date, height_cm, current_weight_kg, target_weight_kg,
-                    activity_level, target_pace_kg_per_month, diet_goal, dietary_restrictions,
+                    activity_level, target_pace_kg_per_month, diet_goal, desired_diet_method,
                     allergies_dislikes, past_diet_experience, updated_at
              FROM user_profile
              WHERE id = :id
@@ -89,7 +86,7 @@ final class UserProfileRepository
      *   activityLevel: string|null,
      *   targetPaceKgPerMonth: float|null,
      *   dietGoal: string|null,
-     *   dietaryRestrictions: list<string>,
+     *   desiredDietMethod: string|null,
      *   allergiesDislikes: string|null,
      *   pastDietExperience: string|null,
      *   isComplete: bool,
@@ -112,7 +109,7 @@ final class UserProfileRepository
                  activity_level = :activity_level,
                  target_pace_kg_per_month = :target_pace_kg_per_month,
                  diet_goal = :diet_goal,
-                 dietary_restrictions = :dietary_restrictions,
+                 desired_diet_method = :desired_diet_method,
                  allergies_dislikes = :allergies_dislikes,
                  past_diet_experience = :past_diet_experience,
                  updated_at = datetime(\'now\')
@@ -127,7 +124,7 @@ final class UserProfileRepository
             'activity_level' => $merged['activityLevel'],
             'target_pace_kg_per_month' => $merged['targetPaceKgPerMonth'],
             'diet_goal' => $merged['dietGoal'],
-            'dietary_restrictions' => $this->encodeDietaryRestrictions($merged['dietaryRestrictions']),
+            'desired_diet_method' => $merged['desiredDietMethod'],
             'allergies_dislikes' => $merged['allergiesDislikes'],
             'past_diet_experience' => $merged['pastDietExperience'],
             'id' => self::PROFILE_ID,
@@ -147,7 +144,7 @@ final class UserProfileRepository
      *   activityLevel: string|null,
      *   targetPaceKgPerMonth: float|null,
      *   dietGoal: string|null,
-     *   dietaryRestrictions: list<string>,
+     *   desiredDietMethod: string|null,
      *   allergiesDislikes: string|null,
      *   pastDietExperience: string|null,
      *   isComplete: bool,
@@ -165,7 +162,7 @@ final class UserProfileRepository
             'activityLevel' => $this->nullableString($row['activity_level'] ?? null),
             'targetPaceKgPerMonth' => $this->nullableFloat($row['target_pace_kg_per_month'] ?? null),
             'dietGoal' => $this->nullableString($row['diet_goal'] ?? null),
-            'dietaryRestrictions' => $this->decodeDietaryRestrictions($row['dietary_restrictions'] ?? null),
+            'desiredDietMethod' => $this->nullableTrimmedText($row['desired_diet_method'] ?? null),
             'allergiesDislikes' => $this->nullableTrimmedText($row['allergies_dislikes'] ?? null),
             'pastDietExperience' => $this->nullableTrimmedText($row['past_diet_experience'] ?? null),
             'updatedAt' => isset($row['updated_at']) ? (string) $row['updated_at'] : null,
@@ -185,7 +182,7 @@ final class UserProfileRepository
      *   activityLevel: string|null,
      *   targetPaceKgPerMonth: float|null,
      *   dietGoal: string|null,
-     *   dietaryRestrictions: list<string>,
+     *   desiredDietMethod: string|null,
      *   allergiesDislikes: string|null,
      *   pastDietExperience: string|null,
      *   isComplete: bool,
@@ -203,7 +200,7 @@ final class UserProfileRepository
             'activityLevel' => null,
             'targetPaceKgPerMonth' => null,
             'dietGoal' => null,
-            'dietaryRestrictions' => [],
+            'desiredDietMethod' => null,
             'allergiesDislikes' => null,
             'pastDietExperience' => null,
             'updatedAt' => null,
@@ -237,9 +234,9 @@ final class UserProfileRepository
                 ? $fields['targetPaceKgPerMonth']
                 : $current['targetPaceKgPerMonth'],
             'dietGoal' => array_key_exists('dietGoal', $fields) ? $fields['dietGoal'] : $current['dietGoal'],
-            'dietaryRestrictions' => array_key_exists('dietaryRestrictions', $fields)
-                ? $fields['dietaryRestrictions']
-                : $current['dietaryRestrictions'],
+            'desiredDietMethod' => array_key_exists('desiredDietMethod', $fields)
+                ? $fields['desiredDietMethod']
+                : $current['desiredDietMethod'],
             'allergiesDislikes' => array_key_exists('allergiesDislikes', $fields)
                 ? $fields['allergiesDislikes']
                 : $current['allergiesDislikes'],
@@ -259,6 +256,9 @@ final class UserProfileRepository
         }
         if ($merged['dietGoal'] === '') {
             $merged['dietGoal'] = null;
+        }
+        if ($merged['desiredDietMethod'] === '') {
+            $merged['desiredDietMethod'] = null;
         }
         if ($merged['allergiesDislikes'] === '') {
             $merged['allergiesDislikes'] = null;
@@ -302,16 +302,7 @@ final class UserProfileRepository
             throw new InvalidArgumentException('targetPaceKgPerMonth must be between 0 and 20');
         }
 
-        if (!is_array($profile['dietaryRestrictions'])) {
-            throw new InvalidArgumentException('dietaryRestrictions must be an array');
-        }
-
-        foreach ($profile['dietaryRestrictions'] as $restriction) {
-            if (!is_string($restriction) || !in_array($restriction, self::DIETARY_RESTRICTIONS, true)) {
-                throw new InvalidArgumentException('dietaryRestrictions contains an invalid value');
-            }
-        }
-
+        $this->validateTextLength('desiredDietMethod', $profile['desiredDietMethod']);
         $this->validateTextLength('allergiesDislikes', $profile['allergiesDislikes']);
         $this->validateTextLength('pastDietExperience', $profile['pastDietExperience']);
     }
@@ -387,41 +378,5 @@ final class UserProfileRepository
         $trimmed = trim($value);
 
         return $trimmed === '' ? null : $trimmed;
-    }
-
-    /**
-     * @return list<string>
-     */
-    private function decodeDietaryRestrictions(mixed $value): array
-    {
-        if (!is_string($value) || $value === '') {
-            return [];
-        }
-
-        $decoded = json_decode($value, true);
-        if (!is_array($decoded)) {
-            return [];
-        }
-
-        $restrictions = [];
-        foreach ($decoded as $item) {
-            if (is_string($item) && in_array($item, self::DIETARY_RESTRICTIONS, true)) {
-                $restrictions[] = $item;
-            }
-        }
-
-        return $restrictions;
-    }
-
-    /**
-     * @param list<string> $restrictions
-     */
-    private function encodeDietaryRestrictions(array $restrictions): ?string
-    {
-        if ($restrictions === []) {
-            return null;
-        }
-
-        return json_encode(array_values($restrictions), JSON_UNESCAPED_UNICODE);
     }
 }

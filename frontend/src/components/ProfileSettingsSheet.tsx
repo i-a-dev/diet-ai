@@ -13,7 +13,6 @@ import {
   fetchUserProfile,
   updateUserProfile,
   type ActivityLevel,
-  type DietaryRestriction,
   type DietGoal,
   type Gender,
   type UserProfile,
@@ -57,12 +56,6 @@ const DIET_GOAL_OPTIONS: { value: DietGoal; label: string }[] = [
   { value: 'health', label: '健康維持' },
 ]
 
-const DIETARY_RESTRICTION_OPTIONS: { value: DietaryRestriction; label: string }[] = [
-  { value: 'carb', label: '糖質制限' },
-  { value: 'fat', label: '脂質制限' },
-  { value: 'calorie', label: 'カロリー制限' },
-]
-
 const DEFAULT_PROFILE: UserProfile = {
   gender: null,
   birthDate: null,
@@ -72,7 +65,7 @@ const DEFAULT_PROFILE: UserProfile = {
   activityLevel: null,
   targetPaceKgPerMonth: null,
   dietGoal: null,
-  dietaryRestrictions: [],
+  desiredDietMethod: null,
   allergiesDislikes: null,
   pastDietExperience: null,
   isComplete: false,
@@ -262,51 +255,6 @@ function OptionPills<T extends string>({
   )
 }
 
-function MultiOptionPills<T extends string>({
-  options,
-  values,
-  onChange,
-}: {
-  options: { value: T; label: string }[]
-  values: T[]
-  onChange: (values: T[]) => void
-}) {
-  const toggle = (value: T) => {
-    if (values.includes(value)) {
-      onChange(values.filter((item) => item !== value))
-      return
-    }
-    onChange([...values, value])
-  }
-
-  return (
-    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-      {options.map((option) => {
-        const selected = values.includes(option.value)
-        return (
-          <button
-            key={option.value}
-            type="button"
-            onClick={() => toggle(option.value)}
-            style={{
-              padding: '10px 16px',
-              borderRadius: 999,
-              border: selected ? `1.5px solid ${GREEN}` : '1px solid #E8E8E8',
-              background: selected ? GREEN_BG : '#fff',
-              color: selected ? GREEN : '#555',
-              fontSize: 14,
-              fontWeight: selected ? 700 : 500,
-              cursor: 'pointer',
-            }}
-          >
-            {option.label}
-          </button>
-        )
-      })}
-    </div>
-  )
-}
-
 export function ProfileSettingsSheet({
   open,
   onClose,
@@ -375,7 +323,7 @@ export function ProfileSettingsSheet({
         activityLevel: effective.activityLevel,
         targetPaceKgPerMonth: effective.targetPaceKgPerMonth,
         dietGoal: profile.dietGoal,
-        dietaryRestrictions: profile.dietaryRestrictions,
+        desiredDietMethod: profile.desiredDietMethod,
         allergiesDislikes: profile.allergiesDislikes,
         pastDietExperience: profile.pastDietExperience,
       })
@@ -623,11 +571,18 @@ export function ProfileSettingsSheet({
               />
             </FieldCard>
 
-            <FieldCard icon={<Heart size={18} color={ORANGE} strokeWidth={2.2} />} iconBg={ORANGE_BG} label="食事制限の仕方">
-              <MultiOptionPills
-                options={DIETARY_RESTRICTION_OPTIONS}
-                values={profile.dietaryRestrictions}
-                onChange={(values) => updateField('dietaryRestrictions', values)}
+            <FieldCard
+              icon={<Heart size={18} color={ORANGE} strokeWidth={2.2} />}
+              iconBg={ORANGE_BG}
+              label="やりたいダイエット方法"
+              hint="AIコーチのアドバイス精度向上に使用"
+            >
+              <textarea
+                value={profile.desiredDietMethod ?? ''}
+                onChange={(event) => updateField('desiredDietMethod', event.target.value || null)}
+                placeholder="例：リバウンドしにくく、ある程度筋力をつけて、健康に痩せたい"
+                rows={3}
+                style={textareaStyle}
               />
             </FieldCard>
 
