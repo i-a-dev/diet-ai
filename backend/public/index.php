@@ -15,13 +15,23 @@ require_once __DIR__ . '/../src/ActivityRepository.php';
 require_once __DIR__ . '/../src/CalorieEstimateService.php';
 require_once __DIR__ . '/../src/ExerciseMetEstimateService.php';
 require_once __DIR__ . '/../src/UserProfileRepository.php';
+require_once __DIR__ . '/../src/ChatCoachService.php';
+require_once __DIR__ . '/../src/ChatMessageRepository.php';
 
 $weightRepository = new WeightRepository();
 $userProfileRepository = new UserProfileRepository();
 $mealEntryRepository = new MealEntryRepository();
 $activityRepository = new ActivityRepository();
+$chatMessageRepository = new ChatMessageRepository();
 $calorieEstimateService = new CalorieEstimateService();
 $exerciseMetEstimateService = new ExerciseMetEstimateService();
+$chatCoachService = new ChatCoachService(
+    $userProfileRepository,
+    $weightRepository,
+    $mealEntryRepository,
+    $activityRepository,
+    $chatMessageRepository
+);
 $requestMethod = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 $requestPath = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
 
@@ -115,6 +125,38 @@ if ($requestMethod === 'PUT' && $requestPath === '/api/user/profile') {
     }
 
     json_response(['profile' => $profile]);
+}
+
+// GET /api/chat/messages — チャット履歴の取得
+if ($requestMethod === 'GET' && $requestPath === '/api/chat/messages') {
+    $limit = (int) ($_GET['limit'] ?? ChatMessageRepository::DISPLAY_LIMIT);
+    if ($limit < 1 || $limit > ChatMessageRepository::MAX_STORED_MESSAGES) {
+        json_response(['message' => 'limit is out of range'], 422);
+    }
+
+    json_response([
+        'messages' => $chatMessageRepository->listForDisplay($limit),
+    ]);
+}
+
+// POST /api/chat — AIコーチとの会話
+if ($requestMethod === 'POST' && $requestPath === '/api/chat') {
+    $body = json_decode(file_get_contents('php://input') ?: '{}', true);
+    $content = trim((string) ($body['content'] ?? ''));
+
+    if ($content === '') {
+        json_response(['message' => 'content is required'], 422);
+    }
+
+    try {
+        $result = $chatCoachService->sendUserMessage($content);
+    } catch (InvalidArgumentException $exception) {
+        json_response(['message' => $exception->getMessage()], 422);
+    } catch (RuntimeException $exception) {
+        json_response(['message' => $exception->getMessage()], 502);
+    }
+
+    json_response($result);
 }
 
 // GET /api/records/daily — 記録画面用の日次データ

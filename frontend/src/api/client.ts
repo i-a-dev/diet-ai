@@ -324,3 +324,27 @@ export function updateUserProfile(fields: {
     body: JSON.stringify(fields),
   });
 }
+
+export type ChatRole = "user" | "assistant";
+
+export interface ChatMessage {
+  id: number;
+  role: ChatRole;
+  content: string;
+  createdAt: string;
+}
+
+export function fetchChatMessages(limit?: number) {
+  const query = limit ? `?limit=${limit}` : "";
+  return request<{ messages: ChatMessage[] }>(`/chat/messages${query}`);
+}
+
+export function sendChatMessage(content: string) {
+  return request<{
+    userMessage: ChatMessage;
+    assistantMessage: ChatMessage;
+  }>("/chat", {
+    method: "POST",
+    body: JSON.stringify({ content }),
+  });
+}

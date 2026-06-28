@@ -1,16 +1,165 @@
-import { Bike, Footprints, Moon, Sun, Sunset, Users } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { BubbleCoach } from "../BubbleCoach.tsx";
 import { BubbleUser } from "../BubbleUser.tsx";
 import { CoachAvatar } from "../CoachAvatar.tsx";
-import { InfoCard } from "../InfoCard.tsx";
 import { TopNav } from "../TopNav.tsx";
 import { ORANGE } from "../../constants.ts";
+import {
+  fetchChatMessages,
+  fetchUserProfile,
+  sendChatMessage,
+  type ChatMessage,
+} from "../../api/client.ts";
+
+interface DisplayMessage extends ChatMessage {
+  createdAtDate: Date;
+}
+
+function formatTime(date: Date): string {
+  return date.toLocaleTimeString("ja-JP", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+}
+
+function toDisplayMessage(message: ChatMessage): DisplayMessage {
+  return {
+    ...message,
+    createdAtDate: new Date(message.createdAt),
+  };
+}
+
+function buildWelcomeMessage(targetWeightKg: number | null): string {
+  const goalLine =
+    targetWeightKg !== null
+      ? `目標体重は${targetWeightKg}kgですね。`
+      : "目標体重がまだ未設定なら、設定画面から登録しておくと相談しやすくなります。";
+
+  return `あなた専属のAIコーチです！\nいつでも気軽に相談してくださいね！\n${goalLine}\n記録した体重・食事・運動・歩数を見ながら、一緒に考えます。`;
+}
+
+function renderMessageContent(content: string) {
+  return content.split("\n").map((line, index, lines) => (
+    <span key={`${index}-${line}`}>
+      {line}
+      {index < lines.length - 1 ? <br /> : null}
+    </span>
+  ));
+}
 
 export function ChatScreen() {
+  const [messages, setMessages] = useState<DisplayMessage[]>([]);
+  const [input, setInput] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+  const [isBootstrapping, setIsBootstrapping] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  const createWelcomeMessage = useCallback(
+    (targetWeightKg: number | null): DisplayMessage => ({
+      id: 0,
+      role: "assistant",
+      content: buildWelcomeMessage(targetWeightKg),
+      createdAt: new Date().toISOString(),
+      createdAtDate: new Date(),
+    }),
+    [],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function bootstrap() {
+      try {
+        const [historyResponse, profileResponse] = await Promise.all([
+          fetchChatMessages(),
+          fetchUserProfile(),
+        ]);
+
+        if (cancelled) {
+          return;
+        }
+
+        if (historyResponse.messages.length > 0) {
+          setMessages(historyResponse.messages.map(toDisplayMessage));
+          return;
+        }
+
+        setMessages([
+          createWelcomeMessage(profileResponse.profile.targetWeightKg),
+        ]);
+      } catch {
+        if (!cancelled) {
+          setMessages([createWelcomeMessage(null)]);
+        }
+      } finally {
+        if (!cancelled) {
+          setIsBootstrapping(false);
+        }
+      }
+    }
+
+    void bootstrap();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [createWelcomeMessage]);
+
+  useEffect(() => {
+    const container = scrollRef.current;
+    if (!container) {
+      return;
+    }
+    container.scrollTop = container.scrollHeight;
+  }, [messages, isLoading]);
+
+  const handleSend = async () => {
+    const trimmed = input.trim();
+    if (!trimmed || isLoading || isBootstrapping) {
+      return;
+    }
+
+    const optimisticUserMessage: DisplayMessage = {
+      id: -Date.now(),
+      role: "user",
+      content: trimmed,
+      createdAt: new Date().toISOString(),
+      createdAtDate: new Date(),
+    };
+
+    setMessages((current) => [...current, optimisticUserMessage]);
+    setInput("");
+    setError(null);
+    setIsLoading(true);
+
+    try {
+      const { userMessage, assistantMessage } = await sendChatMessage(trimmed);
+      setMessages((current) => [
+        ...current.filter((message) => message.id !== optimisticUserMessage.id),
+        toDisplayMessage(userMessage),
+        toDisplayMessage(assistantMessage),
+      ]);
+    } catch (sendError) {
+      setMessages((current) =>
+        current.filter((message) => message.id !== optimisticUserMessage.id),
+      );
+      const message =
+        sendError instanceof Error
+          ? sendError.message
+          : "メッセージの送信に失敗しました";
+      setError(message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   return (
     <>
       <TopNav title="AIコーチと相談" />
       <div
+        ref={scrollRef}
         style={{
           flex: 1,
           padding: "14px 16px",
@@ -21,285 +170,122 @@ export function ChatScreen() {
           background: "#fff",
         }}
       >
-        <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
-          <CoachAvatar />
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: 4,
-              maxWidth: 260,
-            }}
-          >
-            <span style={{ fontSize: 11, color: ORANGE, fontWeight: 600 }}>
-              AIコーチ
-            </span>
-            <BubbleCoach>
-              〇〇さん専属のAIコーチです！
-              <br />
-              いつでも気軽に相談してくださいね！
-            </BubbleCoach>
-          </div>
-        </div>
+        {messages.map((message) =>
+          message.role === "assistant" ? (
+            <div
+              key={message.id}
+              style={{ display: "flex", gap: 10, alignItems: "flex-start" }}
+            >
+              <CoachAvatar />
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 4,
+                  maxWidth: 260,
+                }}
+              >
+                <span style={{ fontSize: 11, color: ORANGE, fontWeight: 600 }}>
+                  AIコーチ {formatTime(message.createdAtDate)}
+                </span>
+                <BubbleCoach>{renderMessageContent(message.content)}</BubbleCoach>
+              </div>
+            </div>
+          ) : (
+            <div
+              key={message.id}
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "flex-end",
+                gap: 3,
+              }}
+            >
+              <BubbleUser>{renderMessageContent(message.content)}</BubbleUser>
+              <span style={{ fontSize: 11, color: "#C0C0C0" }}>
+                {formatTime(message.createdAtDate)}
+              </span>
+            </div>
+          ),
+        )}
 
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "flex-end",
-            gap: 3,
-          }}
-        >
-          <BubbleUser>
-            ケーキ食べちゃった...
-            <br />
-            目標達成するにはどうしたらいい？
-          </BubbleUser>
-          <span style={{ fontSize: 11, color: "#C0C0C0" }}>既読 10:30</span>
-        </div>
-
-        <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
-          <CoachAvatar />
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: 4,
-              maxWidth: 260,
-            }}
-          >
-            <span style={{ fontSize: 11, color: ORANGE, fontWeight: 600 }}>
-              AIコーチ 10:31
-            </span>
-            <BubbleCoach>
-              全然大丈夫ですよ！
-              <br />
-              まず安心してください。
-              <br />
-              ケーキ1個くらいでダイエットは失敗しません◎
-            </BubbleCoach>
+        {isLoading ? (
+          <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+            <CoachAvatar />
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: 4,
+                maxWidth: 260,
+              }}
+            >
+              <span style={{ fontSize: 11, color: ORANGE, fontWeight: 600 }}>
+                AIコーチ
+              </span>
+              <BubbleCoach>考え中...</BubbleCoach>
+            </div>
           </div>
-        </div>
+        ) : null}
 
-        <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
-          <CoachAvatar />
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: 4,
-              maxWidth: 260,
-            }}
-          >
-            <span style={{ fontSize: 11, color: ORANGE, fontWeight: 600 }}>
-              AIコーチ 10:32
-            </span>
-            <BubbleCoach>
-              今回のケーキはだいたい350kcalくらいだと思います。消費するなら、だいたいこんな感じです
-              <InfoCard>
-                <div
-                  style={{
-                    fontSize: 12,
-                    fontWeight: 700,
-                    color: "#C06010",
-                    marginBottom: 6,
-                  }}
-                >
-                  約350kcalを消費するには
-                </div>
-                {[
-                  {
-                    icon: <Footprints size={14} />,
-                    label: "ウォーキング（普通のペース）",
-                    time: "約70〜90分",
-                  },
-                  {
-                    icon: <Users size={14} />,
-                    label: "ベビーカー散歩",
-                    time: "約80分",
-                  },
-                  {
-                    icon: <Bike size={14} />,
-                    label: "自転車（ゆっくり）",
-                    time: "約40分",
-                  },
-                  {
-                    icon: <Footprints size={14} />,
-                    label: "ジョギング",
-                    time: "約35分",
-                  },
-                ].map((row) => (
-                  <div
-                    key={row.label}
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      fontSize: 12,
-                      color: "#7A4010",
-                      marginBottom: 3,
-                    }}
-                  >
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 5,
-                        color: "#C06010",
-                      }}
-                    >
-                      {row.icon}
-                      <span style={{ color: "#7A4010" }}>{row.label}</span>
-                    </div>
-                    <span
-                      style={{
-                        color: "#C06010",
-                        fontWeight: 600,
-                        whiteSpace: "nowrap",
-                        marginLeft: 6,
-                      }}
-                    >
-                      {row.time}
-                    </span>
-                  </div>
-                ))}
-              </InfoCard>
-            </BubbleCoach>
+        {error ? (
+          <div style={{ fontSize: 12, color: "#D64545", textAlign: "center" }}>
+            {error}
           </div>
-        </div>
-
-        <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
-          <CoachAvatar />
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: 4,
-              maxWidth: 260,
-            }}
-          >
-            <span style={{ fontSize: 11, color: ORANGE, fontWeight: 600 }}>
-              AIコーチ 10:33
-            </span>
-            <BubbleCoach>
-              でも正直、消費しようとしなくて大丈夫です。私なら明日少し調整しますね！
-            </BubbleCoach>
-          </div>
-        </div>
-
-        <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
-          <CoachAvatar />
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: 4,
-              maxWidth: 260,
-            }}
-          >
-            <span style={{ fontSize: 11, color: ORANGE, fontWeight: 600 }}>
-              AIコーチ 10:34
-            </span>
-            <BubbleCoach>
-              明日のおすすめメニュー、考えました
-              <InfoCard>
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "repeat(3,1fr)",
-                    gap: 6,
-                  }}
-                >
-                  {[
-                    {
-                      icon: <Sun size={12} />,
-                      title: "朝ごはん",
-                      items: ["ゆで卵2個", "ヨーグルト", "ブラックコーヒー"],
-                    },
-                    {
-                      icon: <Sunset size={12} />,
-                      title: "お昼ごはん",
-                      items: [
-                        "鶏むね塩こうじ焼き",
-                        "サラダ",
-                        "ご飯（普通盛り）",
-                        "味噌汁",
-                      ],
-                    },
-                    {
-                      icon: <Moon size={12} />,
-                      title: "夜ごはん",
-                      items: ["豆腐のサラダ", "味噌汁", "ご飯100g"],
-                    },
-                  ].map((col) => (
-                    <div key={col.title}>
-                      <div
-                        style={{
-                          fontSize: 11,
-                          fontWeight: 700,
-                          color: "#C06010",
-                          marginBottom: 4,
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 3,
-                        }}
-                      >
-                        <span style={{ color: "#C06010" }}>{col.icon}</span>
-                        {col.title}
-                      </div>
-                      <div
-                        style={{
-                          fontSize: 11,
-                          color: "#7A4010",
-                          lineHeight: 1.8,
-                        }}
-                      >
-                        {col.items.map((item) => (
-                          <div key={item}>・{item}</div>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </InfoCard>
-            </BubbleCoach>
-          </div>
-        </div>
+        ) : null}
       </div>
 
       <div
         style={{
           display: "flex",
-          alignItems: "center",
+          alignItems: "flex-end",
           gap: 8,
           padding: "5px 16px 4px",
           background: "#fff",
           borderTop: "1px solid #F0F0F0",
         }}
       >
-        <div
+        <textarea
+          value={input}
+          onChange={(event) => setInput(event.target.value)}
+          placeholder="メッセージを入力..."
+          rows={1}
+          disabled={isLoading || isBootstrapping}
           style={{
             flex: 1,
             background: "#F5F5F5",
             borderRadius: 14,
+            border: "none",
             padding: "8px 12px",
             fontSize: 12,
-            color: "#C0C0C0",
+            color: "#222",
             lineHeight: 1.4,
+            resize: "none",
+            fontFamily: "inherit",
+            outline: "none",
+            minHeight: 36,
+            maxHeight: 120,
           }}
-        >
-          メッセージを入力...
-        </div>
+        />
         <button
+          type="button"
+          onClick={() => void handleSend()}
+          disabled={isLoading || isBootstrapping || input.trim() === ""}
           style={{
-            background: ORANGE,
+            background:
+              isLoading || isBootstrapping || input.trim() === ""
+                ? "#F0C9A0"
+                : ORANGE,
             color: "#fff",
             border: "none",
             borderRadius: 14,
             padding: "6px 14px",
             fontSize: 12,
             fontWeight: 600,
-            cursor: "pointer",
+            cursor:
+              isLoading || isBootstrapping || input.trim() === ""
+                ? "not-allowed"
+                : "pointer",
             lineHeight: 1.4,
           }}
         >
