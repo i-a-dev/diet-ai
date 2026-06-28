@@ -15,6 +15,7 @@ require_once __DIR__ . '/../src/ActivityRepository.php';
 require_once __DIR__ . '/../src/CalorieEstimateService.php';
 require_once __DIR__ . '/../src/ExerciseMetEstimateService.php';
 require_once __DIR__ . '/../src/UserProfileRepository.php';
+require_once __DIR__ . '/../src/CalorieGoalCalculator.php';
 require_once __DIR__ . '/../src/ChatCoachService.php';
 require_once __DIR__ . '/../src/ChatMessageRepository.php';
 

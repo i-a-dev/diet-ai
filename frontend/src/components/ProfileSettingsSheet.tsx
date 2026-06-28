@@ -87,6 +87,7 @@ const DEFAULT_NUMERIC = {
   heightCm: 160,
   currentWeightKg: 60,
   targetWeightKg: 57,
+  targetPaceKgPerMonth: 2,
 } as const
 
 function applyNumericDefaults(profile: UserProfile): UserProfile {
@@ -95,6 +96,7 @@ function applyNumericDefaults(profile: UserProfile): UserProfile {
     heightCm: profile.heightCm ?? DEFAULT_NUMERIC.heightCm,
     currentWeightKg: profile.currentWeightKg ?? DEFAULT_NUMERIC.currentWeightKg,
     targetWeightKg: profile.targetWeightKg ?? DEFAULT_NUMERIC.targetWeightKg,
+    targetPaceKgPerMonth: profile.targetPaceKgPerMonth ?? DEFAULT_NUMERIC.targetPaceKgPerMonth,
   }
 }
 
@@ -371,7 +373,7 @@ export function ProfileSettingsSheet({
         currentWeightKg: effective.currentWeightKg,
         targetWeightKg: effective.targetWeightKg,
         activityLevel: effective.activityLevel,
-        targetPaceKgPerMonth: profile.targetPaceKgPerMonth,
+        targetPaceKgPerMonth: effective.targetPaceKgPerMonth,
         dietGoal: profile.dietGoal,
         dietaryRestrictions: profile.dietaryRestrictions,
         allergiesDislikes: profile.allergiesDislikes,
@@ -394,7 +396,7 @@ export function ProfileSettingsSheet({
   const heightCm = profile.heightCm ?? DEFAULT_NUMERIC.heightCm
   const currentWeightKg = profile.currentWeightKg ?? DEFAULT_NUMERIC.currentWeightKg
   const targetWeightKg = profile.targetWeightKg ?? DEFAULT_NUMERIC.targetWeightKg
-  const targetPaceKgPerMonth = profile.targetPaceKgPerMonth ?? 2
+  const targetPaceKgPerMonth = profile.targetPaceKgPerMonth ?? DEFAULT_NUMERIC.targetPaceKgPerMonth
 
   return (
     <div

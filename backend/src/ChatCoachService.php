@@ -15,12 +15,21 @@ final class ChatCoachService
 あなたはダイエット記録アプリの専属AIコーチです。
 ユーザーが記録した体重・食事・運動・歩数のデータを踏まえ、温かく具体的にアドバイスしてください。
 
+【プロフィールの扱い（最重要）】
+- 【ユーザーの記録データ】内の「■ プロフィール（ユーザー登録・正）」は、ユーザーがアプリに登録した正式な情報です
+- プロフィールに値がある項目は、すべて事実として扱い、返信の前提にしてください
+- プロフィールに記載済みの項目について「〜ですか？」「確認したいこと」として再度聞かないでください
+- プロフィールの数値や設定を疑ったり、変更の有無を確認したりしないでください
+- 「未設定」と明記されているプロフィール項目だけ、必要なら設定を促してください
+- アレルギー・苦手食材が「なし」などと登録されている場合も、登録内容を正として扱ってください
+
 【回答のルール】
 - 日本語で、チャットらしい短めの文体で返答する
 - 記録データに触れるときは具体的な数値や日付を引用する
+- プロフィールの目標体重・活動レベル・目標ペース・目標摂取カロリーは、登録値をそのまま使う
 - 失敗を責めず、次の一歩を一緒に考える
 - 極端な食事制限や医療行為の代替は勧めない
-- 不明な点は推測せず、記録の追加を優しく促す
+- 日々の記録（今日の食事・運動など）が不足しているときだけ、記録の追加を優しく促す
 - 改行を使って読みやすくする
 TEXT;
 
@@ -156,6 +165,7 @@ TEXT;
             ->format('Y-m-d');
 
         $profile = $this->userProfileRepository->get();
+        $calorieGoal = CalorieGoalCalculator::calculate($profile);
         $todayWeight = $this->weightRepository->getSummaryForDate($today);
         $todayMeals = $this->mealEntryRepository->getSectionsForDate($today);
         $todaySteps = $this->activityRepository->getStepsForDate($today);
@@ -169,9 +179,13 @@ TEXT;
         $lines[] = '今日の日付: ' . $today;
         $lines[] = '';
 
-        $lines[] = '■ プロフィール';
+        $lines[] = '■ プロフィール（ユーザー登録・正）';
+        $lines[] = '※以下はユーザーがプロフィール画面で登録した正式な情報です。事実として扱い、再度確認しないでください。';
         $lines[] = '性別: ' . $this->formatGender($profile['gender'] ?? null);
         $lines[] = '生年月日: ' . ($profile['birthDate'] ?? '未設定');
+        if ($calorieGoal['ageYears'] !== null) {
+            $lines[] = '年齢: ' . $calorieGoal['ageYears'] . '歳';
+        }
         $lines[] = '身長: ' . $this->formatNullableNumber($profile['heightCm'], 'cm');
         $lines[] = '現在の体重: ' . $this->formatNullableNumber($profile['currentWeightKg'], 'kg');
         $lines[] = '目標体重: ' . $this->formatNullableNumber($profile['targetWeightKg'], 'kg');
@@ -179,8 +193,21 @@ TEXT;
         $lines[] = '目標ペース: ' . $this->formatNullableNumber($profile['targetPaceKgPerMonth'], 'kg/月');
         $lines[] = 'ダイエット目的: ' . $this->formatDietGoal($profile['dietGoal'] ?? null);
         $lines[] = '食事制限の仕方: ' . $this->formatDietaryRestrictions($profile['dietaryRestrictions'] ?? []);
-        $lines[] = 'アレルギー・苦手食材: ' . ($profile['allergiesDislikes'] ?? '未設定');
-        $lines[] = '過去のダイエット経験: ' . ($profile['pastDietExperience'] ?? '未設定');
+        $lines[] = 'アレルギー・苦手食材: ' . $this->formatProfileText($profile['allergiesDislikes'] ?? null);
+        $lines[] = '過去のダイエット経験: ' . $this->formatProfileText($profile['pastDietExperience'] ?? null);
+        if ($calorieGoal['bmrKcal'] !== null) {
+            $lines[] = '推定基礎代謝: ' . $calorieGoal['bmrKcal'] . 'kcal/日';
+        }
+        if ($calorieGoal['tdeeKcal'] !== null) {
+            $lines[] = '推定消費カロリー: ' . $calorieGoal['tdeeKcal'] . 'kcal/日';
+        }
+        if ($calorieGoal['dailyIntakeGoalKcal'] !== null) {
+            $lines[] = '目標摂取カロリー: ' . $calorieGoal['dailyIntakeGoalKcal'] . 'kcal/日';
+            if ($calorieGoal['dailyDeficitKcal'] !== null) {
+                $lines[] = '（目標ペースに基づく1日あたりの不足カロリー: 約'
+                    . $calorieGoal['dailyDeficitKcal'] . 'kcal）';
+            }
+        }
         $lines[] = '';
 
         $lines[] = '■ 今日の記録 (' . $today . ')';
@@ -347,6 +374,15 @@ TEXT;
     private function formatNullableNumber(?float $value, string $unit): string
     {
         return $value === null ? '未設定' : $value . $unit;
+    }
+
+    private function formatProfileText(?string $value): string
+    {
+        if ($value === null || $value === '') {
+            return '未設定';
+        }
+
+        return $value . '（ユーザー登録）';
     }
 
     private function formatGender(?string $gender): string
