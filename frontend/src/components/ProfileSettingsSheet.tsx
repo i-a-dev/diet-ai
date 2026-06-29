@@ -778,6 +778,7 @@ export function ProfileSettingsSheet({
               icon={<Heart size={18} color={ORANGE} strokeWidth={2.2} />}
               iconBg={ORANGE_BG}
               label="やりたいダイエット方法"
+              hint="AIコーチの提案精度向上に使用"
             >
               <textarea
                 value={profile.desiredDietMethod ?? ""}
@@ -799,6 +800,7 @@ export function ProfileSettingsSheet({
               icon={<User size={18} color={BLUE} strokeWidth={2.2} />}
               iconBg={BLUE_BG}
               label="アレルギー・苦手食材"
+              hint="AIコーチの提案精度向上に使用"
             >
               <textarea
                 value={profile.allergiesDislikes ?? ""}
@@ -820,6 +822,7 @@ export function ProfileSettingsSheet({
               icon={<User size={18} color={PURPLE} strokeWidth={2.2} />}
               iconBg={PURPLE_BG}
               label="過去のダイエット経験"
+              hint="AIコーチの提案精度向上に使用"
             >
               <textarea
                 value={profile.pastDietExperience ?? ""}
