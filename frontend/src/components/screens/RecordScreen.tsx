@@ -27,7 +27,10 @@ import { ExerciseChip } from "../ExerciseChip.tsx";
 import type { MealItemInput } from "../AddFoodModal.tsx";
 import { AddFoodModal } from "../AddFoodModal.tsx";
 import { BottomSheet } from "../BottomSheet.tsx";
-import { type ExerciseInput, ExerciseRegisterSheet } from "../ExerciseRegisterSheet.tsx";
+import {
+  type ExerciseInput,
+  ExerciseRegisterSheet,
+} from "../ExerciseRegisterSheet.tsx";
 import { MealSection } from "../MealSection.tsx";
 import { SecIcon } from "../SecIcon.tsx";
 import { StepsRegisterSheet } from "../StepsRegisterSheet.tsx";
@@ -77,18 +80,19 @@ function parseKcal(kcal: string) {
   return Number(kcal.replace(/[^\d]/g, "")) || 0;
 }
 
+const NET_INTAKE_BUFFER_KCAL = 300;
+const NET_INTAKE_OVER_COLOR = "#C0392B";
+
 function formatKcal(value: number) {
   return value.toLocaleString();
-}
-
-function formatDailyGoalKcal(goalKcal: number | null) {
-  return goalKcal !== null ? `${formatKcal(goalKcal)}kcal` : "—";
 }
 
 function formatWeightDiff(diff: number | null) {
   if (diff === null) return "前日比 --";
   if (diff === 0) return "前日比 ±0.0kg";
-  return diff > 0 ? `前日比 +${diff.toFixed(1)}kg` : `前日比 ${diff.toFixed(1)}kg`;
+  return diff > 0
+    ? `前日比 +${diff.toFixed(1)}kg`
+    : `前日比 ${diff.toFixed(1)}kg`;
 }
 
 function shiftDate(baseDate: string, dayOffset: number) {
@@ -117,7 +121,9 @@ function createInitialMeals(): Record<MealKey, MealSectionData> {
   };
 }
 
-function mapMealSectionsToState(sections: MealSectionSummary[] = []): Record<MealKey, MealSectionData> {
+function mapMealSectionsToState(
+  sections: MealSectionSummary[] = [],
+): Record<MealKey, MealSectionData> {
   const nextMeals = createInitialMeals();
 
   sections.forEach((section) => {
@@ -139,7 +145,9 @@ function mapMealSectionsToState(sections: MealSectionSummary[] = []): Record<Mea
 export function RecordScreen() {
   const [weight, setWeight] = useState<number | null>(null);
   const [referenceWeight, setReferenceWeight] = useState<number | null>(null);
-  const [referenceRecordedOn, setReferenceRecordedOn] = useState<string | null>(null);
+  const [referenceRecordedOn, setReferenceRecordedOn] = useState<string | null>(
+    null,
+  );
   const [weightDiff, setWeightDiff] = useState<number | null>(null);
   const [dateLabel, setDateLabel] = useState("読み込み中...");
   const [selectedDate, setSelectedDate] = useState<string>(formatCurrentDate);
@@ -147,7 +155,8 @@ export function RecordScreen() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [meals, setMeals] = useState<Record<MealKey, MealSectionData>>(createInitialMeals);
+  const [meals, setMeals] =
+    useState<Record<MealKey, MealSectionData>>(createInitialMeals);
   const [weightSheetOpen, setWeightSheetOpen] = useState(false);
   const [mealSheetOpen, setMealSheetOpen] = useState(false);
   const [stepsSheetOpen, setStepsSheetOpen] = useState(false);
@@ -156,8 +165,11 @@ export function RecordScreen() {
   const [steps, setSteps] = useState({ count: 0, burnedCalories: 0 });
   const [exercises, setExercises] = useState<ExerciseEntrySummary[]>([]);
   const [exerciseNotice, setExerciseNotice] = useState<string | null>(null);
-  const [activeExerciseNote, setActiveExerciseNote] = useState<ExerciseEntrySummary | null>(null);
-  const [dailyIntakeGoalKcal, setDailyIntakeGoalKcal] = useState<number | null>(null);
+  const [activeExerciseNote, setActiveExerciseNote] =
+    useState<ExerciseEntrySummary | null>(null);
+  const [dailyIntakeGoalKcal, setDailyIntakeGoalKcal] = useState<number | null>(
+    null,
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -204,7 +216,11 @@ export function RecordScreen() {
         setExerciseNotice(null);
       } catch (loadError) {
         if (!cancelled) {
-          setError(loadError instanceof Error ? loadError.message : "読み込みに失敗しました");
+          setError(
+            loadError instanceof Error
+              ? loadError.message
+              : "読み込みに失敗しました",
+          );
         }
       } finally {
         if (!cancelled) setIsLoading(false);
@@ -221,7 +237,12 @@ export function RecordScreen() {
   const totalMealKcal = useMemo(
     () =>
       Object.values(meals).reduce(
-        (sum, meal) => sum + meal.items.reduce((mealSum, item) => mealSum + parseKcal(item.kcal), 0),
+        (sum, meal) =>
+          sum +
+          meal.items.reduce(
+            (mealSum, item) => mealSum + parseKcal(item.kcal),
+            0,
+          ),
         0,
       ),
     [meals],
@@ -255,7 +276,11 @@ export function RecordScreen() {
       setMealSheetOpen(false);
       setActiveMealKey(null);
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : "食事の保存に失敗しました");
+      setError(
+        saveError instanceof Error
+          ? saveError.message
+          : "食事の保存に失敗しました",
+      );
     } finally {
       setIsSaving(false);
     }
@@ -265,7 +290,10 @@ export function RecordScreen() {
     () =>
       (Object.entries(meals) as [MealKey, MealSectionData][]).reduce(
         (acc, [key, meal]) => {
-          acc[key] = meal.items.reduce((sum, item) => sum + parseKcal(item.kcal), 0);
+          acc[key] = meal.items.reduce(
+            (sum, item) => sum + parseKcal(item.kcal),
+            0,
+          );
           return acc;
         },
         {} as Record<MealKey, number>,
@@ -280,11 +308,15 @@ export function RecordScreen() {
       const data = await saveWeight(value, recordedOn);
       setWeight(data.weight.current);
       setReferenceWeight(data.weight.referenceWeight ?? data.weight.current);
-      setReferenceRecordedOn(data.weight.referenceRecordedOn ?? data.weight.recordedOn);
+      setReferenceRecordedOn(
+        data.weight.referenceRecordedOn ?? data.weight.recordedOn,
+      );
       setWeightDiff(data.weight.diffFromPreviousDay);
       setWeightSheetOpen(false);
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : "保存に失敗しました");
+      setError(
+        saveError instanceof Error ? saveError.message : "保存に失敗しました",
+      );
     } finally {
       setIsSaving(false);
     }
@@ -300,7 +332,10 @@ export function RecordScreen() {
     [exercises],
   );
   const totalActivityKcal = steps.burnedCalories + exerciseTotalKcal;
-  const hasLowConfidenceExercise = exercises.some((item) => item.confidence === "low");
+  const netIntakeKcal = totalMealKcal - totalActivityKcal;
+  const hasLowConfidenceExercise = exercises.some(
+    (item) => item.confidence === "low",
+  );
 
   const handleStepsSave = async (value: number) => {
     try {
@@ -310,7 +345,11 @@ export function RecordScreen() {
       setSteps(data.steps);
       setStepsSheetOpen(false);
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : "歩数の保存に失敗しました");
+      setError(
+        saveError instanceof Error
+          ? saveError.message
+          : "歩数の保存に失敗しました",
+      );
     } finally {
       setIsSaving(false);
     }
@@ -334,7 +373,11 @@ export function RecordScreen() {
       }
       setExerciseSheetOpen(false);
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : "運動の保存に失敗しました");
+      setError(
+        saveError instanceof Error
+          ? saveError.message
+          : "運動の保存に失敗しました",
+      );
     } finally {
       setIsSaving(false);
     }
@@ -346,6 +389,28 @@ export function RecordScreen() {
       ? undefined
       : referenceRecordedOn.replace(/^\d{4}-/, "").replace("-", "/")
     : undefined;
+
+  const netIntakeBarMax =
+    dailyIntakeGoalKcal !== null
+      ? dailyIntakeGoalKcal + NET_INTAKE_BUFFER_KCAL
+      : Math.max(netIntakeKcal, 1);
+  const netIntakeFillPercent = Math.min(
+    (Math.max(netIntakeKcal, 0) / netIntakeBarMax) * 100,
+    100,
+  );
+  const netIntakeGoalMarkerPercent =
+    dailyIntakeGoalKcal !== null
+      ? (dailyIntakeGoalKcal / netIntakeBarMax) * 100
+      : null;
+  const isNetIntakeOverBuffer =
+    dailyIntakeGoalKcal !== null &&
+    netIntakeKcal > dailyIntakeGoalKcal + NET_INTAKE_BUFFER_KCAL;
+  const netIntakeBarColor = isNetIntakeOverBuffer
+    ? NET_INTAKE_OVER_COLOR
+    : ORANGE;
+  const netIntakeValueColor = isNetIntakeOverBuffer
+    ? NET_INTAKE_OVER_COLOR
+    : ORANGE;
 
   const secStyle = {
     background: "#fff",
@@ -411,13 +476,18 @@ export function RecordScreen() {
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            cursor: isLoading || isSaving || !selectedDate ? "not-allowed" : "pointer",
+            cursor:
+              isLoading || isSaving || !selectedDate
+                ? "not-allowed"
+                : "pointer",
             opacity: isLoading || isSaving || !selectedDate ? 0.4 : 1,
           }}
         >
           <ChevronLeft size={22} color="#C0C0C0" />
         </button>
-        <span style={{ fontSize: 15, fontWeight: 600, color: "#111" }}>{dateLabel}</span>
+        <span style={{ fontSize: 15, fontWeight: 600, color: "#111" }}>
+          {dateLabel}
+        </span>
         <button
           type="button"
           aria-label="翌日を表示"
@@ -430,7 +500,10 @@ export function RecordScreen() {
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            cursor: isLoading || isSaving || !selectedDate ? "not-allowed" : "pointer",
+            cursor:
+              isLoading || isSaving || !selectedDate
+                ? "not-allowed"
+                : "pointer",
             opacity: isLoading || isSaving || !selectedDate ? 0.4 : 1,
           }}
         >
@@ -494,7 +567,9 @@ export function RecordScreen() {
                 </span>
                 <span style={{ fontSize: 18, color: "#888" }}> kg</span>
               </div>
-              <div style={{ fontSize: 13, color: ORANGE, marginTop: 5 }}>{formatWeightDiff(weightDiff)}</div>
+              <div style={{ fontSize: 13, color: ORANGE, marginTop: 5 }}>
+                {formatWeightDiff(weightDiff)}
+              </div>
             </div>
             <svg width="110" height="44" viewBox="0 0 110 44">
               <polyline
@@ -529,6 +604,137 @@ export function RecordScreen() {
         </div>
 
         <div style={secStyle}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "baseline",
+              justifyContent: "space-between",
+              gap: 12,
+              marginBottom: 14,
+            }}
+          >
+            <div style={{ fontSize: 15, fontWeight: 600, color: "#222" }}>
+              純摂取カロリー
+            </div>
+            <div style={{ fontSize: 15, color: "#666", whiteSpace: "nowrap" }}>
+              <span
+                style={{
+                  fontSize: 20,
+                  fontWeight: 800,
+                  color: netIntakeValueColor,
+                }}
+              >
+                {formatKcal(netIntakeKcal)}
+              </span>
+              {dailyIntakeGoalKcal !== null && (
+                <span style={{ fontWeight: 600 }}>
+                  {" "}
+                  / {formatKcal(dailyIntakeGoalKcal)} kcal
+                </span>
+              )}
+              {dailyIntakeGoalKcal === null && (
+                <span style={{ fontWeight: 600 }}> kcal</span>
+              )}
+            </div>
+          </div>
+
+          <div
+            style={{
+              position: "relative",
+              height: 10,
+              borderRadius: 999,
+              background: "#F0F0F0",
+              overflow: "visible",
+              marginBottom: 18,
+            }}
+          >
+            <div
+              style={{
+                height: "100%",
+                width: `${Math.min(netIntakeFillPercent, 100)}%`,
+                borderRadius: 999,
+                background: netIntakeBarColor,
+                transition: "width 200ms ease, background 200ms ease",
+              }}
+            />
+            {netIntakeGoalMarkerPercent !== null && (
+              <div
+                style={{
+                  position: "absolute",
+                  top: -3,
+                  left: `${Math.min(netIntakeGoalMarkerPercent, 100)}%`,
+                  transform: "translateX(-50%)",
+                  width: 2,
+                  height: 16,
+                  borderRadius: 1,
+                  background: "#9CA3AF",
+                }}
+              />
+            )}
+          </div>
+
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 8,
+              paddingTop: 8,
+              borderTop: "1px solid #F0F0F0",
+            }}
+          >
+            <div style={{ flex: 1, textAlign: "center" }}>
+              <div style={{ fontSize: 12, color: "#888", marginBottom: 0 }}>
+                食事
+              </div>
+              <div style={{ fontSize: 16, fontWeight: 700, color: "#A67C52" }}>
+                {formatKcal(totalMealKcal)}
+                <span style={{ fontSize: 12, fontWeight: 500, color: "#888" }}>
+                  {" "}
+                  kcal
+                </span>
+              </div>
+            </div>
+            <span style={{ fontSize: 18, color: "#CCC", paddingTop: 14 }}>
+              −
+            </span>
+            <div style={{ flex: 1, textAlign: "center" }}>
+              <div style={{ fontSize: 12, color: "#888", marginBottom: 0 }}>
+                運動
+              </div>
+              <div style={{ fontSize: 16, fontWeight: 700, color: "#2EAA72" }}>
+                {formatKcal(totalActivityKcal)}
+                <span style={{ fontSize: 12, fontWeight: 500, color: "#888" }}>
+                  {" "}
+                  kcal
+                </span>
+              </div>
+            </div>
+            <span style={{ fontSize: 18, color: "#CCC", paddingTop: 14 }}>
+              =
+            </span>
+            <div style={{ flex: 1, textAlign: "center" }}>
+              <div style={{ fontSize: 12, color: "#888", marginBottom: 0 }}>
+                純摂取
+              </div>
+              <div
+                style={{
+                  fontSize: 16,
+                  fontWeight: 700,
+                  color: netIntakeValueColor,
+                }}
+              >
+                {formatKcal(netIntakeKcal)}
+                <span style={{ fontSize: 12, fontWeight: 500, color: "#888" }}>
+                  {" "}
+                  kcal
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div style={secStyle}>
           <div style={secHead}>
             <div style={secTitle}>
               <SecIcon bg="#FDE8C8" color={ORANGE}>
@@ -537,20 +743,27 @@ export function RecordScreen() {
               食事
             </div>
             <span style={{ fontSize: 13, fontWeight: 700, color: ORANGE }}>
-              {formatKcal(totalMealKcal)} / {formatDailyGoalKcal(dailyIntakeGoalKcal)}
+              {formatKcal(totalMealKcal)} kcal
             </span>
           </div>
-          {(Object.entries(meals) as [MealKey, MealSectionData][]).map(([key, meal]) => (
-            <MealSection
-              key={key}
-              icon={meal.icon}
-              title={meal.title}
-              totalKcal={formatKcal(meal.items.reduce((sum, item) => sum + parseKcal(item.kcal), 0))}
-              items={meal.items}
-              isLast={meal.isLast}
-              onAdd={() => openMealSheet(key)}
-            />
-          ))}
+          {(Object.entries(meals) as [MealKey, MealSectionData][]).map(
+            ([key, meal]) => (
+              <MealSection
+                key={key}
+                icon={meal.icon}
+                title={meal.title}
+                totalKcal={formatKcal(
+                  meal.items.reduce(
+                    (sum, item) => sum + parseKcal(item.kcal),
+                    0,
+                  ),
+                )}
+                items={meal.items}
+                isLast={meal.isLast}
+                onAdd={() => openMealSheet(key)}
+              />
+            ),
+          )}
         </div>
 
         <div style={secStyle}>
@@ -563,7 +776,8 @@ export function RecordScreen() {
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
               <span style={{ fontSize: 14, color: "#2EAA72" }}>
-                <span style={{ fontWeight: 700 }}>{totalActivityKcal}</span> kcal
+                <span style={{ fontWeight: 700 }}>{totalActivityKcal}</span>{" "}
+                kcal
               </span>
               <button
                 type="button"
@@ -629,7 +843,9 @@ export function RecordScreen() {
               </div>
             )}
             {exerciseNotice && (
-              <div style={{ marginTop: 6, fontSize: 12, color: "#9CA3AF" }}>{exerciseNotice}</div>
+              <div style={{ marginTop: 6, fontSize: 12, color: "#9CA3AF" }}>
+                {exerciseNotice}
+              </div>
             )}
           </ActivitySubSection>
         </div>
@@ -677,7 +893,11 @@ export function RecordScreen() {
 
       <BottomSheet
         open={activeExerciseNote !== null}
-        title={activeExerciseNote ? `${activeExerciseNote.name}について` : "運動について"}
+        title={
+          activeExerciseNote
+            ? `${activeExerciseNote.name}について`
+            : "運動について"
+        }
         onClose={() => setActiveExerciseNote(null)}
       >
         {activeExerciseNote && (
