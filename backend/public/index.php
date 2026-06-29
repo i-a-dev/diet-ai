@@ -410,6 +410,7 @@ if ($requestMethod === 'POST' && $requestPath === '/api/records/meals') {
     $mealType = trim((string) ($body['mealType'] ?? ''));
     $foodName = trim((string) ($body['foodName'] ?? ''));
     $calories = $body['calories'] ?? null;
+    $caloriesEdited = filter_var($body['caloriesEdited'] ?? false, FILTER_VALIDATE_BOOLEAN);
 
     if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
         json_response(['message' => 'date must be YYYY-MM-DD'], 422);
@@ -420,7 +421,7 @@ if ($requestMethod === 'POST' && $requestPath === '/api/records/meals') {
     }
 
     try {
-        $entry = $mealEntryRepository->addEntry($date, $mealType, $foodName, (int) round((float) $calories));
+        $entry = $mealEntryRepository->addEntry($date, $mealType, $foodName, (int) round((float) $calories), $caloriesEdited);
         $sections = $mealEntryRepository->getSectionsForDate($date);
     } catch (InvalidArgumentException $exception) {
         json_response(['message' => $exception->getMessage()], 422);

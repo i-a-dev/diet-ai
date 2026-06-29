@@ -26,6 +26,7 @@ import { fetchMealHistory, type MealType } from "../api/client.ts";
 export interface MealItemInput {
   label: string;
   kcal: string;
+  caloriesEdited?: boolean;
 }
 
 interface AddFoodModalProps {
@@ -96,6 +97,8 @@ export function AddFoodModal({
   const [historyTab, setHistoryTab] = useState<"recent" | "meal">("recent");
   const [recentHistory, setRecentHistory] = useState<MealItemInput[]>([]);
   const [mealHistory, setMealHistory] = useState<MealItemInput[]>([]);
+  const [selectedHistoryItem, setSelectedHistoryItem] =
+    useState<MealItemInput | null>(null);
   const activeSearchTokenRef = useRef(0);
   const historyRequestTokenRef = useRef(0);
   const showSearchApiDebug =
@@ -114,6 +117,7 @@ export function AddFoodModal({
     setShowManualEdit(false);
     setIsSubmitting(false);
     setCompletedResult(null);
+    setSelectedHistoryItem(null);
     setHistoryTab("recent");
     activeSearchTokenRef.current = 0;
   }, [open]);
@@ -147,6 +151,7 @@ export function AddFoodModal({
     isSearching ||
     progress.state === "found" ||
     progress.state === "estimated" ||
+    progress.state === "from_history" ||
     progress.state === "low_confidence_estimate" ||
     progress.state === "web_searching" ||
     progress.state === "web_found" ||
@@ -157,9 +162,7 @@ export function AddFoodModal({
     const nextMealTotal = currentMealKcal + completedResult.calories;
     const nextTotal = currentTotalKcal + completedResult.calories;
     const remaining =
-      dailyGoalKcal !== null
-        ? Math.max(dailyGoalKcal - nextTotal, 0)
-        : null;
+      dailyGoalKcal !== null ? Math.max(dailyGoalKcal - nextTotal, 0) : null;
     return { nextMealTotal, nextTotal, remaining };
   }, [completedResult, currentMealKcal, currentTotalKcal, dailyGoalKcal]);
   const isWebSearchFallback =
@@ -167,6 +170,46 @@ export function AddFoodModal({
     progress.steps.some(
       (step) => step.key === "ai_web_searching" && step.status === "done",
     );
+
+  function handleHistorySelect(item: MealItemInput) {
+    activeSearchTokenRef.current = 0;
+    setInputValue(item.label);
+    setManualKcal(item.kcal.replace(/kcal/i, ""));
+    setShowManualEdit(false);
+    setSelectedHistoryItem(item);
+    const result = mealItemToSearchResult(item);
+    setProgress({
+      state: "from_history",
+      steps: INITIAL_STEPS.map((step) => ({ ...step, status: "skipped" })),
+      result,
+    });
+  }
+
+  function resolveEditedCalories(result: FoodSearchResult): {
+    calories: number;
+    caloriesEdited: boolean;
+  } {
+    const parsedManualKcal = Number(manualKcal);
+    const hasValidManualKcal =
+      showManualEdit &&
+      Number.isFinite(parsedManualKcal) &&
+      parsedManualKcal > 0;
+    const manualDiffers =
+      hasValidManualKcal &&
+      Math.round(parsedManualKcal) !== Math.round(result.calories);
+
+    if (manualDiffers) {
+      return {
+        calories: Math.round(parsedManualKcal),
+        caloriesEdited: true,
+      };
+    }
+
+    return {
+      calories: result.calories,
+      caloriesEdited: parseCaloriesEdited(result.caloriesEdited),
+    };
+  }
 
   async function handleSearch() {
     if (!canSearch || isSearching) return;
@@ -229,19 +272,25 @@ export function AddFoodModal({
     setIsSubmitting(true);
     try {
       if (result) {
-        const item = {
+        const { calories, caloriesEdited } = resolveEditedCalories(result);
+        const item: MealItemInput = {
           label: result.name,
-          kcal: `${result.calories}kcal`,
+          kcal: `${calories}kcal`,
+          caloriesEdited,
         };
         await onSave(item);
-        setCompletedResult(result);
+        setCompletedResult({ ...result, calories, caloriesEdited });
         setProgress({ ...progress, state: "completed" });
         return;
       }
 
       const parsedKcal = Number(manualKcal);
       if (!Number.isFinite(parsedKcal) || parsedKcal <= 0) return;
-      const item = { label, kcal: `${Math.round(parsedKcal)}kcal` };
+      const item: MealItemInput = {
+        label,
+        kcal: `${Math.round(parsedKcal)}kcal`,
+        caloriesEdited: true,
+      };
       await onSave(item);
       setCompletedResult({
         id: `user-${Date.now()}`,
@@ -314,13 +363,11 @@ export function AddFoodModal({
               <button
                 key={`${item.label}-${item.kcal}`}
                 type="button"
-                onClick={() => {
-                  setInputValue(item.label);
-                  setManualKcal(item.kcal.replace("kcal", ""));
-                }}
+                onClick={() => handleHistorySelect(item)}
                 style={chipStyle}
               >
-                {item.label}
+                <span style={chipLabelStyle}>{item.label}</span>
+                <span style={chipKcalStyle}>{item.kcal}</span>
               </button>
             ))}
             {chipItems.length === 0 && (
@@ -380,6 +427,24 @@ export function AddFoodModal({
       return (
         <FoodEstimateCard
           result={selectedResult}
+          onEdit={() => {
+            setShowManualEdit(true);
+            setManualKcal(String(selectedResult.calories));
+          }}
+          onAdd={() => void saveItem(selectedResult)}
+        />
+      );
+    }
+
+    if (state === "from_history" && selectedResult) {
+      const historyEdited = parseCaloriesEdited(
+        selectedHistoryItem?.caloriesEdited ?? selectedResult.caloriesEdited,
+      );
+      return (
+        <FoodEstimateCard
+          variant="history"
+          result={selectedResult}
+          caloriesEdited={historyEdited}
           onEdit={() => {
             setShowManualEdit(true);
             setManualKcal(String(selectedResult.calories));
@@ -503,19 +568,53 @@ export function AddFoodModal({
   );
 }
 
+function parseCaloriesEdited(value: unknown): boolean {
+  return value === true || value === 1 || value === "1" || value === "true";
+}
+
+function mealItemToSearchResult(item: MealItemInput): FoodSearchResult {
+  const calories = parseKcalFromString(item.kcal);
+  const caloriesEdited = parseCaloriesEdited(item.caloriesEdited);
+  return {
+    id: `history-${item.label}-${calories}`,
+    name: item.label,
+    displayName: item.label,
+    amount: 1,
+    unit: "食",
+    calories,
+    protein: null,
+    fat: null,
+    carbs: null,
+    source: "user_registered",
+    confidence: "high",
+    isEstimated: false,
+    barcode: null,
+    brandName: null,
+    rawInput: item.label,
+    caloriesEdited,
+  };
+}
+
+function parseKcalFromString(kcal: string): number {
+  const parsed = Number(kcal.replace(/kcal/i, "").trim());
+  return Number.isFinite(parsed) ? Math.round(parsed) : 0;
+}
+
 function toUniqueMealInputs(
-  history: Array<{ label: string; calories: number }>,
+  history: Array<{ label: string; calories: number; caloriesEdited?: boolean }>,
 ): MealItemInput[] {
   const seen = new Set<string>();
   const unique: MealItemInput[] = [];
 
   for (const entry of history) {
-    const key = entry.label.trim().toLowerCase();
-    if (key === "" || seen.has(key)) continue;
+    const normalizedLabel = entry.label.trim().toLowerCase();
+    const key = `${normalizedLabel}|${entry.calories}`;
+    if (normalizedLabel === "" || seen.has(key)) continue;
     seen.add(key);
     unique.push({
       label: entry.label,
       kcal: `${entry.calories}kcal`,
+      caloriesEdited: parseCaloriesEdited(entry.caloriesEdited),
     });
     if (unique.length >= 12) break;
   }
@@ -600,13 +699,33 @@ const inactiveTabButtonStyle: CSSProperties = {
 };
 
 const chipStyle: CSSProperties = {
-  padding: "3px 12px",
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 8,
+  padding: "4px 12px",
   borderRadius: 999,
   border: "1px solid #F5E1D2",
   background: "#FFF5EB",
   fontSize: 13,
   color: "#8B5E3C",
   cursor: "pointer",
+  maxWidth: "100%",
+};
+
+const chipLabelStyle: CSSProperties = {
+  fontWeight: 500,
+  lineHeight: 1.3,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+};
+
+const chipKcalStyle: CSSProperties = {
+  flexShrink: 0,
+  fontSize: 12,
+  fontWeight: 500,
+  color: "#C2410C",
+  lineHeight: 1.2,
 };
 
 const emptyHistoryStyle: CSSProperties = {

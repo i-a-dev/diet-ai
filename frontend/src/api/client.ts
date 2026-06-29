@@ -144,6 +144,7 @@ export interface MealHistoryEntry {
   mealType: MealType;
   label: string;
   calories: number;
+  caloriesEdited: boolean;
   recordedOn: string;
 }
 
@@ -168,10 +169,11 @@ export function saveMeal(
   foodName: string,
   calories: number,
   date?: string,
+  caloriesEdited = false,
 ) {
   return request<SaveMealResponse>("/records/meals", {
     method: "POST",
-    body: JSON.stringify({ mealType, foodName, calories, date }),
+    body: JSON.stringify({ mealType, foodName, calories, date, caloriesEdited }),
   });
 }
 

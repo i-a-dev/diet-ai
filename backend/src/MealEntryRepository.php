@@ -65,9 +65,15 @@ final class MealEntryRepository
     }
 
     /**
-     * @return array{id: int, mealType: string, label: string, calories: int}
+     * @return array{id: int, mealType: string, label: string, calories: int, caloriesEdited: bool}
      */
-    public function addEntry(string $date, string $mealType, string $foodName, int $caloriesKcal): array
+    public function addEntry(
+        string $date,
+        string $mealType,
+        string $foodName,
+        int $caloriesKcal,
+        bool $caloriesEdited = false,
+    ): array
     {
         if (!isset(self::MEAL_LABELS[$mealType])) {
             throw new InvalidArgumentException('mealType must be breakfast|lunch|dinner|snack');
@@ -84,14 +90,15 @@ final class MealEntryRepository
 
         $now = (new DateTimeImmutable('now', new DateTimeZone('Asia/Tokyo')))->format('Y-m-d H:i:s');
         $statement = $this->db->prepare(
-            'INSERT INTO meal_entries (recorded_on, meal_type, food_name, calories_kcal, created_at, updated_at)
-             VALUES (:recorded_on, :meal_type, :food_name, :calories_kcal, :created_at, :updated_at)'
+            'INSERT INTO meal_entries (recorded_on, meal_type, food_name, calories_kcal, calories_edited, created_at, updated_at)
+             VALUES (:recorded_on, :meal_type, :food_name, :calories_kcal, :calories_edited, :created_at, :updated_at)'
         );
         $statement->execute([
             'recorded_on' => $date,
             'meal_type' => $mealType,
             'food_name' => $name,
             'calories_kcal' => $caloriesKcal,
+            'calories_edited' => $caloriesEdited ? 1 : 0,
             'created_at' => $now,
             'updated_at' => $now,
         ]);
@@ -101,6 +108,7 @@ final class MealEntryRepository
             'mealType' => $mealType,
             'label' => $name,
             'calories' => $caloriesKcal,
+            'caloriesEdited' => $caloriesEdited,
         ];
     }
 
@@ -108,7 +116,7 @@ final class MealEntryRepository
      * 食事履歴を新しい順で取得する。
      * mealType を指定すると、その区分の履歴のみ返す。
      *
-     * @return array<int, array{id: int, mealType: string, label: string, calories: int, recordedOn: string}>
+     * @return array<int, array{id: int, mealType: string, label: string, calories: int, caloriesEdited: bool, recordedOn: string}>
      */
     public function getHistory(?string $mealType = null, int $limit = 30): array
     {
@@ -120,7 +128,7 @@ final class MealEntryRepository
 
         if ($mealType === null) {
             $statement = $this->db->prepare(
-                'SELECT id, meal_type, food_name, calories_kcal, recorded_on
+                'SELECT id, meal_type, food_name, calories_kcal, calories_edited, recorded_on
                  FROM meal_entries
                  ORDER BY id DESC
                  LIMIT :limit'
@@ -129,7 +137,7 @@ final class MealEntryRepository
             $statement->execute();
         } else {
             $statement = $this->db->prepare(
-                'SELECT id, meal_type, food_name, calories_kcal, recorded_on
+                'SELECT id, meal_type, food_name, calories_kcal, calories_edited, recorded_on
                  FROM meal_entries
                  WHERE meal_type = :meal_type
                  ORDER BY id DESC
@@ -147,6 +155,7 @@ final class MealEntryRepository
                 'mealType' => (string) $row['meal_type'],
                 'label' => (string) $row['food_name'],
                 'calories' => (int) $row['calories_kcal'],
+                'caloriesEdited' => (int) ($row['calories_edited'] ?? 0) === 1,
                 'recordedOn' => (string) $row['recorded_on'],
             ];
         }

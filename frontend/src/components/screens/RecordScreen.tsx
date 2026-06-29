@@ -244,7 +244,13 @@ export function RecordScreen() {
     try {
       setIsSaving(true);
       setError(null);
-      const data = await saveMeal(activeMealKey, item.label, calories, recordedOn ?? selectedDate);
+      const data = await saveMeal(
+        activeMealKey,
+        item.label,
+        calories,
+        recordedOn ?? selectedDate,
+        item.caloriesEdited ?? false,
+      );
       setMeals(mapMealSectionsToState(data.meals));
       setMealSheetOpen(false);
       setActiveMealKey(null);

@@ -13,6 +13,7 @@ export type SearchState =
   | "searching"
   | "found"
   | "estimated"
+  | "from_history"
   | "low_confidence_estimate"
   | "web_searching"
   | "web_found"
@@ -43,6 +44,7 @@ export interface FoodSearchResult {
   brandName?: string | null;
   rawInput: string;
   items?: FoodResultItem[];
+  caloriesEdited?: boolean;
 }
 
 export interface FoodSearchStep {
