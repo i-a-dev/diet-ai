@@ -6,6 +6,10 @@ import {
   type ExerciseHistoryEntry,
 } from "../api/client.ts";
 import { BottomSheet } from "./BottomSheet.tsx";
+import {
+  ExercisePreviewCard,
+  type ExercisePreviewCardModel,
+} from "./ExercisePreviewCard.tsx";
 
 export type ExerciseUnit = "min" | "rep";
 
@@ -33,8 +37,10 @@ export function ExerciseRegisterSheet({
   const [name, setName] = useState("");
   const [amount, setAmount] = useState<number>(30);
   const [unit, setUnit] = useState<ExerciseUnit>("min");
-  const [history, setHistory] = useState<ExerciseInput[]>([]);
+  const [history, setHistory] = useState<ExerciseHistoryEntry[]>([]);
   const [historyError, setHistoryError] = useState<string | null>(null);
+  const [selectedHistoryEntry, setSelectedHistoryEntry] =
+    useState<ExerciseHistoryEntry | null>(null);
   const historyRequestTokenRef = useRef(0);
   const previewRequestTokenRef = useRef(0);
   const nameInputRef = useRef<HTMLInputElement | null>(null);
@@ -42,15 +48,21 @@ export function ExerciseRegisterSheet({
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [preview, setPreview] = useState<ExercisePreviewResponse | null>(null);
 
+  const clearPreview = () => {
+    previewRequestTokenRef.current = Date.now();
+    setPreview(null);
+    setPreviewError(null);
+    setIsPreviewLoading(false);
+    setSelectedHistoryEntry(null);
+  };
+
   useEffect(() => {
     if (!open) return;
     setName("");
     setAmount(30);
     setUnit("min");
     setHistoryError(null);
-    setIsPreviewLoading(false);
-    setPreviewError(null);
-    setPreview(null);
+    clearPreview();
   }, [open]);
 
   useEffect(() => {
@@ -75,30 +87,44 @@ export function ExerciseRegisterSheet({
   const isValid = trimmedName.length > 0 && amount > 0 && amount <= 10000;
   const previewReady =
     preview !== null && !isPreviewLoading && previewError === null;
+  const historyReady =
+    selectedHistoryEntry !== null &&
+    selectedHistoryEntry.name.trim() === trimmedName &&
+    selectedHistoryEntry.amount === amount &&
+    selectedHistoryEntry.unit === unit;
+  const activePreview: ExercisePreviewCardModel | null = previewReady
+    ? toPreviewViewModel(preview)
+    : historyReady
+      ? historyToPreviewViewModel(selectedHistoryEntry)
+      : null;
+  const canSave = activePreview !== null;
 
-  // 変更: 入力変更時は前回の推定結果を破棄し、手動再計算を必須にする。
-  useEffect(() => {
-    if (!open) return;
-    setPreview(null);
-    setPreviewError(null);
-    setIsPreviewLoading(false);
-  }, [open, trimmedName, amount, unit]);
+  const requestPreview = (
+    exerciseName: string,
+    exerciseAmount: number,
+    exerciseUnit: ExerciseUnit,
+  ) => {
+    const normalizedName = exerciseName.trim();
+    if (
+      normalizedName.length === 0 ||
+      exerciseAmount <= 0 ||
+      exerciseAmount > 10000
+    ) {
+      return;
+    }
 
-  const handleCalculatePreview = () => {
-    if (!isValid || isPreviewLoading || isSaving) return;
     const token = Date.now();
     previewRequestTokenRef.current = token;
     setIsPreviewLoading(true);
     setPreviewError(null);
     setPreview(null);
 
-    // 変更: ユーザーが「カロリーを計算する」を押した時だけ推定APIを呼ぶ。
     void (async () => {
       try {
         const nextPreview = await estimateExercisePreview(
-          trimmedName,
-          amount,
-          unit,
+          normalizedName,
+          exerciseAmount,
+          exerciseUnit,
           recordDate,
         );
         if (previewRequestTokenRef.current !== token) return;
@@ -116,8 +142,24 @@ export function ExerciseRegisterSheet({
     })();
   };
 
+  const handleCalculatePreview = () => {
+    if (!isValid || isPreviewLoading || isSaving) return;
+    requestPreview(trimmedName, amount, unit);
+  };
+
+  const handleHistorySelect = (item: ExerciseHistoryEntry) => {
+    previewRequestTokenRef.current = Date.now();
+    setPreview(null);
+    setPreviewError(null);
+    setIsPreviewLoading(false);
+    setName(item.name);
+    setAmount(item.amount);
+    setUnit(item.unit);
+    setSelectedHistoryEntry(item);
+  };
+
   const handleSave = () => {
-    if (!previewReady || isSaving) return;
+    if (!canSave || isSaving) return;
     // 変更: 登録名はユーザー入力を使い、計算の根拠は note/source で示す。
     void onSave({ name: trimmedName, amount, unit });
   };
@@ -131,7 +173,10 @@ export function ExerciseRegisterSheet({
             ref={nameInputRef}
             type="text"
             value={name}
-            onChange={(event) => setName(event.target.value)}
+            onChange={(event) => {
+              setName(event.target.value);
+              clearPreview();
+            }}
             placeholder="例：ウォーキング、スクワット、ランニング"
             style={inputStyle}
           />
@@ -150,6 +195,7 @@ export function ExerciseRegisterSheet({
                     ? 1
                     : Math.max(1, Math.min(10000, Math.round(next))),
                 );
+                clearPreview();
               }}
               style={{
                 ...inputStyle,
@@ -161,7 +207,10 @@ export function ExerciseRegisterSheet({
             <div style={switchWrapStyle}>
               <button
                 type="button"
-                onClick={() => setUnit("min")}
+                onClick={() => {
+                  setUnit("min");
+                  clearPreview();
+                }}
                 style={{
                   ...switchBtnStyle,
                   ...(unit === "min" ? activeSwitchBtnStyle : undefined),
@@ -171,7 +220,10 @@ export function ExerciseRegisterSheet({
               </button>
               <button
                 type="button"
-                onClick={() => setUnit("rep")}
+                onClick={() => {
+                  setUnit("rep");
+                  clearPreview();
+                }}
                 style={{
                   ...switchBtnStyle,
                   ...(unit === "rep" ? activeSwitchBtnStyle : undefined),
@@ -187,72 +239,19 @@ export function ExerciseRegisterSheet({
               <div style={previewHintStyle}>
                 運動名を入力すると消費カロリーを表示します
               </div>
+            ) : isPreviewLoading ? (
+              <div style={previewHintStyle}>カロリーを計算しています...</div>
             ) : previewError ? (
               <div style={previewErrorStyle}>{previewError}</div>
-            ) : previewReady && preview.preview.confidence === "low" ? (
-              <div style={lowPreviewCardStyle}>
-                <div style={previewTopRowStyle}>
-                  <span style={previewKcalTextStyle}>
-                    {preview.preview.caloriesBurned} kcal
-                  </span>
-                  <span style={lowBadgeStyle}>低精度</span>
-                </div>
-                <div style={previewSubTextStyle}>
-                  {preview.preview.exercise} / {preview.preview.minutes}分 /
-                  METs {preview.preview.mets}
-                </div>
-                {preview.preview.note !== "" && (
-                  <div style={previewNoteStyle}>
-                    推定根拠: {preview.preview.note}
-                  </div>
-                )}
-                <div style={lowWarningTextStyle}>
-                  実際のカロリーと異なる場合があります
-                </div>
-              </div>
-            ) : previewReady ? (
-              <div style={previewCardStyle}>
-                <div style={previewTopRowStyle}>
-                  <span style={previewKcalTextStyle}>
-                    {preview.preview.caloriesBurned} kcal
-                  </span>
-                  <span style={estimateBadgeStyle}>
-                    {preview.preview.source === "llm_estimate"
-                      ? "AI推定"
-                      : "ローカルMETs"}
-                  </span>
-                </div>
-                <div style={previewSubTextStyle}>
-                  {preview.preview.mets} METs × {preview.weight.kg}kg ×{" "}
-                  {preview.preview.minutes}h/60
-                </div>
-                {preview.preview.source === "llm_estimate" &&
-                  preview.preview.estimatedExercise !== "" &&
-                  preview.preview.estimatedExercise !==
-                    preview.preview.exercise && (
-                    <div style={previewNoteStyle}>
-                      {preview.preview.estimatedExercise} 相当として計算
-                    </div>
-                  )}
-              </div>
+            ) : activePreview ? (
+              <ExercisePreviewCard
+                model={activePreview}
+                isFromHistory={historyReady}
+              />
             ) : null}
-
-            {previewReady &&
-              preview.weight.source === "reference" &&
-              preview.weight.recordedOn && (
-                <div style={weightInfoStyle}>
-                  {formatShortDate(preview.weight.recordedOn)}の体重{" "}
-                  {preview.weight.kg}kg をもとに計算しました
-                </div>
-              )}
-            {previewReady && preview.weight.source === "default" && (
-              <div style={weightWarningStyle}>
-                体重が未登録のため60kgで計算しています{" "}
-              </div>
-            )}
           </div>
 
-          {!previewReady && (
+          {!canSave && (
             <>
               <div style={hintTitleStyle}>運動の履歴</div>
               <div style={historyScrollAreaStyle}>
@@ -261,11 +260,7 @@ export function ExerciseRegisterSheet({
                     <button
                       key={`${item.name}-${item.amount}-${item.unit}`}
                       type="button"
-                      onClick={() => {
-                        setName(item.name);
-                        setAmount(item.amount);
-                        setUnit(item.unit);
-                      }}
+                      onClick={() => handleHistorySelect(item)}
                       style={historyChipStyle}
                     >
                       {item.name} {item.amount}
@@ -284,7 +279,7 @@ export function ExerciseRegisterSheet({
         </div>
 
         <div style={footerStyle}>
-          {previewReady ? (
+          {canSave ? (
             <button
               type="button"
               disabled={isSaving}
@@ -321,31 +316,64 @@ export function ExerciseRegisterSheet({
   );
 }
 
+function toPreviewViewModel(
+  preview: ExercisePreviewResponse,
+): ExercisePreviewCardModel {
+  return {
+    caloriesBurned: preview.preview.caloriesBurned,
+    confidence: preview.preview.confidence,
+    source: preview.preview.source,
+    exercise: preview.preview.exercise,
+    estimatedExercise: preview.preview.estimatedExercise,
+    minutes: preview.preview.minutes,
+    mets: preview.preview.mets,
+    note: preview.preview.note,
+    weightKg: preview.weight.kg,
+    weightSource: preview.weight.source,
+    weightRecordedOn: preview.weight.recordedOn,
+  };
+}
+
+function historyToPreviewViewModel(
+  entry: ExerciseHistoryEntry,
+): ExercisePreviewCardModel {
+  const note = entry.note ?? "";
+  return {
+    caloriesBurned: entry.burnedCalories,
+    confidence: entry.confidence,
+    source: entry.source,
+    exercise: entry.name,
+    estimatedExercise: parseEstimatedExerciseFromNote(note),
+    minutes: entry.minutes,
+    mets: entry.mets,
+    note,
+    weightKg: entry.weightKg,
+    weightSource: entry.weightSource,
+    weightRecordedOn:
+      entry.weightSource === "reference" ? entry.recordedOn : null,
+  };
+}
+
+function parseEstimatedExerciseFromNote(note: string): string {
+  const match = note.match(/AI推定: 「(.+?)」相当で計算/);
+  return match?.[1] ?? "";
+}
+
 function toUniqueExerciseHistory(
   history: ExerciseHistoryEntry[],
-): ExerciseInput[] {
+): ExerciseHistoryEntry[] {
   const seen = new Set<string>();
-  const unique: ExerciseInput[] = [];
+  const unique: ExerciseHistoryEntry[] = [];
 
   for (const entry of history) {
     const key = `${entry.name.trim().toLowerCase()}|${entry.amount}|${entry.unit}`;
     if (entry.name.trim() === "" || seen.has(key)) continue;
     seen.add(key);
-    unique.push({
-      name: entry.name,
-      amount: entry.amount,
-      unit: entry.unit,
-    });
+    unique.push(entry);
     if (unique.length >= 50) break;
   }
 
   return unique;
-}
-
-function formatShortDate(date: string): string {
-  const [year, month, day] = date.split("-");
-  if (!year || !month || !day) return date;
-  return `${Number(month)}/${Number(day)}`;
 }
 
 const sheetLayoutStyle: CSSProperties = {
@@ -387,69 +415,6 @@ const previewHintStyle: CSSProperties = {
   ...previewStyle,
 };
 
-const previewCardStyle: CSSProperties = {
-  borderRadius: 12,
-  border: "1px solid #BFE6D0",
-  background: "#EDF9F3",
-  padding: "10px 12px",
-};
-
-const lowPreviewCardStyle: CSSProperties = {
-  borderRadius: 12,
-  border: "1px solid #F7CFA3",
-  background: "#FFF6EC",
-  padding: "10px 12px",
-};
-
-const previewTopRowStyle: CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "space-between",
-};
-
-const previewKcalTextStyle: CSSProperties = {
-  color: "#2EAA72",
-  fontSize: 22,
-  fontWeight: 800,
-};
-
-const previewSubTextStyle: CSSProperties = {
-  marginTop: 6,
-  color: "#4B5563",
-  fontSize: 12,
-};
-
-const estimateBadgeStyle: CSSProperties = {
-  fontSize: 11,
-  color: "#2E7D5A",
-  background: "#D6F5E8",
-  borderRadius: 999,
-  padding: "2px 8px",
-  fontWeight: 700,
-};
-
-const lowBadgeStyle: CSSProperties = {
-  fontSize: 11,
-  color: "#9A5515",
-  background: "#FDE8D2",
-  borderRadius: 999,
-  padding: "2px 8px",
-  fontWeight: 700,
-};
-
-const previewNoteStyle: CSSProperties = {
-  marginTop: 6,
-  fontSize: 12,
-  color: "#7C5A3D",
-};
-
-const lowWarningTextStyle: CSSProperties = {
-  marginTop: 6,
-  fontSize: 12,
-  color: "#B45309",
-  fontWeight: 600,
-};
-
 const previewErrorStyle: CSSProperties = {
   fontSize: 12,
   color: "#C0392B",
@@ -457,18 +422,6 @@ const previewErrorStyle: CSSProperties = {
   border: "1px solid #FFD4D1",
   borderRadius: 10,
   padding: "8px 10px",
-};
-
-const weightInfoStyle: CSSProperties = {
-  fontSize: 12,
-  color: "#4B5563",
-  marginTop: 6,
-};
-
-const weightWarningStyle: CSSProperties = {
-  fontSize: 12,
-  color: "#B45309",
-  marginTop: 6,
 };
 
 const hintTitleStyle: CSSProperties = {
