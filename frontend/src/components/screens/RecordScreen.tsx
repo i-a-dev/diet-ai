@@ -36,6 +36,7 @@ import { SecIcon } from "../SecIcon.tsx";
 import { StepsRegisterSheet } from "../StepsRegisterSheet.tsx";
 import { TopNav } from "../TopNav.tsx";
 import { WeightRegisterSheet } from "../WeightRegisterSheet.tsx";
+import { WeightSparkline } from "../WeightSparkline.tsx";
 import { ORANGE } from "../../constants.ts";
 
 type MealKey = "breakfast" | "lunch" | "dinner" | "snack";
@@ -170,6 +171,7 @@ export function RecordScreen() {
   const [dailyIntakeGoalKcal, setDailyIntakeGoalKcal] = useState<number | null>(
     null,
   );
+  const [weightSparklineKey, setWeightSparklineKey] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -312,6 +314,7 @@ export function RecordScreen() {
         data.weight.referenceRecordedOn ?? data.weight.recordedOn,
       );
       setWeightDiff(data.weight.diffFromPreviousDay);
+      setWeightSparklineKey((prev) => prev + 1);
       setWeightSheetOpen(false);
     } catch (saveError) {
       setError(
@@ -571,35 +574,10 @@ export function RecordScreen() {
                 {formatWeightDiff(weightDiff)}
               </div>
             </div>
-            <svg width="110" height="44" viewBox="0 0 110 44">
-              <polyline
-                points="0,34 18,30 36,38 54,26 72,20 90,14 110,8"
-                fill="none"
-                stroke={ORANGE}
-                strokeWidth="2.2"
-                strokeLinejoin="round"
-                strokeLinecap="round"
-              />
-              {[
-                { cx: 0, cy: 34 },
-                { cx: 18, cy: 30 },
-                { cx: 36, cy: 38 },
-                { cx: 54, cy: 26 },
-                { cx: 72, cy: 20 },
-                { cx: 90, cy: 14 },
-              ].map((point) => (
-                <circle
-                  key={`${point.cx}-${point.cy}`}
-                  cx={point.cx}
-                  cy={point.cy}
-                  r="3"
-                  fill="#fff"
-                  stroke={ORANGE}
-                  strokeWidth="1.8"
-                />
-              ))}
-              <circle cx="110" cy="8" r="4" fill={ORANGE} />
-            </svg>
+            <WeightSparkline
+              selectedDate={selectedDate}
+              refreshKey={weightSparklineKey}
+            />
           </div>
         </div>
 
