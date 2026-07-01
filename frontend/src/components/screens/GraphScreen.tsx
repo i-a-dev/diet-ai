@@ -327,27 +327,18 @@ function buildWeightLineSegments(
   chartMin: number,
   chartMax: number,
 ) {
-  const segments: string[] = [];
-  let current: string[] = [];
+  const segment: string[] = [];
 
   points.forEach((point, index) => {
     if (point.value === null) {
-      if (current.length > 0) {
-        segments.push(current.join(" "));
-        current = [];
-      }
       return;
     }
 
     const y = weightToY(point.value, chartMin, chartMax);
-    current.push(`${xs[index]},${y}`);
+    segment.push(`${xs[index]},${y}`);
   });
 
-  if (current.length > 0) {
-    segments.push(current.join(" "));
-  }
-
-  return segments;
+  return segment.length > 0 ? [segment.join(" ")] : [];
 }
 
 function formatSignedKg(value: number | null) {
