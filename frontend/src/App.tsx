@@ -1,16 +1,56 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { PhoneMockFrame, phoneAppShellStyle } from './components/PhoneMockFrame.tsx'
 import { SBar } from './components/SBar.tsx'
 import { TabBar } from './components/TabBar.tsx'
 import { ProfileSettingsSheet } from './components/ProfileSettingsSheet.tsx'
 import { ChatScreen } from './components/screens/ChatScreen.tsx'
+import { ForgotPasswordScreen } from './components/screens/ForgotPasswordScreen.tsx'
 import { GraphScreen } from './components/screens/GraphScreen.tsx'
+import { LoginScreen } from './components/screens/LoginScreen.tsx'
 import { RecordScreen } from './components/screens/RecordScreen.tsx'
+import { ResetPasswordScreen } from './components/screens/ResetPasswordScreen.tsx'
+import { VerifyEmailScreen } from './components/screens/VerifyEmailScreen.tsx'
 import { fetchUserProfile } from './api/client.ts'
+import { useAuth } from './contexts/AuthContext.tsx'
 import { useMediaQuery } from './hooks/useMediaQuery.ts'
 
-const fontFamily = "-apple-system,BlinkMacSystemFont,'Hiragino Sans','Noto Sans JP',sans-serif"
+type GuestView = 'login' | 'forgot-password'
 
-export default function App() {
+function parseAuthRoute(pathname: string, search: string) {
+  const params = new URLSearchParams(search)
+  const token = params.get('token')?.trim() ?? ''
+
+  if (pathname === '/auth/verify-email' && token) {
+    return { type: 'verify-email' as const, token }
+  }
+
+  if (pathname === '/auth/reset-password' && token) {
+    return { type: 'reset-password' as const, token }
+  }
+
+  return null
+}
+
+function LoadingScreen() {
+  return (
+    <PhoneMockFrame>
+      <div
+        style={{
+          flex: 1,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          color: '#888',
+          fontSize: 14,
+        }}
+      >
+        読み込み中...
+      </div>
+    </PhoneMockFrame>
+  )
+}
+
+function AppContent() {
   const [tab, setTab] = useState<number>(0)
   const [onboardingOpen, setOnboardingOpen] = useState(false)
   const [profileChecked, setProfileChecked] = useState(false)
@@ -27,7 +67,7 @@ export default function App() {
         }
       })
       .catch(() => {
-        // API 未接続時はオンボーディングをスキップしてアプリを表示
+        // プロフィール取得失敗時はオンボーディングをスキップ
       })
       .finally(() => {
         if (!cancelled) {
@@ -40,90 +80,81 @@ export default function App() {
     }
   }, [])
 
-  const appShell = (
-    <>
-      {isDesktopPreview && <SBar />}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0 }}>
-        {screens[tab]}
-      </div>
-      <TabBar active={tab} onChange={setTab} />
-      <ProfileSettingsSheet
-        open={onboardingOpen}
-        mode="onboarding"
-        onClose={() => setOnboardingOpen(false)}
-        onSaved={() => setOnboardingOpen(false)}
-      />
-    </>
-  )
-
   if (!profileChecked) {
-    return (
-      <div
-        style={{
-          fontFamily,
-          background: '#fff',
-          height: '100dvh',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          color: '#888',
-          fontSize: 14,
-        }}
-      >
-        読み込み中...
-      </div>
-    )
-  }
-
-  if (isDesktopPreview) {
-    return (
-      <div
-        style={{
-          fontFamily,
-          background: '#F2F2F7',
-          minHeight: '100vh',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          padding: '40px 20px',
-        }}
-      >
-        <div style={{ fontSize: 12, color: '#999', letterSpacing: '0.05em', marginBottom: 16 }}>
-          ダイエットアプリ - UIモックアップ
-        </div>
-
-        <div
-          style={{
-            width: 375,
-            background: '#fff',
-            borderRadius: 50,
-            border: '8px solid #1a1a1a',
-            overflow: 'hidden',
-            display: 'flex',
-            flexDirection: 'column',
-            boxShadow: '0 24px 64px rgba(0,0,0,0.20)',
-            height: 800,
-          }}
-        >
-          {appShell}
-        </div>
-      </div>
-    )
+    return <LoadingScreen />
   }
 
   return (
-    <div
-      style={{
-        fontFamily,
-        background: '#fff',
-        height: '100dvh',
-        display: 'flex',
-        flexDirection: 'column',
-        overflow: 'hidden',
-      }}
-    >
-      {appShell}
-    </div>
+    <PhoneMockFrame>
+      <div style={phoneAppShellStyle}>
+        {isDesktopPreview && <SBar />}
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0 }}>
+          {screens[tab]}
+        </div>
+        <TabBar active={tab} onChange={setTab} />
+        <ProfileSettingsSheet
+          open={onboardingOpen}
+          mode="onboarding"
+          onClose={() => setOnboardingOpen(false)}
+          onSaved={() => setOnboardingOpen(false)}
+        />
+      </div>
+    </PhoneMockFrame>
   )
+}
+
+export default function App() {
+  const { isAuthenticated, isLoading, user } = useAuth()
+  const [guestView, setGuestView] = useState<GuestView>('login')
+
+  const authRoute = useMemo(
+    () => parseAuthRoute(window.location.pathname, window.location.search),
+    [],
+  )
+
+  if (isLoading) {
+    return <LoadingScreen />
+  }
+
+  if (authRoute?.type === 'verify-email') {
+    return (
+      <PhoneMockFrame>
+        <div style={phoneAppShellStyle}>
+          <VerifyEmailScreen token={authRoute.token} onDone={() => window.location.assign('/')} />
+        </div>
+      </PhoneMockFrame>
+    )
+  }
+
+  if (authRoute?.type === 'reset-password') {
+    return (
+      <PhoneMockFrame>
+        <div style={phoneAppShellStyle}>
+          <ResetPasswordScreen
+            token={authRoute.token}
+            onDone={() => {
+              setGuestView('login')
+              window.location.assign('/')
+            }}
+          />
+        </div>
+      </PhoneMockFrame>
+    )
+  }
+
+  if (!isAuthenticated || user === null) {
+    return (
+      <PhoneMockFrame>
+        <div style={phoneAppShellStyle}>
+          {guestView === 'forgot-password' ? (
+            <ForgotPasswordScreen onBackToLogin={() => setGuestView('login')} />
+          ) : (
+            <LoginScreen onForgotPassword={() => setGuestView('forgot-password')} />
+          )}
+        </div>
+      </PhoneMockFrame>
+    )
+  }
+
+  return <AppContent key={user.id} />
 }

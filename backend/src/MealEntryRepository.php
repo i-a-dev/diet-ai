@@ -16,9 +16,11 @@ final class MealEntryRepository
     ];
 
     private PDO $db;
+    private int $userId;
 
-    public function __construct(?PDO $db = null)
+    public function __construct(int $userId, ?PDO $db = null)
     {
+        $this->userId = $userId;
         $this->db = $db ?? Database::connection();
     }
 
@@ -41,10 +43,10 @@ final class MealEntryRepository
         $statement = $this->db->prepare(
             'SELECT id, meal_type, food_name, calories_kcal
              FROM meal_entries
-             WHERE recorded_on = :recorded_on
+             WHERE user_id = :user_id AND recorded_on = :recorded_on
              ORDER BY id ASC'
         );
-        $statement->execute(['recorded_on' => $date]);
+        $statement->execute(['user_id' => $this->userId, 'recorded_on' => $date]);
 
         foreach ($statement->fetchAll() as $row) {
             $mealType = (string) $row['meal_type'];
@@ -90,10 +92,11 @@ final class MealEntryRepository
 
         $now = (new DateTimeImmutable('now', new DateTimeZone('Asia/Tokyo')))->format('Y-m-d H:i:s');
         $statement = $this->db->prepare(
-            'INSERT INTO meal_entries (recorded_on, meal_type, food_name, calories_kcal, calories_edited, created_at, updated_at)
-             VALUES (:recorded_on, :meal_type, :food_name, :calories_kcal, :calories_edited, :created_at, :updated_at)'
+            'INSERT INTO meal_entries (user_id, recorded_on, meal_type, food_name, calories_kcal, calories_edited, created_at, updated_at)
+             VALUES (:user_id, :recorded_on, :meal_type, :food_name, :calories_kcal, :calories_edited, :created_at, :updated_at)'
         );
         $statement->execute([
+            'user_id' => $this->userId,
             'recorded_on' => $date,
             'meal_type' => $mealType,
             'food_name' => $name,
@@ -130,19 +133,22 @@ final class MealEntryRepository
             $statement = $this->db->prepare(
                 'SELECT id, meal_type, food_name, calories_kcal, calories_edited, recorded_on
                  FROM meal_entries
+                 WHERE user_id = :user_id
                  ORDER BY id DESC
                  LIMIT :limit'
             );
+            $statement->bindValue(':user_id', $this->userId, PDO::PARAM_INT);
             $statement->bindValue(':limit', $safeLimit, PDO::PARAM_INT);
             $statement->execute();
         } else {
             $statement = $this->db->prepare(
                 'SELECT id, meal_type, food_name, calories_kcal, calories_edited, recorded_on
                  FROM meal_entries
-                 WHERE meal_type = :meal_type
+                 WHERE user_id = :user_id AND meal_type = :meal_type
                  ORDER BY id DESC
                  LIMIT :limit'
             );
+            $statement->bindValue(':user_id', $this->userId, PDO::PARAM_INT);
             $statement->bindValue(':meal_type', $mealType, PDO::PARAM_STR);
             $statement->bindValue(':limit', $safeLimit, PDO::PARAM_INT);
             $statement->execute();
@@ -175,7 +181,7 @@ final class MealEntryRepository
             $endDate,
             'SELECT recorded_on, COALESCE(SUM(calories_kcal), 0) AS total_value
              FROM meal_entries
-             WHERE recorded_on BETWEEN :start AND :end
+             WHERE user_id = :user_id AND recorded_on BETWEEN :start AND :end
              GROUP BY recorded_on
              ORDER BY recorded_on ASC',
         );
@@ -196,6 +202,7 @@ final class MealEntryRepository
 
         $statement = $this->db->prepare($sql);
         $statement->execute([
+            'user_id' => $this->userId,
             'start' => $startDate,
             'end' => $endDate,
         ]);

@@ -157,7 +157,16 @@ export function ChatScreen() {
   };
 
   return (
-    <>
+    <div
+      style={{
+        position: "relative",
+        flex: 1,
+        display: "flex",
+        flexDirection: "column",
+        overflow: "hidden",
+        minHeight: 0,
+      }}
+    >
       <TopNav title="AIコーチと相談" />
       <div
         ref={scrollRef}
@@ -299,6 +308,6 @@ export function ChatScreen() {
           送信
         </button>
       </div>
-    </>
+    </div>
   );
 }

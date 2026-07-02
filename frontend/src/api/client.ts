@@ -1,15 +1,22 @@
+import { clearAuthToken, getAuthToken } from "../auth/tokenStorage.ts";
+
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "/api";
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
+  const token = getAuthToken();
   const response = await fetch(`${API_BASE}${path}`, {
     headers: {
       "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(options?.headers ?? {}),
     },
     ...options,
   });
 
   if (!response.ok) {
+    if (response.status === 401 && token) {
+      clearAuthToken();
+    }
     const error = (await response.json().catch(() => null)) as {
       message?: string;
     } | null;
@@ -395,4 +402,67 @@ export function sendChatMessage(content: string) {
     method: "POST",
     body: JSON.stringify({ content }),
   });
+}
+
+export interface AuthUser {
+  id: number;
+  email: string;
+  emailVerified?: boolean;
+}
+
+export interface RegisterResponse {
+  requiresVerification: true;
+  email: string;
+  message: string;
+}
+
+export function login(email: string, password: string) {
+  return request<{ token: string; user: AuthUser }>("/auth/login", {
+    method: "POST",
+    body: JSON.stringify({ email, password }),
+  });
+}
+
+export function register(email: string, password: string) {
+  return request<RegisterResponse>("/auth/register", {
+    method: "POST",
+    body: JSON.stringify({ email, password }),
+  });
+}
+
+export function verifyEmail(token: string) {
+  return request<{ token: string; user: AuthUser }>(
+    `/auth/verify-email?token=${encodeURIComponent(token)}`,
+  );
+}
+
+export function resendVerificationEmail(email: string) {
+  return request<{ message: string }>("/auth/resend-verification", {
+    method: "POST",
+    body: JSON.stringify({ email }),
+  });
+}
+
+export function requestPasswordReset(email: string) {
+  return request<{ message: string }>("/auth/forgot-password", {
+    method: "POST",
+    body: JSON.stringify({ email }),
+  });
+}
+
+export function resetPassword(token: string, password: string) {
+  return request<{ message: string }>("/auth/reset-password", {
+    method: "POST",
+    body: JSON.stringify({ token, password }),
+  });
+}
+
+export function logout() {
+  return request<{ ok: boolean }>("/auth/logout", {
+    method: "POST",
+  });
+}
+
+export function fetchCurrentUser() {
+  return request<{ user: AuthUser }>("/auth/me");
 }

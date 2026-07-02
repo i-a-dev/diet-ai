@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Menu } from 'lucide-react'
 import { ProfileSettingsSheet } from './ProfileSettingsSheet.tsx'
 import { SideMenu } from './SideMenu.tsx'
+import { useAuth } from '../contexts/AuthContext.tsx'
 
 interface TopNavProps {
   title: string
@@ -11,6 +12,7 @@ interface TopNavProps {
 export function TopNav({ title, onProfileUpdated }: TopNavProps) {
   const [menuOpen, setMenuOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const { user, logout } = useAuth()
 
   const openProfileSettings = () => {
     setMenuOpen(false)
@@ -66,6 +68,8 @@ export function TopNav({ title, onProfileUpdated }: TopNavProps) {
         open={menuOpen}
         onClose={() => setMenuOpen(false)}
         onOpenProfileSettings={openProfileSettings}
+        onLogout={() => void logout()}
+        userEmail={user?.email}
       />
       <ProfileSettingsSheet
         open={settingsOpen}

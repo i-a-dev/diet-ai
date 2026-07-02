@@ -15,7 +15,7 @@ function json_response(array $payload, int $statusCode = 200): never
     header('Content-Type: application/json; charset=utf-8');
     // ブラウザ（React）から API を呼べるように CORS を許可
     header('Access-Control-Allow-Origin: *');
-    header('Access-Control-Allow-Headers: Content-Type');
+    header('Access-Control-Allow-Headers: Content-Type, Authorization');
     header('Access-Control-Allow-Methods: GET, POST, PUT, PATCH, OPTIONS');
 
     echo json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);

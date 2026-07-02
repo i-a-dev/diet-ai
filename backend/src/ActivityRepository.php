@@ -8,9 +8,11 @@ declare(strict_types=1);
 final class ActivityRepository
 {
     private PDO $db;
+    private int $userId;
 
-    public function __construct(?PDO $db = null)
+    public function __construct(int $userId, ?PDO $db = null)
     {
+        $this->userId = $userId;
         $this->db = $db ?? Database::connection();
     }
 
@@ -22,10 +24,10 @@ final class ActivityRepository
         $statement = $this->db->prepare(
             'SELECT step_count, burned_calories_kcal
              FROM step_entries
-             WHERE recorded_on = :recorded_on
+             WHERE user_id = :user_id AND recorded_on = :recorded_on
              LIMIT 1'
         );
-        $statement->execute(['recorded_on' => $date]);
+        $statement->execute(['user_id' => $this->userId, 'recorded_on' => $date]);
         $row = $statement->fetch();
 
         if ($row === false) {
@@ -54,14 +56,15 @@ final class ActivityRepository
         $now = (new DateTimeImmutable('now', new DateTimeZone('Asia/Tokyo')))->format('Y-m-d H:i:s');
 
         $statement = $this->db->prepare(
-            'INSERT INTO step_entries (recorded_on, step_count, burned_calories_kcal, created_at, updated_at)
-             VALUES (:recorded_on, :step_count, :burned_calories_kcal, :created_at, :updated_at)
-             ON CONFLICT(recorded_on) DO UPDATE SET
+            'INSERT INTO step_entries (user_id, recorded_on, step_count, burned_calories_kcal, created_at, updated_at)
+             VALUES (:user_id, :recorded_on, :step_count, :burned_calories_kcal, :created_at, :updated_at)
+             ON CONFLICT(user_id, recorded_on) DO UPDATE SET
                step_count = excluded.step_count,
                burned_calories_kcal = excluded.burned_calories_kcal,
                updated_at = excluded.updated_at'
         );
         $statement->execute([
+            'user_id' => $this->userId,
             'recorded_on' => $date,
             'step_count' => $count,
             'burned_calories_kcal' => $burnedCalories,
@@ -97,10 +100,10 @@ final class ActivityRepository
         $statement = $this->db->prepare(
             'SELECT id, exercise_name, amount, unit, minutes, mets, source, confidence, is_estimated, estimate_note, weight_kg, weight_source, burned_calories_kcal
              FROM exercise_entries
-             WHERE recorded_on = :recorded_on
+             WHERE user_id = :user_id AND recorded_on = :recorded_on
              ORDER BY id ASC'
         );
-        $statement->execute(['recorded_on' => $date]);
+        $statement->execute(['user_id' => $this->userId, 'recorded_on' => $date]);
 
         $entries = [];
         $totalCalories = 0;
@@ -202,15 +205,16 @@ final class ActivityRepository
 
         $statement = $this->db->prepare(
             'INSERT INTO exercise_entries (
-                recorded_on, exercise_name, amount, unit, minutes, mets, source, confidence, is_estimated, estimate_note,
+                user_id, recorded_on, exercise_name, amount, unit, minutes, mets, source, confidence, is_estimated, estimate_note,
                 weight_kg, weight_source, burned_calories_kcal, created_at, updated_at
              )
              VALUES (
-                :recorded_on, :exercise_name, :amount, :unit, :minutes, :mets, :source, :confidence, :is_estimated, :estimate_note,
+                :user_id, :recorded_on, :exercise_name, :amount, :unit, :minutes, :mets, :source, :confidence, :is_estimated, :estimate_note,
                 :weight_kg, :weight_source, :burned_calories_kcal, :created_at, :updated_at
              )'
         );
         $statement->execute([
+            'user_id' => $this->userId,
             'recorded_on' => $date,
             'exercise_name' => $exerciseName,
             'amount' => $amount,
@@ -270,9 +274,11 @@ final class ActivityRepository
         $statement = $this->db->prepare(
             'SELECT id, exercise_name, amount, unit, minutes, mets, source, confidence, is_estimated, estimate_note, weight_kg, weight_source, burned_calories_kcal, recorded_on
              FROM exercise_entries
+             WHERE user_id = :user_id
              ORDER BY id DESC
              LIMIT :limit'
         );
+        $statement->bindValue(':user_id', $this->userId, PDO::PARAM_INT);
         $statement->bindValue(':limit', $safeLimit, PDO::PARAM_INT);
         $statement->execute();
 
@@ -311,7 +317,7 @@ final class ActivityRepository
             $endDate,
             'SELECT recorded_on, COALESCE(SUM(burned_calories_kcal), 0) AS total_value
              FROM exercise_entries
-             WHERE recorded_on BETWEEN :start AND :end
+             WHERE user_id = :user_id AND recorded_on BETWEEN :start AND :end
              GROUP BY recorded_on
              ORDER BY recorded_on ASC',
         );
@@ -329,7 +335,7 @@ final class ActivityRepository
             $endDate,
             'SELECT recorded_on, step_count AS total_value
              FROM step_entries
-             WHERE recorded_on BETWEEN :start AND :end
+             WHERE user_id = :user_id AND recorded_on BETWEEN :start AND :end
              ORDER BY recorded_on ASC',
         );
     }
@@ -349,6 +355,7 @@ final class ActivityRepository
 
         $statement = $this->db->prepare($sql);
         $statement->execute([
+            'user_id' => $this->userId,
             'start' => $startDate,
             'end' => $endDate,
         ]);

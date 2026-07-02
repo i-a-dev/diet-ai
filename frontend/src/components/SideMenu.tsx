@@ -1,12 +1,14 @@
-import { Settings, X } from 'lucide-react'
+import { LogOut, Settings, X } from 'lucide-react'
 
 interface SideMenuProps {
   open: boolean
   onClose: () => void
   onOpenProfileSettings: () => void
+  onLogout: () => void
+  userEmail?: string | null
 }
 
-export function SideMenu({ open, onClose, onOpenProfileSettings }: SideMenuProps) {
+export function SideMenu({ open, onClose, onOpenProfileSettings, onLogout, userEmail }: SideMenuProps) {
   if (!open) {
     return null
   }
@@ -14,7 +16,7 @@ export function SideMenu({ open, onClose, onOpenProfileSettings }: SideMenuProps
   return (
     <div
       style={{
-        position: 'fixed',
+        position: 'absolute',
         inset: 0,
         zIndex: 40,
         display: 'flex',
@@ -86,6 +88,43 @@ export function SideMenu({ open, onClose, onOpenProfileSettings }: SideMenuProps
           >
             <Settings size={20} color="#666" />
             <span style={{ fontSize: 15, color: '#111', fontWeight: 500 }}>プロフィール</span>
+          </button>
+        </div>
+
+        {userEmail && (
+          <div
+            style={{
+              padding: '12px 16px',
+              fontSize: 12,
+              color: '#999',
+              borderTop: '1px solid #F0F0F0',
+            }}
+          >
+            {userEmail}
+          </div>
+        )}
+
+        <div style={{ marginTop: 'auto', padding: '8px 0', borderTop: '1px solid #F0F0F0' }}>
+          <button
+            type="button"
+            onClick={() => {
+              onClose()
+              onLogout()
+            }}
+            style={{
+              width: '100%',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 12,
+              padding: '14px 16px',
+              border: 'none',
+              background: 'transparent',
+              cursor: 'pointer',
+              textAlign: 'left',
+            }}
+          >
+            <LogOut size={20} color="#666" />
+            <span style={{ fontSize: 15, color: '#111', fontWeight: 500 }}>ログアウト</span>
           </button>
         </div>
       </div>

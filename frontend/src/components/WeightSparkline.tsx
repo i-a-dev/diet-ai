@@ -56,7 +56,7 @@ function buildSparklineGeometry(
     .map((point) => point.value)
     .filter((value): value is number => value !== null);
 
-  if (values.length === 0) {
+  if (values.length < 2) {
     return null;
   }
 
@@ -147,14 +147,7 @@ export function WeightSparkline({
   );
 
   if (!geometry) {
-    return (
-      <svg
-        width={WIDTH}
-        height={HEIGHT}
-        viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
-        style={{ overflow: "visible" }}
-      />
-    );
+    return null;
   }
 
   return (

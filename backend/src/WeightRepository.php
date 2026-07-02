@@ -11,13 +11,15 @@ final class WeightRepository
     public const WEIGHT_TIMELINE_SCROLL_FLOOR = '2026-01-01';
 
     private PDO $db;
+    private int $userId;
 
     /**
      * DB 接続を用意する。
      * $db を渡さない場合は Database::connection() で SQLite に接続する。
      */
-    public function __construct(?PDO $db = null)
+    public function __construct(int $userId, ?PDO $db = null)
     {
+        $this->userId = $userId;
         $this->db = $db ?? Database::connection();
     }
 
@@ -86,12 +88,13 @@ final class WeightRepository
 
         // 同じ recorded_on があれば UPDATE、なければ INSERT（upsert）
         $this->db->prepare(
-            'INSERT INTO weight_entries (recorded_on, weight_kg, created_at, updated_at)
-             VALUES (:recorded_on, :weight_kg, :created_at, :updated_at)
-             ON CONFLICT(recorded_on) DO UPDATE SET
+            'INSERT INTO weight_entries (user_id, recorded_on, weight_kg, created_at, updated_at)
+             VALUES (:user_id, :recorded_on, :weight_kg, :created_at, :updated_at)
+             ON CONFLICT(user_id, recorded_on) DO UPDATE SET
                weight_kg = excluded.weight_kg,
                updated_at = excluded.updated_at'
         )->execute([
+            'user_id' => $this->userId,
             'recorded_on' => $date,
             'weight_kg' => $roundedWeight,
             'created_at' => $now,
@@ -122,10 +125,11 @@ final class WeightRepository
         $statement = $this->db->prepare(
             'SELECT recorded_on, weight_kg
              FROM weight_entries
-             WHERE recorded_on BETWEEN :start AND :end
+             WHERE user_id = :user_id AND recorded_on BETWEEN :start AND :end
              ORDER BY recorded_on ASC'
         );
         $statement->execute([
+            'user_id' => $this->userId,
             'start' => $startDate,
             'end' => $endDate,
         ]);
@@ -156,7 +160,9 @@ final class WeightRepository
      */
     public function getEarliestRecordedDate(): ?string
     {
-        $value = $this->db->query('SELECT MIN(recorded_on) FROM weight_entries')->fetchColumn();
+        $statement = $this->db->prepare('SELECT MIN(recorded_on) FROM weight_entries WHERE user_id = :user_id');
+        $statement->execute(['user_id' => $this->userId]);
+        $value = $statement->fetchColumn();
 
         if (!is_string($value) || $value === '') {
             return null;
@@ -200,7 +206,9 @@ final class WeightRepository
      */
     public function getMaxRecordedWeight(): ?float
     {
-        $value = $this->db->query('SELECT MAX(weight_kg) FROM weight_entries')->fetchColumn();
+        $statement = $this->db->prepare('SELECT MAX(weight_kg) FROM weight_entries WHERE user_id = :user_id');
+        $statement->execute(['user_id' => $this->userId]);
+        $value = $statement->fetchColumn();
 
         if (!is_numeric($value)) {
             return null;
@@ -214,7 +222,9 @@ final class WeightRepository
      */
     public function getMinRecordedWeight(): ?float
     {
-        $value = $this->db->query('SELECT MIN(weight_kg) FROM weight_entries')->fetchColumn();
+        $statement = $this->db->prepare('SELECT MIN(weight_kg) FROM weight_entries WHERE user_id = :user_id');
+        $statement->execute(['user_id' => $this->userId]);
+        $value = $statement->fetchColumn();
 
         if (!is_numeric($value)) {
             return null;
@@ -280,9 +290,9 @@ final class WeightRepository
     private function findByDate(string $date): ?array
     {
         $statement = $this->db->prepare(
-            'SELECT recorded_on, weight_kg FROM weight_entries WHERE recorded_on = :recorded_on LIMIT 1'
+            'SELECT recorded_on, weight_kg FROM weight_entries WHERE user_id = :user_id AND recorded_on = :recorded_on LIMIT 1'
         );
-        $statement->execute(['recorded_on' => $date]);
+        $statement->execute(['user_id' => $this->userId, 'recorded_on' => $date]);
         $row = $statement->fetch();
 
         return $row === false ? null : $row;
@@ -298,11 +308,11 @@ final class WeightRepository
         $statement = $this->db->prepare(
             'SELECT recorded_on, weight_kg
              FROM weight_entries
-             WHERE recorded_on < :recorded_on
+             WHERE user_id = :user_id AND recorded_on < :recorded_on
              ORDER BY recorded_on DESC
              LIMIT 1'
         );
-        $statement->execute(['recorded_on' => $date]);
+        $statement->execute(['user_id' => $this->userId, 'recorded_on' => $date]);
         $row = $statement->fetch();
 
         return $row === false ? null : $row;
@@ -318,11 +328,11 @@ final class WeightRepository
         $statement = $this->db->prepare(
             'SELECT recorded_on, weight_kg
              FROM weight_entries
-             WHERE recorded_on <= :recorded_on
+             WHERE user_id = :user_id AND recorded_on <= :recorded_on
              ORDER BY recorded_on DESC
              LIMIT 1'
         );
-        $statement->execute(['recorded_on' => $date]);
+        $statement->execute(['user_id' => $this->userId, 'recorded_on' => $date]);
         $row = $statement->fetch();
 
         return $row === false ? null : $row;

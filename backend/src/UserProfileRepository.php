@@ -4,12 +4,9 @@ declare(strict_types=1);
 
 /**
  * ユーザープロフィールの読み書きを担当するクラス。
- * 単一ユーザー想定のため id=1 の1行のみを扱う。
  */
 final class UserProfileRepository
 {
-    private const PROFILE_ID = 1;
-
     /** @var list<string> */
     private const GENDERS = ['male', 'female', 'other'];
 
@@ -29,9 +26,11 @@ final class UserProfileRepository
     ];
 
     private PDO $db;
+    private int $userId;
 
-    public function __construct(?PDO $db = null)
+    public function __construct(int $userId, ?PDO $db = null)
     {
+        $this->userId = $userId;
         $this->db = $db ?? Database::connection();
     }
 
@@ -60,10 +59,10 @@ final class UserProfileRepository
                     activity_level, target_pace_kg_per_month, diet_goal, desired_diet_method,
                     allergies_dislikes, past_diet_experience, coach_notes, updated_at
              FROM user_profile
-             WHERE id = :id
+             WHERE user_id = :user_id
              LIMIT 1'
         );
-        $statement->execute(['id' => self::PROFILE_ID]);
+        $statement->execute(['user_id' => $this->userId]);
         $row = $statement->fetch();
 
         if ($row === false) {
@@ -101,23 +100,33 @@ final class UserProfileRepository
         $this->validate($merged);
 
         $statement = $this->db->prepare(
-            'UPDATE user_profile
-             SET gender = :gender,
-                 birth_date = :birth_date,
-                 height_cm = :height_cm,
-                 current_weight_kg = :current_weight_kg,
-                 target_weight_kg = :target_weight_kg,
-                 activity_level = :activity_level,
-                 target_pace_kg_per_month = :target_pace_kg_per_month,
-                 diet_goal = :diet_goal,
-                 desired_diet_method = :desired_diet_method,
-                 allergies_dislikes = :allergies_dislikes,
-                 past_diet_experience = :past_diet_experience,
-                 coach_notes = :coach_notes,
-                 updated_at = datetime(\'now\')
-             WHERE id = :id'
+            'INSERT INTO user_profile (
+                user_id, gender, birth_date, height_cm, current_weight_kg, target_weight_kg,
+                activity_level, target_pace_kg_per_month, diet_goal, desired_diet_method,
+                allergies_dislikes, past_diet_experience, coach_notes, updated_at
+             )
+             VALUES (
+                :user_id, :gender, :birth_date, :height_cm, :current_weight_kg, :target_weight_kg,
+                :activity_level, :target_pace_kg_per_month, :diet_goal, :desired_diet_method,
+                :allergies_dislikes, :past_diet_experience, :coach_notes, datetime(\'now\')
+             )
+             ON CONFLICT(user_id) DO UPDATE SET
+                 gender = excluded.gender,
+                 birth_date = excluded.birth_date,
+                 height_cm = excluded.height_cm,
+                 current_weight_kg = excluded.current_weight_kg,
+                 target_weight_kg = excluded.target_weight_kg,
+                 activity_level = excluded.activity_level,
+                 target_pace_kg_per_month = excluded.target_pace_kg_per_month,
+                 diet_goal = excluded.diet_goal,
+                 desired_diet_method = excluded.desired_diet_method,
+                 allergies_dislikes = excluded.allergies_dislikes,
+                 past_diet_experience = excluded.past_diet_experience,
+                 coach_notes = excluded.coach_notes,
+                 updated_at = datetime(\'now\')'
         );
         $statement->execute([
+            'user_id' => $this->userId,
             'gender' => $merged['gender'],
             'birth_date' => $merged['birthDate'],
             'height_cm' => $merged['heightCm'],
@@ -130,7 +139,6 @@ final class UserProfileRepository
             'allergies_dislikes' => $merged['allergiesDislikes'],
             'past_diet_experience' => $merged['pastDietExperience'],
             'coach_notes' => $merged['coachNotes'],
-            'id' => self::PROFILE_ID,
         ]);
 
         return $this->get();

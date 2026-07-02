@@ -18,12 +18,184 @@ require_once __DIR__ . '/../src/UserProfileRepository.php';
 require_once __DIR__ . '/../src/CalorieGoalCalculator.php';
 require_once __DIR__ . '/../src/ChatCoachService.php';
 require_once __DIR__ . '/../src/ChatMessageRepository.php';
+require_once __DIR__ . '/../src/AuthService.php';
+require_once __DIR__ . '/../src/MailService.php';
 
-$weightRepository = new WeightRepository();
-$userProfileRepository = new UserProfileRepository();
-$mealEntryRepository = new MealEntryRepository();
-$activityRepository = new ActivityRepository();
-$chatMessageRepository = new ChatMessageRepository();
+$authService = new AuthService();
+$requestMethod = $_SERVER['REQUEST_METHOD'] ?? 'GET';
+$requestPath = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
+
+/**
+ * Authorization ヘッダーから Bearer トークンを取り出す。
+ */
+$extractBearerToken = static function (): ?string {
+    $header = $_SERVER['HTTP_AUTHORIZATION'] ?? $_SERVER['REDIRECT_HTTP_AUTHORIZATION'] ?? '';
+    if ($header === '' && function_exists('getallheaders')) {
+        $headers = getallheaders();
+        if (is_array($headers)) {
+            foreach ($headers as $name => $value) {
+                if (strcasecmp((string) $name, 'Authorization') === 0) {
+                    $header = (string) $value;
+                    break;
+                }
+            }
+        }
+    }
+
+    if (preg_match('/^Bearer\s+(\S+)$/i', trim($header), $matches) !== 1) {
+        return null;
+    }
+
+    return $matches[1];
+};
+
+// ブラウザの preflight リクエスト（CORS 確認）への応答
+if ($requestMethod === 'OPTIONS') {
+    json_response(['ok' => true]);
+}
+
+// POST /api/auth/register — 新規登録
+if ($requestMethod === 'POST' && $requestPath === '/api/auth/register') {
+    $body = json_decode(file_get_contents('php://input') ?: '{}', true);
+    if (!is_array($body)) {
+        json_response(['message' => 'Invalid JSON body'], 422);
+    }
+
+    $email = trim((string) ($body['email'] ?? ''));
+    $password = (string) ($body['password'] ?? '');
+
+    try {
+        $result = $authService->register($email, $password);
+    } catch (InvalidArgumentException $exception) {
+        json_response(['message' => $exception->getMessage()], 422);
+    } catch (RuntimeException $exception) {
+        json_response(['message' => $exception->getMessage()], 502);
+    }
+
+    json_response($result);
+}
+
+// POST /api/auth/login — ログイン
+if ($requestMethod === 'POST' && $requestPath === '/api/auth/login') {
+    $body = json_decode(file_get_contents('php://input') ?: '{}', true);
+    if (!is_array($body)) {
+        json_response(['message' => 'Invalid JSON body'], 422);
+    }
+
+    $email = trim((string) ($body['email'] ?? ''));
+    $password = (string) ($body['password'] ?? '');
+
+    try {
+        $result = $authService->login($email, $password);
+    } catch (InvalidArgumentException $exception) {
+        json_response(['message' => $exception->getMessage()], 422);
+    }
+
+    json_response($result);
+}
+
+// GET /api/auth/verify-email — メール認証
+if ($requestMethod === 'GET' && $requestPath === '/api/auth/verify-email') {
+    $token = trim((string) ($_GET['token'] ?? ''));
+
+    try {
+        $result = $authService->verifyEmail($token);
+    } catch (InvalidArgumentException $exception) {
+        json_response(['message' => $exception->getMessage()], 422);
+    }
+
+    json_response($result);
+}
+
+// POST /api/auth/resend-verification — 確認メール再送
+if ($requestMethod === 'POST' && $requestPath === '/api/auth/resend-verification') {
+    $body = json_decode(file_get_contents('php://input') ?: '{}', true);
+    if (!is_array($body)) {
+        json_response(['message' => 'Invalid JSON body'], 422);
+    }
+
+    $email = trim((string) ($body['email'] ?? ''));
+
+    try {
+        $result = $authService->resendVerificationEmail($email);
+    } catch (InvalidArgumentException $exception) {
+        json_response(['message' => $exception->getMessage()], 422);
+    } catch (RuntimeException $exception) {
+        json_response(['message' => $exception->getMessage()], 502);
+    }
+
+    json_response($result);
+}
+
+// POST /api/auth/forgot-password — パスワード再設定メール送信
+if ($requestMethod === 'POST' && $requestPath === '/api/auth/forgot-password') {
+    $body = json_decode(file_get_contents('php://input') ?: '{}', true);
+    if (!is_array($body)) {
+        json_response(['message' => 'Invalid JSON body'], 422);
+    }
+
+    $email = trim((string) ($body['email'] ?? ''));
+
+    try {
+        $result = $authService->requestPasswordReset($email);
+    } catch (InvalidArgumentException $exception) {
+        json_response(['message' => $exception->getMessage()], 422);
+    } catch (RuntimeException $exception) {
+        json_response(['message' => $exception->getMessage()], 502);
+    }
+
+    json_response($result);
+}
+
+// POST /api/auth/reset-password — パスワード再設定
+if ($requestMethod === 'POST' && $requestPath === '/api/auth/reset-password') {
+    $body = json_decode(file_get_contents('php://input') ?: '{}', true);
+    if (!is_array($body)) {
+        json_response(['message' => 'Invalid JSON body'], 422);
+    }
+
+    $token = trim((string) ($body['token'] ?? ''));
+    $password = (string) ($body['password'] ?? '');
+
+    try {
+        $result = $authService->resetPassword($token, $password);
+    } catch (InvalidArgumentException $exception) {
+        json_response(['message' => $exception->getMessage()], 422);
+    }
+
+    json_response($result);
+}
+
+$authToken = $extractBearerToken();
+$authenticatedUser = $authService->resolveUserFromToken($authToken);
+
+// POST /api/auth/logout — ログアウト
+if ($requestMethod === 'POST' && $requestPath === '/api/auth/logout') {
+    if ($authToken !== null && $authToken !== '') {
+        $authService->logout($authToken);
+    }
+    json_response(['ok' => true]);
+}
+
+// GET /api/auth/me — ログイン中のユーザー情報
+if ($requestMethod === 'GET' && $requestPath === '/api/auth/me') {
+    if ($authenticatedUser === null) {
+        json_response(['message' => 'Unauthorized'], 401);
+    }
+
+    json_response(['user' => $authenticatedUser]);
+}
+
+if ($authenticatedUser === null) {
+    json_response(['message' => 'Unauthorized'], 401);
+}
+
+$userId = (int) $authenticatedUser['id'];
+$weightRepository = new WeightRepository($userId);
+$userProfileRepository = new UserProfileRepository($userId);
+$mealEntryRepository = new MealEntryRepository($userId);
+$activityRepository = new ActivityRepository($userId);
+$chatMessageRepository = new ChatMessageRepository($userId);
 $calorieEstimateService = new CalorieEstimateService();
 $exerciseMetEstimateService = new ExerciseMetEstimateService();
 $chatCoachService = new ChatCoachService(
@@ -33,8 +205,6 @@ $chatCoachService = new ChatCoachService(
     $activityRepository,
     $chatMessageRepository
 );
-$requestMethod = $_SERVER['REQUEST_METHOD'] ?? 'GET';
-$requestPath = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
 
 /**
  * 変更: 運動カロリープレビュー/保存で共通利用する体重解決ロジック。
@@ -64,11 +234,6 @@ $resolveWeightContext = static function (array $weightSummary): array {
         'referenceRecordedOn' => null,
     ];
 };
-
-// ブラウザの preflight リクエスト（CORS 確認）への応答
-if ($requestMethod === 'OPTIONS') {
-    json_response(['ok' => true]);
-}
 
 /**
  * 変更: AI推定時に「何相当で計算したか」が分かるノート文言を生成する。

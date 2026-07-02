@@ -29,3 +29,7 @@ services:
     environment:
       - DATABASE_PATH=/var/www/html/data/diet.db
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - MAIL_DRIVER=${MAIL_DRIVER:-log}
+      - MAIL_FROM=${MAIL_FROM:-noreply@diet-ai.local}
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:5173}
+      - RESEND_API_KEY=${RESEND_API_KEY:-}

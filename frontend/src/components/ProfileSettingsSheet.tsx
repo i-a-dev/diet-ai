@@ -551,7 +551,7 @@ export function ProfileSettingsSheet({
   return (
     <div
       style={{
-        position: "fixed",
+        position: "absolute",
         inset: 0,
         zIndex: 50,
         background: "#F5F5F7",

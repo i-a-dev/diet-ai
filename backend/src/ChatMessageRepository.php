@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 /**
  * チャット履歴の保存・取得を担当するクラス。
- * 単一ユーザー想定のため user_id は持たない。
  */
 final class ChatMessageRepository
 {
@@ -21,9 +20,11 @@ final class ChatMessageRepository
     public const MAX_STORED_MESSAGES = 500;
 
     private PDO $db;
+    private int $userId;
 
-    public function __construct(?PDO $db = null)
+    public function __construct(int $userId, ?PDO $db = null)
     {
+        $this->userId = $userId;
         $this->db = $db ?? Database::connection();
     }
 
@@ -40,9 +41,11 @@ final class ChatMessageRepository
         $statement = $this->db->prepare(
             'SELECT id, role, content, created_at
              FROM chat_messages
+             WHERE user_id = :user_id
              ORDER BY id DESC
              LIMIT :limit'
         );
+        $statement->bindValue(':user_id', $this->userId, PDO::PARAM_INT);
         $statement->bindValue(':limit', $limit, PDO::PARAM_INT);
         $statement->execute();
 
@@ -59,9 +62,11 @@ final class ChatMessageRepository
         $statement = $this->db->prepare(
             'SELECT role, content
              FROM chat_messages
+             WHERE user_id = :user_id
              ORDER BY id DESC
              LIMIT :limit'
         );
+        $statement->bindValue(':user_id', $this->userId, PDO::PARAM_INT);
         $statement->bindValue(':limit', self::API_CONTEXT_LIMIT, PDO::PARAM_INT);
         $statement->execute();
 
@@ -92,10 +97,11 @@ final class ChatMessageRepository
 
         $now = (new DateTimeImmutable('now', new DateTimeZone('Asia/Tokyo')))->format('Y-m-d H:i:s');
         $statement = $this->db->prepare(
-            'INSERT INTO chat_messages (role, content, created_at)
-             VALUES (:role, :content, :created_at)'
+            'INSERT INTO chat_messages (user_id, role, content, created_at)
+             VALUES (:user_id, :role, :content, :created_at)'
         );
         $statement->execute([
+            'user_id' => $this->userId,
             'role' => $role,
             'content' => $trimmed,
             'created_at' => $now,
@@ -113,7 +119,10 @@ final class ChatMessageRepository
 
     public function count(): int
     {
-        return (int) $this->db->query('SELECT COUNT(*) FROM chat_messages')->fetchColumn();
+        $statement = $this->db->prepare('SELECT COUNT(*) FROM chat_messages WHERE user_id = :user_id');
+        $statement->execute(['user_id' => $this->userId]);
+
+        return (int) $statement->fetchColumn();
     }
 
     private function prune(): void
@@ -123,9 +132,9 @@ final class ChatMessageRepository
             ->format('Y-m-d H:i:s');
 
         $statement = $this->db->prepare(
-            'DELETE FROM chat_messages WHERE created_at < :cutoff'
+            'DELETE FROM chat_messages WHERE user_id = :user_id AND created_at < :cutoff'
         );
-        $statement->execute(['cutoff' => $cutoff]);
+        $statement->execute(['user_id' => $this->userId, 'cutoff' => $cutoff]);
 
         $overflow = $this->count() - self::MAX_STORED_MESSAGES;
         if ($overflow <= 0) {
@@ -136,10 +145,12 @@ final class ChatMessageRepository
             'DELETE FROM chat_messages
              WHERE id IN (
                SELECT id FROM chat_messages
+               WHERE user_id = :user_id
                ORDER BY id ASC
                LIMIT :limit
              )'
         );
+        $deleteStatement->bindValue(':user_id', $this->userId, PDO::PARAM_INT);
         $deleteStatement->bindValue(':limit', $overflow, PDO::PARAM_INT);
         $deleteStatement->execute();
     }
