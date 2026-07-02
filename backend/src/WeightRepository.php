@@ -237,13 +237,21 @@ final class WeightRepository
      * 体重グラフのY軸範囲を計算する。
      * 上限: 最高記録とグラフ上端の間が全体の約1/10。
      * 下限: 1/10 の式で求めた値を floor した整数（最低記録が目標より下なら最低記録を基準）。
+     * 記録が1件もない場合は computeEmptyChartBounds() のルールを使う。
      *
      * @return array{min: int, max: int}
      */
     public function computeChartBounds(?float $targetWeightKg, ?float $fallbackMin = null): array
     {
-        $maxRecorded = $this->getMaxRecordedWeight() ?? $targetWeightKg ?? 60.0;
-        $minRecorded = $this->getMinRecordedWeight() ?? $fallbackMin ?? $maxRecorded;
+        $maxRecorded = $this->getMaxRecordedWeight();
+        $minRecorded = $this->getMinRecordedWeight();
+
+        if ($maxRecorded === null && $minRecorded === null) {
+            return $this->computeEmptyChartBounds($targetWeightKg);
+        }
+
+        $maxRecorded = $maxRecorded ?? $targetWeightKg ?? 60.0;
+        $minRecorded = $minRecorded ?? $fallbackMin ?? $maxRecorded;
 
         if ($targetWeightKg !== null && $minRecorded < $targetWeightKg) {
             $bottomReference = $minRecorded;
@@ -274,6 +282,33 @@ final class WeightRepository
 
         if ($chartMin < 0) {
             $chartMin = 0;
+        }
+
+        return [
+            'min' => $chartMin,
+            'max' => $chartMax,
+        ];
+    }
+
+    /**
+     * 体重記録が1件もないときのY軸範囲。
+     * 目標を下から20%の位置に置き、下2割は目標より軽く・上8割は目標より重い表示にする。
+     *
+     * @return array{min: int, max: int}
+     */
+    private function computeEmptyChartBounds(?float $targetWeightKg): array
+    {
+        $target = $targetWeightKg ?? 60.0;
+        $range = 10.0;
+        $chartMin = (int) floor($target - 0.2 * $range);
+        $chartMax = (int) ceil($target + 0.8 * $range);
+
+        if ($chartMin < 0) {
+            $chartMin = 0;
+        }
+
+        if ($chartMin >= $chartMax) {
+            $chartMax = $chartMin + 10;
         }
 
         return [
