@@ -146,9 +146,6 @@ function mapMealSectionsToState(
 export function RecordScreen() {
   const [weight, setWeight] = useState<number | null>(null);
   const [referenceWeight, setReferenceWeight] = useState<number | null>(null);
-  const [referenceRecordedOn, setReferenceRecordedOn] = useState<string | null>(
-    null,
-  );
   const [weightDiff, setWeightDiff] = useState<number | null>(null);
   const [dateLabel, setDateLabel] = useState("読み込み中...");
   const [selectedDate, setSelectedDate] = useState<string>(formatCurrentDate);
@@ -207,7 +204,6 @@ export function RecordScreen() {
         setRecordedOn(data.recordedOn);
         setWeight(data.weight.current);
         setReferenceWeight(data.weight.referenceWeight ?? null);
-        setReferenceRecordedOn(data.weight.referenceRecordedOn ?? null);
         setWeightDiff(data.weight.diffFromPreviousDay);
         setMeals(mapMealSectionsToState(data.meals));
         setSteps({
@@ -310,9 +306,6 @@ export function RecordScreen() {
       const data = await saveWeight(value, recordedOn);
       setWeight(data.weight.current);
       setReferenceWeight(data.weight.referenceWeight ?? data.weight.current);
-      setReferenceRecordedOn(
-        data.weight.referenceRecordedOn ?? data.weight.recordedOn,
-      );
       setWeightDiff(data.weight.diffFromPreviousDay);
       setWeightSparklineKey((prev) => prev + 1);
       setWeightSheetOpen(false);
@@ -385,13 +378,6 @@ export function RecordScreen() {
       setIsSaving(false);
     }
   };
-
-  const hasTodayWeight = weight !== null;
-  const referenceDateLabel = referenceRecordedOn
-    ? referenceRecordedOn === recordedOn
-      ? undefined
-      : referenceRecordedOn.replace(/^\d{4}-/, "").replace("-", "/")
-    : undefined;
 
   const netIntakeBarMax =
     dailyIntakeGoalKcal !== null
@@ -845,9 +831,8 @@ export function RecordScreen() {
 
       <WeightRegisterSheet
         open={weightSheetOpen}
-        initialValue={weight ?? referenceWeight ?? 62.4}
+        initialValue={weight ?? referenceWeight ?? 60}
         dateLabel={dateLabel}
-        referenceDateLabel={!hasTodayWeight ? referenceDateLabel : undefined}
         isSaving={isSaving}
         onClose={() => setWeightSheetOpen(false)}
         onSave={handleWeightSave}

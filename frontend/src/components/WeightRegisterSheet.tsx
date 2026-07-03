@@ -7,7 +7,6 @@ interface WeightRegisterSheetProps {
   open: boolean
   initialValue: number
   dateLabel?: string
-  referenceDateLabel?: string
   isSaving?: boolean
   onClose: () => void
   onSave: (value: number) => void | Promise<void>
@@ -21,7 +20,6 @@ export function WeightRegisterSheet({
   open,
   initialValue,
   dateLabel,
-  referenceDateLabel,
   isSaving = false,
   onClose,
   onSave,
@@ -68,11 +66,6 @@ export function WeightRegisterSheet({
         <div style={{ fontSize: 13, color: '#AAA', marginTop: 12 }}>
           {dateLabel ? `${dateLabel}の記録` : '今日の記録'}
         </div>
-        {referenceDateLabel && (
-          <div style={{ fontSize: 12, color: '#9CA3AF', marginTop: 4 }}>
-            前回記録（{referenceDateLabel}）を初期値にしています
-          </div>
-        )}
       </div>
 
       <div style={{ display: 'flex', gap: 10 }}>
