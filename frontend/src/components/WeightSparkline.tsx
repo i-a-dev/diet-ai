@@ -6,7 +6,7 @@ import {
 import { ORANGE } from "../constants.ts";
 
 const WIDTH = 110;
-const HEIGHT = 44;
+const HEIGHT = 52;
 const PADDING_X = 6;
 const PADDING_Y = 6;
 const VISIBLE_DAYS = 7;

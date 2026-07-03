@@ -545,11 +545,12 @@ export function RecordScreen() {
           <div
             style={{
               display: "flex",
-              alignItems: "flex-end",
-              justifyContent: "space-between",
+              alignItems: "center",
+              flexWrap: "nowrap",
+              width: "100%",
             }}
           >
-            <div>
+            <div style={{ flex: "0 1 auto", minWidth: 0 }}>
               <div>
                 <span style={{ fontSize: 36, fontWeight: 700, color: "#111" }}>
                   {weight === null ? "--.-" : weight.toFixed(1)}
@@ -560,10 +561,19 @@ export function RecordScreen() {
                 {formatWeightDiff(weightDiff)}
               </div>
             </div>
-            <WeightSparkline
-              selectedDate={selectedDate}
-              refreshKey={weightSparklineKey}
-            />
+            <div
+              style={{
+                flex: "0 0 auto",
+                alignSelf: "center",
+                marginLeft: "auto",
+                paddingRight: 24,
+              }}
+            >
+              <WeightSparkline
+                selectedDate={selectedDate}
+                refreshKey={weightSparklineKey}
+              />
+            </div>
           </div>
         </div>
 
