@@ -321,8 +321,12 @@ export function RecordScreen() {
   const handleMoveDate = (offset: number) => {
     const baseDate = selectedDate ?? recordedOn;
     if (!baseDate) return;
-    setSelectedDate(shiftDate(baseDate, offset));
+    const nextDate = shiftDate(baseDate, offset);
+    if (nextDate > formatCurrentDate()) return;
+    setSelectedDate(nextDate);
   };
+  const canMoveToNextDate =
+    selectedDate != null && selectedDate < formatCurrentDate();
   const exerciseTotalKcal = useMemo(
     () => exercises.reduce((sum, item) => sum + item.burnedCalories, 0),
     [exercises],
@@ -477,27 +481,31 @@ export function RecordScreen() {
         <span style={{ fontSize: 15, fontWeight: 600, color: "#111" }}>
           {dateLabel}
         </span>
-        <button
-          type="button"
-          aria-label="翌日を表示"
-          onClick={() => handleMoveDate(1)}
-          disabled={isLoading || isSaving || !selectedDate}
-          style={{
-            border: "none",
-            background: "transparent",
-            padding: 0,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            cursor:
-              isLoading || isSaving || !selectedDate
-                ? "not-allowed"
-                : "pointer",
-            opacity: isLoading || isSaving || !selectedDate ? 0.4 : 1,
-          }}
-        >
-          <ChevronRight size={22} color="#C0C0C0" />
-        </button>
+        {canMoveToNextDate ? (
+          <button
+            type="button"
+            aria-label="翌日を表示"
+            onClick={() => handleMoveDate(1)}
+            disabled={isLoading || isSaving || !selectedDate}
+            style={{
+              border: "none",
+              background: "transparent",
+              padding: 0,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              cursor:
+                isLoading || isSaving || !selectedDate
+                  ? "not-allowed"
+                  : "pointer",
+              opacity: isLoading || isSaving || !selectedDate ? 0.4 : 1,
+            }}
+          >
+            <ChevronRight size={22} color="#C0C0C0" />
+          </button>
+        ) : (
+          <div style={{ width: 22 }} aria-hidden="true" />
+        )}
       </div>
       <div
         style={{
