@@ -47,6 +47,17 @@ export function LoginScreen({ onForgotPassword }: LoginScreenProps) {
     }
   };
 
+  const switchMode = () => {
+    if (mode === "login") {
+      setPassword("");
+    } else {
+      setEmail("");
+      setPassword("");
+    }
+    setMode(mode === "login" ? "register" : "login");
+    setError(null);
+  };
+
   if (pendingEmail) {
     return (
       <VerifyEmailPendingScreen
@@ -54,7 +65,9 @@ export function LoginScreen({ onForgotPassword }: LoginScreenProps) {
         onBackToLogin={() => {
           setPendingEmail(null);
           setMode("login");
+          setEmail("");
           setPassword("");
+          setError(null);
         }}
       />
     );
@@ -72,10 +85,7 @@ export function LoginScreen({ onForgotPassword }: LoginScreenProps) {
         <>
           <button
             type="button"
-            onClick={() => {
-              setMode(mode === "login" ? "register" : "login");
-              setError(null);
-            }}
+            onClick={switchMode}
             style={authLinkButtonStyle}
           >
             {mode === "login"

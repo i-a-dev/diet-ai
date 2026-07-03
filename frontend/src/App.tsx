@@ -147,9 +147,15 @@ export default function App() {
       <PhoneMockFrame>
         <div style={phoneAppShellStyle}>
           {guestView === 'forgot-password' ? (
-            <ForgotPasswordScreen onBackToLogin={() => setGuestView('login')} />
+            <ForgotPasswordScreen
+              key="forgot-password"
+              onBackToLogin={() => setGuestView('login')}
+            />
           ) : (
-            <LoginScreen onForgotPassword={() => setGuestView('forgot-password')} />
+            <LoginScreen
+              key="login"
+              onForgotPassword={() => setGuestView('forgot-password')}
+            />
           )}
         </div>
       </PhoneMockFrame>
