@@ -65,7 +65,17 @@ TEXT;
         }
 
         if ($driver === 'resend') {
-            $this->sendViaResend($from, $to, $subject, $body);
+            try {
+                $this->sendViaResend($from, $to, $subject, $body);
+            } catch (RuntimeException $exception) {
+                if ($this->shouldFallbackToLog($exception)) {
+                    $this->logMail($from, $to, $subject, $body);
+
+                    return;
+                }
+
+                throw $exception;
+            }
 
             return;
         }
@@ -73,6 +83,26 @@ TEXT;
         throw new RuntimeException(
             sprintf('Unsupported MAIL_DRIVER "%s". Use "log" (development) or "resend" (production).', $driver)
         );
+    }
+
+    private function shouldFallbackToLog(RuntimeException $exception): bool
+    {
+        if (!$this->isLocalDevelopment()) {
+            return false;
+        }
+
+        $message = $exception->getMessage();
+
+        // Resend の無料プランでは登録メール宛（onboarding@resend.dev）のみ送信可
+        return str_contains($message, 'Resend API error (403)')
+            || str_contains($message, 'testing emails');
+    }
+
+    private function isLocalDevelopment(): bool
+    {
+        $frontendUrl = strtolower(trim((string) (getenv('FRONTEND_URL') ?: 'http://localhost:5173')));
+
+        return str_contains($frontendUrl, 'localhost') || str_contains($frontendUrl, '127.0.0.1');
     }
 
     private function logMail(string $from, string $to, string $subject, string $body): void

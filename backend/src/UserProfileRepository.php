@@ -99,6 +99,8 @@ final class UserProfileRepository
         $merged = $this->mergeFields($current, $fields);
         $this->validate($merged);
 
+        $now = (new DateTimeImmutable('now', new DateTimeZone('Asia/Tokyo')))->format('Y-m-d H:i:s');
+
         $statement = $this->db->prepare(
             'INSERT INTO user_profile (
                 user_id, gender, birth_date, height_cm, current_weight_kg, target_weight_kg,
@@ -108,22 +110,22 @@ final class UserProfileRepository
              VALUES (
                 :user_id, :gender, :birth_date, :height_cm, :current_weight_kg, :target_weight_kg,
                 :activity_level, :target_pace_kg_per_month, :diet_goal, :desired_diet_method,
-                :allergies_dislikes, :past_diet_experience, :coach_notes, datetime(\'now\')
+                :allergies_dislikes, :past_diet_experience, :coach_notes, :updated_at
              )
-             ON CONFLICT(user_id) DO UPDATE SET
-                 gender = excluded.gender,
-                 birth_date = excluded.birth_date,
-                 height_cm = excluded.height_cm,
-                 current_weight_kg = excluded.current_weight_kg,
-                 target_weight_kg = excluded.target_weight_kg,
-                 activity_level = excluded.activity_level,
-                 target_pace_kg_per_month = excluded.target_pace_kg_per_month,
-                 diet_goal = excluded.diet_goal,
-                 desired_diet_method = excluded.desired_diet_method,
-                 allergies_dislikes = excluded.allergies_dislikes,
-                 past_diet_experience = excluded.past_diet_experience,
-                 coach_notes = excluded.coach_notes,
-                 updated_at = datetime(\'now\')'
+             ON DUPLICATE KEY UPDATE
+                 gender = VALUES(gender),
+                 birth_date = VALUES(birth_date),
+                 height_cm = VALUES(height_cm),
+                 current_weight_kg = VALUES(current_weight_kg),
+                 target_weight_kg = VALUES(target_weight_kg),
+                 activity_level = VALUES(activity_level),
+                 target_pace_kg_per_month = VALUES(target_pace_kg_per_month),
+                 diet_goal = VALUES(diet_goal),
+                 desired_diet_method = VALUES(desired_diet_method),
+                 allergies_dislikes = VALUES(allergies_dislikes),
+                 past_diet_experience = VALUES(past_diet_experience),
+                 coach_notes = VALUES(coach_notes),
+                 updated_at = VALUES(updated_at)'
         );
         $statement->execute([
             'user_id' => $this->userId,
@@ -139,6 +141,7 @@ final class UserProfileRepository
             'allergies_dislikes' => $merged['allergiesDislikes'],
             'past_diet_experience' => $merged['pastDietExperience'],
             'coach_notes' => $merged['coachNotes'],
+            'updated_at' => $now,
         ]);
 
         return $this->get();

@@ -27,9 +27,38 @@ services:
       - ./backend:/var/www/html
       - ./backend/data:/var/www/html/data
     environment:
-      - DATABASE_PATH=/var/www/html/data/diet.db
+      - DB_HOST=mysql
+      - DB_PORT=3306
+      - DB_DATABASE=${DB_DATABASE:-diet_ai}
+      - DB_USERNAME=${DB_USERNAME:-diet_ai}
+      - DB_PASSWORD=${DB_PASSWORD:-diet_ai}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - MAIL_DRIVER=${MAIL_DRIVER:-log}
       - MAIL_FROM=${MAIL_FROM:-noreply@diet-ai.local}
       - FRONTEND_URL=${FRONTEND_URL:-http://localhost:5173}
       - RESEND_API_KEY=${RESEND_API_KEY:-}
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  mysql:
+    image: mysql:8.4
+    container_name: diet-ai-mysql
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
+      MYSQL_DATABASE: ${DB_DATABASE:-diet_ai}
+      MYSQL_USER: ${DB_USERNAME:-diet_ai}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-diet_ai}
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u root -p$$MYSQL_ROOT_PASSWORD || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+volumes:
+  mysql_data:

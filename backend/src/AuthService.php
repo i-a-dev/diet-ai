@@ -464,7 +464,7 @@ final class AuthService
     private function ensureProfileRow(int $userId): void
     {
         $this->db->prepare(
-            'INSERT OR IGNORE INTO user_profile (user_id, updated_at) VALUES (:user_id, :updated_at)'
+            'INSERT IGNORE INTO user_profile (user_id, updated_at) VALUES (:user_id, :updated_at)'
         )->execute([
             'user_id' => $userId,
             'updated_at' => $this->now(),

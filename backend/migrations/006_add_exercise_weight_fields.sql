@@ -1,2 +1,2 @@
-ALTER TABLE exercise_entries ADD COLUMN weight_kg REAL NOT NULL DEFAULT 60.0;
-ALTER TABLE exercise_entries ADD COLUMN weight_source TEXT NOT NULL DEFAULT 'default';
+ALTER TABLE exercise_entries ADD COLUMN weight_kg DECIMAL(5,1) NOT NULL DEFAULT 60.0;
+ALTER TABLE exercise_entries ADD COLUMN weight_source VARCHAR(50) NOT NULL DEFAULT 'default';

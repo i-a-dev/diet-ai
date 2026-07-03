@@ -15,7 +15,7 @@ final class WeightRepository
 
     /**
      * DB 接続を用意する。
-     * $db を渡さない場合は Database::connection() で SQLite に接続する。
+     * $db を渡さない場合は Database::connection() で MySQL に接続する。
      */
     public function __construct(int $userId, ?PDO $db = null)
     {
@@ -90,9 +90,9 @@ final class WeightRepository
         $this->db->prepare(
             'INSERT INTO weight_entries (user_id, recorded_on, weight_kg, created_at, updated_at)
              VALUES (:user_id, :recorded_on, :weight_kg, :created_at, :updated_at)
-             ON CONFLICT(user_id, recorded_on) DO UPDATE SET
-               weight_kg = excluded.weight_kg,
-               updated_at = excluded.updated_at'
+             ON DUPLICATE KEY UPDATE
+               weight_kg = VALUES(weight_kg),
+               updated_at = VALUES(updated_at)'
         )->execute([
             'user_id' => $this->userId,
             'recorded_on' => $date,

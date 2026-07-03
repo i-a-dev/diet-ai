@@ -144,10 +144,12 @@ final class ChatMessageRepository
         $deleteStatement = $this->db->prepare(
             'DELETE FROM chat_messages
              WHERE id IN (
-               SELECT id FROM chat_messages
-               WHERE user_id = :user_id
-               ORDER BY id ASC
-               LIMIT :limit
+               SELECT id FROM (
+                 SELECT id FROM chat_messages
+                 WHERE user_id = :user_id
+                 ORDER BY id ASC
+                 LIMIT :limit
+               ) AS overflow_rows
              )'
         );
         $deleteStatement->bindValue(':user_id', $this->userId, PDO::PARAM_INT);

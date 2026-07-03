@@ -1,7 +1,7 @@
 FROM php:8.3-cli-alpine
 
-RUN apk add --no-cache sqlite-dev curl-dev \
-    && docker-php-ext-install pdo_sqlite curl
+RUN apk add --no-cache curl-dev \
+    && docker-php-ext-install pdo_mysql curl
 
 WORKDIR /var/www/html
 

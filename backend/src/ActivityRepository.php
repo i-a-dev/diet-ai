@@ -58,10 +58,10 @@ final class ActivityRepository
         $statement = $this->db->prepare(
             'INSERT INTO step_entries (user_id, recorded_on, step_count, burned_calories_kcal, created_at, updated_at)
              VALUES (:user_id, :recorded_on, :step_count, :burned_calories_kcal, :created_at, :updated_at)
-             ON CONFLICT(user_id, recorded_on) DO UPDATE SET
-               step_count = excluded.step_count,
-               burned_calories_kcal = excluded.burned_calories_kcal,
-               updated_at = excluded.updated_at'
+             ON DUPLICATE KEY UPDATE
+               step_count = VALUES(step_count),
+               burned_calories_kcal = VALUES(burned_calories_kcal),
+               updated_at = VALUES(updated_at)'
         );
         $statement->execute([
             'user_id' => $this->userId,

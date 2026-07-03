@@ -3,7 +3,7 @@
 declare(strict_types=1);
 
 /**
- * SQLite データベースへの接続と初期化を担当するクラス。
+ * MySQL データベースへの接続と初期化を担当するクラス。
  * 初回接続時にマイグレーション（テーブル作成）とサンプルデータ投入を行う。
  */
 final class Database
@@ -12,7 +12,7 @@ final class Database
     private static ?PDO $pdo = null;
 
     /**
-     * SQLite への PDO 接続を返す。
+     * MySQL への PDO 接続を返す。
      * 初回のみマイグレーションとシードを実行する。
      */
     public static function connection(): PDO
@@ -21,16 +21,40 @@ final class Database
             return self::$pdo;
         }
 
-        $path = getenv('DATABASE_PATH') ?: dirname(__DIR__) . '/data/diet.db';
-        $directory = dirname($path);
+        $host = getenv('DB_HOST') ?: '127.0.0.1';
+        $port = getenv('DB_PORT') ?: '3306';
+        $database = getenv('DB_DATABASE') ?: 'diet_ai';
+        $username = getenv('DB_USERNAME') ?: 'diet_ai';
+        $password = getenv('DB_PASSWORD') ?: 'diet_ai';
 
-        if (!is_dir($directory) && !mkdir($directory, 0755, true) && !is_dir($directory)) {
-            throw new RuntimeException('Failed to create database directory.');
+        $dsn = sprintf(
+            'mysql:host=%s;port=%s;dbname=%s;charset=utf8mb4',
+            $host,
+            $port,
+            $database
+        );
+
+        $options = [
+            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+            PDO::ATTR_EMULATE_PREPARES => false,
+        ];
+
+        for ($attempt = 1; $attempt <= 15; $attempt++) {
+            try {
+                self::$pdo = new PDO($dsn, $username, $password, $options);
+                break;
+            } catch (PDOException $exception) {
+                if ($attempt === 15) {
+                    throw $exception;
+                }
+                sleep(2);
+            }
         }
 
-        self::$pdo = new PDO('sqlite:' . $path);
-        self::$pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-        self::$pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
+        if (!self::$pdo instanceof PDO) {
+            throw new RuntimeException('Failed to connect to MySQL.');
+        }
 
         self::migrate();
         self::seedIfEmpty();
@@ -51,17 +75,17 @@ final class Database
 
         sort($migrationPaths, SORT_STRING);
 
-        self::$pdo->exec(
+        self::execSql(
             'CREATE TABLE IF NOT EXISTS schema_migrations (
-                version TEXT PRIMARY KEY,
-                applied_at TEXT NOT NULL DEFAULT (datetime(\'now\'))
-            )'
+                version VARCHAR(255) PRIMARY KEY,
+                applied_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
         );
 
         $appliedRows = self::$pdo->query('SELECT version FROM schema_migrations');
         $appliedVersions = [];
         if ($appliedRows !== false) {
-            foreach ($appliedRows->fetchAll() as $row) {
+            foreach ($appliedRows as $row) {
                 $appliedVersions[(string) $row['version']] = true;
             }
         }
@@ -78,9 +102,8 @@ final class Database
                 throw new RuntimeException(sprintf('Migration file not found: %s', $migrationPath));
             }
 
-            self::$pdo->beginTransaction();
             try {
-                self::$pdo->exec($sql);
+                self::execSql($sql);
                 $statement = self::$pdo->prepare(
                     'INSERT INTO schema_migrations (version, applied_at) VALUES (:version, :applied_at)'
                 );
@@ -89,14 +112,41 @@ final class Database
                     'applied_at' => (new DateTimeImmutable('now', new DateTimeZone('Asia/Tokyo')))
                         ->format('Y-m-d H:i:s'),
                 ]);
-                self::$pdo->commit();
             } catch (Throwable $exception) {
-                if (self::$pdo->inTransaction()) {
-                    self::$pdo->rollBack();
-                }
                 throw $exception;
             }
         }
+    }
+
+    /**
+     * @param non-empty-string $sql
+     */
+    private static function execSql(string $sql): void
+    {
+        foreach (self::splitSqlStatements($sql) as $statement) {
+            self::$pdo->exec($statement);
+        }
+    }
+
+    /**
+     * @return list<string>
+     */
+    private static function splitSqlStatements(string $sql): array
+    {
+        $withoutComments = preg_replace('/--.*$/m', '', $sql);
+        if (!is_string($withoutComments)) {
+            throw new RuntimeException('Failed to parse migration SQL.');
+        }
+
+        $statements = [];
+        foreach (explode(';', $withoutComments) as $part) {
+            $trimmed = trim($part);
+            if ($trimmed !== '') {
+                $statements[] = $trimmed;
+            }
+        }
+
+        return $statements;
     }
 
     /**
@@ -115,15 +165,15 @@ final class Database
 
     private static function hasSeedCompleted(): bool
     {
-        self::$pdo->exec(
+        self::execSql(
             'CREATE TABLE IF NOT EXISTS app_metadata (
-                key TEXT PRIMARY KEY,
+                `key` VARCHAR(255) PRIMARY KEY,
                 value TEXT NOT NULL
-            )'
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
         );
 
         $statement = self::$pdo->prepare(
-            'SELECT value FROM app_metadata WHERE key = :key LIMIT 1'
+            'SELECT value FROM app_metadata WHERE `key` = :key LIMIT 1'
         );
         $statement->execute(['key' => 'seed_completed']);
         $row = $statement->fetch();
@@ -134,9 +184,9 @@ final class Database
     private static function markSeedCompleted(): void
     {
         $statement = self::$pdo->prepare(
-            'INSERT INTO app_metadata (key, value)
+            'INSERT INTO app_metadata (`key`, value)
              VALUES (:key, :value)
-             ON CONFLICT(key) DO UPDATE SET value = excluded.value'
+             ON DUPLICATE KEY UPDATE value = VALUES(value)'
         );
         $statement->execute([
             'key' => 'seed_completed',
