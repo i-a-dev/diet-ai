@@ -647,6 +647,8 @@ if ($requestMethod === 'POST' && $requestPath === '/api/foods') {
     $source = trim((string) ($body['source'] ?? 'ai_web_search'));
     $rawInput = trim((string) ($body['rawInput'] ?? ''));
     $rawInputOrNull = $rawInput === '' ? null : $rawInput;
+    $sourceUrl = trim((string) ($body['sourceUrl'] ?? ''));
+    $sourceUrlOrNull = $sourceUrl === '' ? null : $sourceUrl;
 
     if (!is_numeric($amount)) {
         json_response(['message' => 'amount is required'], 422);
@@ -664,6 +666,7 @@ if ($requestMethod === 'POST' && $requestPath === '/api/foods') {
             (int) round((float) $calories),
             $source,
             $rawInputOrNull,
+            $sourceUrlOrNull,
         );
     } catch (InvalidArgumentException $exception) {
         json_response(['message' => $exception->getMessage()], 422);

@@ -11,8 +11,11 @@ final class CalorieEstimateService
 {
     private const API_URL = 'https://api.anthropic.com/v1/messages';
     private const MODEL = 'claude-haiku-4-5-20251001';
-    private const SYSTEM_PROMPT = 'あなたは日本の食品・料理全般に詳しいカロリー推定の専門家です。食べ物・飲み物として一般的に人が摂取するものだけを対象にしてください。食品でないものは推定せず、{"error":"not_food"} のみ返答してください。食品の場合はJSONのみ返答し、前置きや説明は不要です。';
-    private const WEB_SEARCH_SYSTEM_PROMPT = 'あなたは日本の食品・料理全般に詳しいカロリー推定の専門家です。食べ物・飲み物として一般的に人が摂取するものだけを対象にしてください。食品でないものは {"error":"not_food"} のみ返答してください。食品の場合は web_search で公式の栄養成分・カロリー情報を確認してから回答してください。ページにカロリー（kcal）の表示がある場合はその数値をそのまま使い、たんぱく質・脂質・糖質から再計算しないでください。検索結果は要点のみ抽出し、カロリーと重量の数値だけを使ってください。検索結果の文章をそのまま処理しないでください。最終回答はJSONのみ。前置きや説明は不要です。';
+    private const SYSTEM_PROMPT = 'あなたは日本の食品・料理全般に詳しいカロリー推定の専門家です。口に入れて摂取するもの（料理・飲み物・お菓子・ゼリー・サプリ・機能性食品・市販品）は食品として扱ってください。明らかに食べないもの（洗剤・化粧品・金属など）だけ {"error":"not_food"} を返してください。商品名が不明確でも食べ物の可能性がある場合は not_food にせず推定してください。食品の場合はJSONのみ返答し、前置きや説明は不要です。';
+    private const WEB_SEARCH_SYSTEM_PROMPT = 'あなたは日本の食品・料理全般に詳しいカロリー推定の専門家です。口に入れて摂取するもの（料理・飲み物・お菓子・ゼリー・サプリ・機能性食品・市販品）は食品として扱ってください。明らかに食べないものだけ {"error":"not_food"} を返してください。商品名が不明確でも食べ物の可能性がある場合は not_food にせず推定してください。食品の場合は web_search で栄養成分表・エネルギー表示のあるページを優先して確認してから回答してください。販促文の「約○○kcal」だけのページより、「栄養成分表示」「エネルギー ○○kcal」とたんぱく質・脂質・炭水化物が併記されたページを優先してください。ページにカロリー（kcal）の表示がある場合はその数値をそのまま使い、たんぱく質・脂質・糖質から再計算しないでください。最終回答はJSONのみ。前置きや説明は不要です。';
+    private const WEB_SEARCH_MAX_TOKENS = 1024;
+    private const MAX_WEB_SEARCH_URL_FETCHES = 5;
+    private const MIN_URL_FETCH_SCORE = 0;
 
     /**
      * 食品名からカロリーを推定する（公開 API）。
@@ -21,7 +24,7 @@ final class CalorieEstimateService
      * - no_web: Web 検索を使わず 1 回のみ推定
      * - web: Web 検索付きで推定
      *
-     * @return array{kcal: int, assumed_weight_g?: int, confidence: string, product_name?: string}
+     * @return array{kcal: int, assumed_weight_g?: int, confidence: string, product_name?: string, source_url?: string}
      */
     public function estimate(string $foodName, string $mode = 'auto'): array
     {
@@ -74,13 +77,13 @@ final class CalorieEstimateService
     /**
      * Claude API を1回呼び出し、推定結果を返す。
      *
-     * @return array{kcal: int, assumed_weight_g?: int, confidence: string, product_name?: string}|'not_food'|null
+     * @return array{kcal: int, assumed_weight_g?: int, confidence: string, product_name?: string, source_url?: string}|'not_food'|null
      */
     private function requestEstimate(string $foodName, string $apiKey, bool $withWebSearch): array|string|null
     {
         $payload = [
             'model' => self::MODEL,
-            'max_tokens' => $withWebSearch ? 512 : 128,
+            'max_tokens' => $withWebSearch ? self::WEB_SEARCH_MAX_TOKENS : 128,
             'system' => $withWebSearch ? self::WEB_SEARCH_SYSTEM_PROMPT : self::SYSTEM_PROMPT,
             'messages' => [
                 [
@@ -109,39 +112,113 @@ final class CalorieEstimateService
         $text = $this->extractText($decoded);
         $parsed = $this->parseResponse($text);
 
-        if ($withWebSearch && is_array($parsed)) {
-            $parsed = $this->applyLabeledKcalFromOfficialSources($decoded, $parsed);
+        if ($withWebSearch) {
+            $htmlResult = $this->extractLabeledKcalFromWebSearchUrls($decoded);
+            $sourceUrl = $htmlResult['url'] ?? $this->pickPrimaryWebSearchUrl($decoded);
+
+            if ($htmlResult !== null) {
+                if (is_array($parsed)) {
+                    $parsed['kcal'] = $htmlResult['kcal'];
+                    $parsed['confidence'] = 'high';
+                } else {
+                    $parsed = [
+                        'kcal' => $htmlResult['kcal'],
+                        'confidence' => 'high',
+                    ];
+                }
+            }
+
+            if (is_array($parsed) && $sourceUrl !== null) {
+                $parsed['source_url'] = $sourceUrl;
+            }
         }
 
         return $parsed;
     }
 
     /**
-     * Web検索結果の公式ページから表示カロリーを取得し、AIの推定値を上書きする。
+     * Claude の Web 検索結果 URL を順に取得し、HTML から表示カロリーを抽出する。
      *
      * @param array<string, mixed> $response
-     * @param array{kcal: int, assumed_weight_g?: int, confidence: string, product_name?: string} $estimate
-     * @return array{kcal: int, assumed_weight_g?: int, confidence: string, product_name?: string}
+     * @return array{kcal: int, url: string}|null
      */
-    private function applyLabeledKcalFromOfficialSources(array $response, array $estimate): array
+    private function extractLabeledKcalFromWebSearchUrls(array $response): ?array
     {
+        $attempts = 0;
+        $bestResult = null;
+
         foreach ($this->extractRankedWebSearchUrls($response) as $url) {
-            if ($this->scoreOfficialUrl($url) < 100) {
+            if ($this->scoreWebSearchUrl($url) < self::MIN_URL_FETCH_SCORE) {
                 continue;
             }
 
-            $labeledKcal = $this->fetchLabeledKcalFromOfficialPage($url);
-            if ($labeledKcal === null) {
+            if (!$this->isSafePublicUrl($url)) {
                 continue;
             }
 
-            $estimate['kcal'] = $labeledKcal;
-            $estimate['confidence'] = 'high';
+            if ($attempts >= self::MAX_WEB_SEARCH_URL_FETCHES) {
+                break;
+            }
 
-            return $estimate;
+            $attempts++;
+            $html = $this->fetchPublicHtml($url);
+            if ($html === null) {
+                continue;
+            }
+
+            $pageBest = $this->extractBestLabeledKcalFromHtml($html);
+            if ($pageBest === null) {
+                continue;
+            }
+
+            $candidate = [
+                'kcal' => $pageBest['kcal'],
+                'url' => $url,
+                'score' => $pageBest['score'],
+                'hasDecimal' => $pageBest['hasDecimal'],
+            ];
+
+            if (
+                $bestResult === null
+                || $candidate['score'] > $bestResult['score']
+                || (
+                    $candidate['score'] === $bestResult['score']
+                    && $candidate['hasDecimal']
+                    && !$bestResult['hasDecimal']
+                )
+            ) {
+                $bestResult = $candidate;
+            }
         }
 
-        return $estimate;
+        if ($bestResult === null) {
+            return null;
+        }
+
+        return [
+            'kcal' => $bestResult['kcal'],
+            'url' => $bestResult['url'],
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $response
+     */
+    private function pickPrimaryWebSearchUrl(array $response): ?string
+    {
+        foreach ($this->extractRankedWebSearchUrls($response) as $url) {
+            if ($this->scoreWebSearchUrl($url) < self::MIN_URL_FETCH_SCORE) {
+                continue;
+            }
+
+            if (!$this->isSafePublicUrl($url)) {
+                continue;
+            }
+
+            return $url;
+        }
+
+        return null;
     }
 
     /**
@@ -170,26 +247,36 @@ final class CalorieEstimateService
         }
 
         $urls = array_values(array_unique($urls));
-        usort($urls, fn (string $a, string $b): int => $this->scoreOfficialUrl($b) <=> $this->scoreOfficialUrl($a));
+        usort($urls, fn (string $a, string $b): int => $this->scoreWebSearchUrl($b) <=> $this->scoreWebSearchUrl($a));
 
         return $urls;
     }
 
-    private function scoreOfficialUrl(string $url): int
+    /**
+     * Web 検索 URL の取得優先度。ホワイトリストではなくページ種別のヒューリスティックのみ。
+     */
+    private function scoreWebSearchUrl(string $url): int
     {
         $host = strtolower((string) parse_url($url, PHP_URL_HOST));
         $path = (string) parse_url($url, PHP_URL_PATH);
-        $score = 0;
-
-        if ($host === 'nosh.jp' || str_ends_with($host, '.nosh.jp')) {
-            $score += 100;
-        }
+        $score = 50;
 
         if (str_contains($path, '/menu/detail/')) {
             $score += 50;
-            if (preg_match('#/menu/detail/(\d+)#', $path, $matches) === 1) {
-                $score += (int) $matches[1];
-            }
+        }
+
+        if (
+            str_contains($path, '/products/')
+            || str_contains($path, '/goods/')
+            || str_contains($path, '/store/g/')
+            || str_contains($path, '/Goods/Goods.aspx')
+            || str_contains($path, '/item/')
+        ) {
+            $score += 30;
+        }
+
+        if (str_contains($host, 'search.') || str_contains($path, '/search/')) {
+            $score -= 60;
         }
 
         if (str_contains($path, '/review/') || str_contains($host, 'prtimes.jp')) {
@@ -203,19 +290,130 @@ final class CalorieEstimateService
         return $score;
     }
 
-    private function fetchLabeledKcalFromOfficialPage(string $url): ?int
+    /**
+     * HTML から最も信頼できるカロリー表記を1件抽出する。
+     * 栄養成分表示・エネルギーを「約」より優先し、小数表記を加点する。
+     *
+     * @return array{kcal: int, score: int, hasDecimal: bool}|null
+     */
+    private function extractBestLabeledKcalFromHtml(string $html): ?array
     {
-        $html = $this->fetchPublicHtml($url);
-        if ($html === null) {
-            return null;
+        $patternDefs = [
+            ['priority' => 100, 'pattern' => '/栄養成分表示[^0-9]{0,80}(\d{1,4}(?:\.\d+)?)\s*kcal/isu'],
+            ['priority' => 90, 'pattern' => '/エネルギー[^0-9]{0,40}(\d{1,4}(?:\.\d+)?)\s*kcal/isu'],
+            ['priority' => 80, 'pattern' => '/カロリー[^0-9]{0,40}(\d{1,4}(?:\.\d+)?)\s*kcal/isu'],
+            ['priority' => 70, 'pattern' => '/"calories?"\s*:\s*(\d{1,4}(?:\.\d+)?)/i'],
+        ];
+
+        $best = null;
+
+        foreach ($patternDefs as $def) {
+            if (preg_match($def['pattern'], $html, $matches) !== 1) {
+                continue;
+            }
+
+            $rawValue = (string) $matches[1];
+            $kcal = (int) round((float) $rawValue);
+            if ($kcal < 10 || $kcal > 5000) {
+                continue;
+            }
+
+            $hasDecimal = str_contains($rawValue, '.');
+            $score = $def['priority'] + ($hasDecimal ? 10 : 0);
+            $candidate = [
+                'kcal' => $kcal,
+                'score' => $score,
+                'hasDecimal' => $hasDecimal,
+            ];
+
+            if (
+                $best === null
+                || $candidate['score'] > $best['score']
+                || (
+                    $candidate['score'] === $best['score']
+                    && $candidate['hasDecimal']
+                    && !$best['hasDecimal']
+                )
+            ) {
+                $best = $candidate;
+            }
         }
 
-        return $this->extractLabeledKcalFromHtml($html);
+        return $best;
+    }
+
+    private function isSafePublicUrl(string $url): bool
+    {
+        $parts = parse_url($url);
+
+        if (!is_array($parts)) {
+            return false;
+        }
+
+        $scheme = strtolower((string) ($parts['scheme'] ?? ''));
+
+        if (!in_array($scheme, ['http', 'https'], true)) {
+            return false;
+        }
+
+        $host = strtolower((string) ($parts['host'] ?? ''));
+
+        if ($host === '' || $host === 'localhost') {
+            return false;
+        }
+
+        $ips = [];
+
+        if (filter_var($host, FILTER_VALIDATE_IP)) {
+            $ips[] = $host;
+        } else {
+            $resolved = gethostbynamel($host);
+
+            if ($resolved === false || $resolved === []) {
+                return false;
+            }
+
+            $ips = $resolved;
+        }
+
+        foreach ($ips as $ip) {
+            if (!$this->isPublicIp($ip)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private function isPublicIp(string $ip): bool
+    {
+        if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+            return filter_var(
+                $ip,
+                FILTER_VALIDATE_IP,
+                FILTER_FLAG_IPV4 | FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE,
+            ) !== false;
+        }
+
+        if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) {
+            $normalized = strtolower($ip);
+
+            return $normalized !== '::1'
+                && !str_starts_with($normalized, 'fe80:')
+                && !str_starts_with($normalized, 'fc')
+                && !str_starts_with($normalized, 'fd');
+        }
+
+        return false;
     }
 
     private function fetchPublicHtml(string $url): ?string
     {
         if (!function_exists('curl_init')) {
+            return null;
+        }
+
+        if (!$this->isSafePublicUrl($url)) {
             return null;
         }
 
@@ -245,44 +443,34 @@ final class CalorieEstimateService
         return is_string($body) ? $body : null;
     }
 
-    private function extractLabeledKcalFromHtml(string $html): ?int
-    {
-        $patterns = [
-            '/カロリー.*?(\d{2,4})\s*kcal/is',
-            '/エネルギー.*?(\d{2,4})\s*kcal/is',
-            '/"calories?"\s*:\s*(\d{2,4})/i',
-        ];
-
-        foreach ($patterns as $pattern) {
-            if (preg_match($pattern, $html, $matches) === 1) {
-                $kcal = (int) $matches[1];
-                if ($kcal >= 20 && $kcal <= 5000) {
-                    return $kcal;
-                }
-            }
-        }
-
-        return null;
-    }
-
     /**
      * Claude に送るユーザープロンプトを組み立てる。
      * $withWebSearch が true のときは Web 検索の指示を含める。
      */
     private function buildPrompt(string $foodName, bool $withWebSearch): string
     {
+        $searchQueryHint = $this->buildNutritionSearchQueryHint($foodName);
+
         $webSearchSection = $withWebSearch
-            ? <<<'TEXT'
+            ? <<<TEXT
 
 【Web検索】
-- 必ずweb_searchで食品名・商品名の公式カロリー・栄養成分を検索してから回答する
-- 日本食品標準成分表、メーカー公式サイト、コンビニ・外食チェーンの公式栄養情報を優先する
-- ページにカロリー（kcal）の表示がある場合は、その数値をそのまま kcal に使う
+- 必ずweb_searchで検索してから回答する
+- 検索クエリは次の形式を使う: 「{$searchQueryHint}」
+- 量の表記（1本、1個、250g など）は検索クエリから除き、商品名の核心だけを使う
+- 次のページを優先する（栄養成分表・エネルギー表示があるもの）:
+  - 「栄養成分表示」「エネルギー ○○kcal」とたんぱく質・脂質・炭水化物が併記されたページ
+  - メーカー公式、日本食品標準成分表、コンビニ・外食チェーンの公式栄養情報
+  - 韓国食品・輸入食品 EC で成分表が載っている商品詳細ページ
+- 次のページはカロリー根拠にしない（参考程度）:
+  - 販促文の「約○○kcal」だけで栄養成分表がない化粧品 EC・ブランドショップの商品紹介ページ
+  - レビューサイト、ブログ、まとめ記事
+- 複数ページがある場合は、栄養成分表のあるページの数値を優先する
+- ページにエネルギー（kcal）の表示がある場合は、その数値をそのまま kcal に使う
 - たんぱく質・脂質・糖質などからカロリーを再計算しない
 - 検索で公式のカロリーが見つかった場合はその値を使い、confidenceはhighにする
 - 検索で商品名まで特定できた場合は、正式な商品名を product_name に入れる
 - 公式ページにグラム(g)表記の重量がある場合のみ assumed_weight_g にその数値を入れる
-- 公式ページが「1食あたり」「1個あたり」などカロリーのみで重量(g)が無い場合は assumed_weight_g を省略する
 - 検索しても特定できない場合のみ、下記の推定ルールを使う
 TEXT
             : '';
@@ -309,11 +497,11 @@ TEXT;
 以下の入力が食品（食べ物・飲み物）かどうかをまず判定し、食品の場合のみカロリーを推定してください。
 量の表記がなければ一般的な1食分を仮定してください。
 
-【非食品の判定】
-- 人が通常の食事として食べないものは食品ではない
-- 例: 髪の毛、紙、石、金属、木、プラスチック、洗剤、薬、化粧品、ペットフード、肥料、毒物など
-- 食品名に見えても、実際に食べないものは非食品とする
-- 食品かどうか判断できない・曖昧な場合も非食品として扱う
+【食品の判定】
+- 口に入れて摂取するものは食品として扱う（料理・飲み物・お菓子・ゼリー・サプリ・機能性食品・市販品を含む）
+- ダイエットゼリーやサプリメントも、食べる・飲むものであれば食品としてカロリーを推定する
+- 商品名が不明確・存在が確認できない場合でも、食べ物の可能性があるなら not_food にせず confidence: low で推定する
+- not_food にするのは明らかに食べないもののみ（例: 髪の毛、紙、石、金属、洗剤、化粧品、ペットフード、肥料、毒物など）
 - 非食品の場合はカロリーを推定せず、次のJSONのみ返す: {"error":"not_food"}
 - 非食品の場合は説明文を付けない
 {$webSearchSection}
@@ -356,6 +544,24 @@ TEXT;
 
 食品名: {$foodName}
 PROMPT;
+    }
+
+    /**
+     * Web 検索用クエリのヒント文字列を組み立てる。
+     */
+    private function buildNutritionSearchQueryHint(string $foodName): string
+    {
+        $coreName = trim((string) preg_replace(
+            '/\s*\d+(?:\.\d+)?\s*(g|ml|個|杯|切れ|袋|本)\s*$/iu',
+            '',
+            trim($foodName),
+        ));
+
+        if ($coreName === '') {
+            $coreName = trim($foodName);
+        }
+
+        return $coreName . ' 栄養成分 エネルギー kcal';
     }
 
     /**
@@ -456,7 +662,7 @@ PROMPT;
      * Claude のテキスト応答を解析する。
      * 非食品は 'not_food'、食品推定成功は配列、パース失敗は null を返す。
      *
-     * @return array{kcal: int, assumed_weight_g?: int, confidence: string, product_name?: string}|'not_food'|null
+     * @return array{kcal: int, assumed_weight_g?: int, confidence: string, product_name?: string, source_url?: string}|'not_food'|null
      */
     private function parseResponse(string $text): array|string|null
     {
@@ -522,7 +728,7 @@ PROMPT;
      * kcal・assumed_weight_g・confidence のバリデーションと型変換を行う。
      *
      * @param array<string, mixed> $json
-     * @return array{kcal: int, assumed_weight_g?: int, confidence: string, product_name?: string}|null
+     * @return array{kcal: int, assumed_weight_g?: int, confidence: string, product_name?: string, source_url?: string}|null
      */
     private function normalizeEstimate(array $json): ?array
     {

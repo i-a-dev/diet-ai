@@ -216,6 +216,7 @@ function resultFromEstimate(
     assumed_weight_g?: number;
     confidence: SearchConfidence;
     product_name?: string;
+    source_url?: string;
   },
 ): FoodSearchResult {
   const productName = estimate.product_name?.trim();
@@ -223,6 +224,7 @@ function resultFromEstimate(
   const assumedWeightG = estimate.assumed_weight_g;
   const hasWeight = assumedWeightG != null && assumedWeightG > 0;
   const isAiWebSearch = source === "ai_web_search";
+  const sourceUrl = estimate.source_url?.trim() || null;
 
   return {
     id: `${source}-${Date.now()}`,
@@ -238,6 +240,7 @@ function resultFromEstimate(
     confidence: estimate.confidence,
     isEstimated: !isAiWebSearch,
     rawInput: input,
+    sourceUrl,
   };
 }
 
@@ -256,6 +259,7 @@ function resultFromUserFood(food: UserFoodSummary, rawInput: string): FoodSearch
     confidence: "high",
     isEstimated: food.source === "ai_web_search" || food.source === "claude_estimate",
     rawInput,
+    sourceUrl: food.sourceUrl,
   };
 }
 

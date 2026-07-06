@@ -23,6 +23,11 @@ export function FoodSearchResultCard({ result, onAdd }: FoodSearchResultCardProp
       {sourceLabel && <div style={sourceStyle}>{sourceLabel}</div>}
       <div style={nameStyle}>{result.displayName}</div>
       <div style={calorieStyle}>{result.calories} kcal</div>
+      {result.source === "ai_web_search" && result.sourceUrl && (
+        <a href={result.sourceUrl} target="_blank" rel="noreferrer noopener" style={sourceLinkStyle}>
+          参照元を見る
+        </a>
+      )}
       <button type="button" onClick={onAdd} style={primaryButtonStyle}>
         この内容で追加する
       </button>
@@ -63,6 +68,15 @@ const sourceStyle: CSSProperties = {
   fontSize: 12,
   color: "#047857",
   fontWeight: 600,
+};
+
+const sourceLinkStyle: CSSProperties = {
+  display: "inline-block",
+  marginTop: 8,
+  fontSize: 12,
+  color: "#047857",
+  textDecoration: "underline",
+  wordBreak: "break-all",
 };
 
 const primaryButtonStyle: CSSProperties = {

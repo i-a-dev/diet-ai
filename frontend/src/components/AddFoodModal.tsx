@@ -294,6 +294,7 @@ export function AddFoodModal({
               calories,
               source: "ai_web_search",
               rawInput: result.rawInput,
+              sourceUrl: result.sourceUrl ?? null,
             });
           } catch (saveFoodError) {
             console.warn("Failed to save user food", saveFoodError);

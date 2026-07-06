@@ -28,7 +28,8 @@ final class UserFoodRepository
      *   unit: string,
      *   calories: int,
      *   source: string,
-     *   rawInput: string|null
+     *   rawInput: string|null,
+     *   sourceUrl: string|null
      * }|null
      */
     public function searchBestMatch(string $query, int $limit = 50): ?array
@@ -58,7 +59,7 @@ final class UserFoodRepository
         }
 
         $statement = $this->db->prepare(
-            'SELECT id, display_name, name, amount, unit, calories_kcal, source, raw_input
+            'SELECT id, display_name, name, amount, unit, calories_kcal, source, raw_input, source_url
              FROM user_foods
              WHERE ' . implode(' OR ', $conditions) . '
              ORDER BY updated_at DESC
@@ -128,7 +129,8 @@ final class UserFoodRepository
      *   unit: string,
      *   calories: int,
      *   source: string,
-     *   rawInput: string|null
+     *   rawInput: string|null,
+     *   sourceUrl: string|null
      * }
      */
     public function upsert(
@@ -139,6 +141,7 @@ final class UserFoodRepository
         int $caloriesKcal,
         string $source = 'ai_web_search',
         ?string $rawInput = null,
+        ?string $sourceUrl = null,
     ): array {
         $display = trim($displayName);
         $foodName = trim($name);
@@ -159,13 +162,15 @@ final class UserFoodRepository
             throw new InvalidArgumentException('calories must be between 1 and 5000');
         }
 
+        $sourceUrlValue = $this->normalizeSourceUrl($sourceUrl);
+
         $now = (new DateTimeImmutable('now', new DateTimeZone('Asia/Tokyo')))->format('Y-m-d H:i:s');
         $statement = $this->db->prepare(
             'INSERT INTO user_foods (
-                display_name, name, amount, unit, calories_kcal, source, raw_input, created_at, updated_at
+                display_name, name, amount, unit, calories_kcal, source, raw_input, source_url, created_at, updated_at
              )
              VALUES (
-                :display_name, :name, :amount, :unit, :calories_kcal, :source, :raw_input, :created_at, :updated_at
+                :display_name, :name, :amount, :unit, :calories_kcal, :source, :raw_input, :source_url, :created_at, :updated_at
              )
              ON DUPLICATE KEY UPDATE
                 name = VALUES(name),
@@ -174,6 +179,7 @@ final class UserFoodRepository
                 calories_kcal = VALUES(calories_kcal),
                 source = VALUES(source),
                 raw_input = VALUES(raw_input),
+                source_url = VALUES(source_url),
                 updated_at = VALUES(updated_at)'
         );
         $statement->execute([
@@ -184,6 +190,7 @@ final class UserFoodRepository
             'calories_kcal' => $caloriesKcal,
             'source' => $source,
             'raw_input' => $rawInput,
+            'source_url' => $sourceUrlValue,
             'created_at' => $now,
             'updated_at' => $now,
         ]);
@@ -207,7 +214,32 @@ final class UserFoodRepository
             'calories' => $caloriesKcal,
             'source' => $source,
             'rawInput' => $rawInput,
+            'sourceUrl' => $sourceUrlValue,
         ];
+    }
+
+    private function normalizeSourceUrl(?string $sourceUrl): ?string
+    {
+        $trimmed = trim((string) $sourceUrl);
+        if ($trimmed === '') {
+            return null;
+        }
+
+        $parts = parse_url($trimmed);
+        if (!is_array($parts)) {
+            return null;
+        }
+
+        $scheme = strtolower((string) ($parts['scheme'] ?? ''));
+        if (!in_array($scheme, ['http', 'https'], true)) {
+            return null;
+        }
+
+        if (mb_strlen($trimmed) > 2048) {
+            return mb_substr($trimmed, 0, 2048);
+        }
+
+        return $trimmed;
     }
 
     /**
@@ -220,7 +252,8 @@ final class UserFoodRepository
      *   unit: string,
      *   calories: int,
      *   source: string,
-     *   rawInput: string|null
+     *   rawInput: string|null,
+     *   sourceUrl: string|null
      * }
      */
     private function mapRow(array $row): array
@@ -234,6 +267,9 @@ final class UserFoodRepository
             'calories' => (int) $row['calories_kcal'],
             'source' => (string) $row['source'],
             'rawInput' => $row['raw_input'] === null ? null : (string) $row['raw_input'],
+            'sourceUrl' => isset($row['source_url']) && $row['source_url'] !== null
+                ? (string) $row['source_url']
+                : null,
         ];
     }
 

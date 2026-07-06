@@ -248,6 +248,7 @@ export interface CalorieEstimateResponse {
   assumed_weight_g?: number;
   confidence: "high" | "medium" | "low";
   product_name?: string;
+  source_url?: string;
 }
 
 export type CalorieEstimateMode = "auto" | "no_web" | "web";
@@ -271,6 +272,7 @@ export interface UserFoodSummary {
   calories: number;
   source: string;
   rawInput: string | null;
+  sourceUrl: string | null;
 }
 
 export interface UserFoodSearchResponse {
@@ -290,6 +292,7 @@ export function saveUserFood(input: {
   calories: number;
   source?: string;
   rawInput?: string;
+  sourceUrl?: string | null;
 }) {
   return request<{ food: UserFoodSummary }>("/foods", {
     method: "POST",

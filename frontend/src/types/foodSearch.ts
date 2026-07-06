@@ -44,6 +44,7 @@ export interface FoodSearchResult {
   barcode?: string | null;
   brandName?: string | null;
   rawInput: string;
+  sourceUrl?: string | null;
   items?: FoodResultItem[];
   caloriesEdited?: boolean;
 }
