@@ -12,7 +12,7 @@ final class CalorieEstimateService
     private const API_URL = 'https://api.anthropic.com/v1/messages';
     private const MODEL = 'claude-haiku-4-5-20251001';
     private const SYSTEM_PROMPT = 'あなたは日本の食品・料理全般に詳しいカロリー推定の専門家です。食べ物・飲み物として一般的に人が摂取するものだけを対象にしてください。食品でないものは推定せず、{"error":"not_food"} のみ返答してください。食品の場合はJSONのみ返答し、前置きや説明は不要です。';
-    private const WEB_SEARCH_SYSTEM_PROMPT = 'あなたは日本の食品・料理全般に詳しいカロリー推定の専門家です。食べ物・飲み物として一般的に人が摂取するものだけを対象にしてください。食品でないものは {"error":"not_food"} のみ返答してください。食品の場合は web_search で公式の栄養成分・カロリー情報を確認してから回答してください。検索結果は要点のみ抽出し、カロリーと重量の数値だけを使ってください。検索結果の文章をそのまま処理しないでください。最終回答はJSONのみ。前置きや説明は不要です。';
+    private const WEB_SEARCH_SYSTEM_PROMPT = 'あなたは日本の食品・料理全般に詳しいカロリー推定の専門家です。食べ物・飲み物として一般的に人が摂取するものだけを対象にしてください。食品でないものは {"error":"not_food"} のみ返答してください。食品の場合は web_search で公式の栄養成分・カロリー情報を確認してから回答してください。ページにカロリー（kcal）の表示がある場合はその数値をそのまま使い、たんぱく質・脂質・糖質から再計算しないでください。検索結果は要点のみ抽出し、カロリーと重量の数値だけを使ってください。検索結果の文章をそのまま処理しないでください。最終回答はJSONのみ。前置きや説明は不要です。';
 
     /**
      * 食品名からカロリーを推定する（公開 API）。
@@ -107,8 +107,162 @@ final class CalorieEstimateService
 
         $decoded = $this->postToAnthropic($payload, $apiKey, $withWebSearch);
         $text = $this->extractText($decoded);
+        $parsed = $this->parseResponse($text);
 
-        return $this->parseResponse($text);
+        if ($withWebSearch && is_array($parsed)) {
+            $parsed = $this->applyLabeledKcalFromOfficialSources($decoded, $parsed);
+        }
+
+        return $parsed;
+    }
+
+    /**
+     * Web検索結果の公式ページから表示カロリーを取得し、AIの推定値を上書きする。
+     *
+     * @param array<string, mixed> $response
+     * @param array{kcal: int, assumed_weight_g?: int, confidence: string, product_name?: string} $estimate
+     * @return array{kcal: int, assumed_weight_g?: int, confidence: string, product_name?: string}
+     */
+    private function applyLabeledKcalFromOfficialSources(array $response, array $estimate): array
+    {
+        foreach ($this->extractRankedWebSearchUrls($response) as $url) {
+            if ($this->scoreOfficialUrl($url) < 100) {
+                continue;
+            }
+
+            $labeledKcal = $this->fetchLabeledKcalFromOfficialPage($url);
+            if ($labeledKcal === null) {
+                continue;
+            }
+
+            $estimate['kcal'] = $labeledKcal;
+            $estimate['confidence'] = 'high';
+
+            return $estimate;
+        }
+
+        return $estimate;
+    }
+
+    /**
+     * @param array<string, mixed> $response
+     * @return list<string>
+     */
+    private function extractRankedWebSearchUrls(array $response): array
+    {
+        $urls = [];
+
+        foreach ($response['content'] ?? [] as $block) {
+            if (!is_array($block) || ($block['type'] ?? '') !== 'web_search_tool_result') {
+                continue;
+            }
+
+            foreach ($block['content'] ?? [] as $item) {
+                if (!is_array($item) || ($item['type'] ?? '') !== 'web_search_result') {
+                    continue;
+                }
+
+                $url = trim((string) ($item['url'] ?? ''));
+                if ($url !== '') {
+                    $urls[] = $url;
+                }
+            }
+        }
+
+        $urls = array_values(array_unique($urls));
+        usort($urls, fn (string $a, string $b): int => $this->scoreOfficialUrl($b) <=> $this->scoreOfficialUrl($a));
+
+        return $urls;
+    }
+
+    private function scoreOfficialUrl(string $url): int
+    {
+        $host = strtolower((string) parse_url($url, PHP_URL_HOST));
+        $path = (string) parse_url($url, PHP_URL_PATH);
+        $score = 0;
+
+        if ($host === 'nosh.jp' || str_ends_with($host, '.nosh.jp')) {
+            $score += 100;
+        }
+
+        if (str_contains($path, '/menu/detail/')) {
+            $score += 50;
+            if (preg_match('#/menu/detail/(\d+)#', $path, $matches) === 1) {
+                $score += (int) $matches[1];
+            }
+        }
+
+        if (str_contains($path, '/review/') || str_contains($host, 'prtimes.jp')) {
+            $score -= 40;
+        }
+
+        if (str_contains($host, 'ameblo.jp') || str_contains($host, 'slism.jp')) {
+            $score -= 50;
+        }
+
+        return $score;
+    }
+
+    private function fetchLabeledKcalFromOfficialPage(string $url): ?int
+    {
+        $html = $this->fetchPublicHtml($url);
+        if ($html === null) {
+            return null;
+        }
+
+        return $this->extractLabeledKcalFromHtml($html);
+    }
+
+    private function fetchPublicHtml(string $url): ?string
+    {
+        if (!function_exists('curl_init')) {
+            return null;
+        }
+
+        $ch = curl_init($url);
+        if ($ch === false) {
+            return null;
+        }
+
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => 10,
+            CURLOPT_FOLLOWLOCATION => true,
+            CURLOPT_HTTPHEADER => [
+                'User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept-Language: ja-JP,ja;q=0.9',
+            ],
+        ]);
+
+        $body = curl_exec($ch);
+        $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        if ($body === false || $httpCode >= 400) {
+            return null;
+        }
+
+        return is_string($body) ? $body : null;
+    }
+
+    private function extractLabeledKcalFromHtml(string $html): ?int
+    {
+        $patterns = [
+            '/カロリー.*?(\d{2,4})\s*kcal/is',
+            '/エネルギー.*?(\d{2,4})\s*kcal/is',
+            '/"calories?"\s*:\s*(\d{2,4})/i',
+        ];
+
+        foreach ($patterns as $pattern) {
+            if (preg_match($pattern, $html, $matches) === 1) {
+                $kcal = (int) $matches[1];
+                if ($kcal >= 20 && $kcal <= 5000) {
+                    return $kcal;
+                }
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -123,6 +277,8 @@ final class CalorieEstimateService
 【Web検索】
 - 必ずweb_searchで食品名・商品名の公式カロリー・栄養成分を検索してから回答する
 - 日本食品標準成分表、メーカー公式サイト、コンビニ・外食チェーンの公式栄養情報を優先する
+- ページにカロリー（kcal）の表示がある場合は、その数値をそのまま kcal に使う
+- たんぱく質・脂質・糖質などからカロリーを再計算しない
 - 検索で公式のカロリーが見つかった場合はその値を使い、confidenceはhighにする
 - 検索で商品名まで特定できた場合は、正式な商品名を product_name に入れる
 - 公式ページにグラム(g)表記の重量がある場合のみ assumed_weight_g にその数値を入れる
@@ -191,8 +347,10 @@ TEXT;
 
 食品の場合の形式:
 - 通常: {"kcal": 整数, "confidence": "high"|"medium"|"low"}
+- ページにカロリー表示がある場合: {"labeled_kcal": 整数, "kcal": 同じ整数, "confidence": "high"}
 - 重量(g)が公式または推定で分かる場合: {"kcal": 整数, "assumed_weight_g": 整数, "confidence": "high"|"medium"|"low"}
 - 商品名が特定できた場合: 上記に "product_name": "正式な商品名" を追加
+- labeled_kcal がある場合は kcal も必ず同じ値にする
 - 公式ページに重量(g)が無い high の場合は assumed_weight_g を含めない
 非食品の場合の形式: {"error":"not_food"}
 
@@ -379,6 +537,12 @@ PROMPT;
         }
 
         $kcal = (int) round((float) $json['kcal']);
+        if (isset($json['labeled_kcal']) && is_numeric($json['labeled_kcal'])) {
+            $labeledKcal = (int) round((float) $json['labeled_kcal']);
+            if ($labeledKcal > 0) {
+                $kcal = $labeledKcal;
+            }
+        }
 
         if ($kcal <= 0) {
             return null;
