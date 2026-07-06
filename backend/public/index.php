@@ -578,6 +578,12 @@ if ($requestMethod === 'POST' && $requestPath === '/api/records/meals') {
     $foodName = trim((string) ($body['foodName'] ?? ''));
     $calories = $body['calories'] ?? null;
     $caloriesEdited = filter_var($body['caloriesEdited'] ?? false, FILTER_VALIDATE_BOOLEAN);
+    $calorieSource = trim((string) ($body['calorieSource'] ?? ''));
+    $calorieSourceOrNull = $calorieSource === '' ? null : $calorieSource;
+    $sourceUrl = trim((string) ($body['sourceUrl'] ?? ''));
+    $sourceUrlOrNull = $sourceUrl === '' ? null : $sourceUrl;
+    $confidence = trim((string) ($body['confidence'] ?? ''));
+    $confidenceOrNull = $confidence === '' ? null : $confidence;
 
     if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
         json_response(['message' => 'date must be YYYY-MM-DD'], 422);
@@ -588,7 +594,16 @@ if ($requestMethod === 'POST' && $requestPath === '/api/records/meals') {
     }
 
     try {
-        $entry = $mealEntryRepository->addEntry($date, $mealType, $foodName, (int) round((float) $calories), $caloriesEdited);
+        $entry = $mealEntryRepository->addEntry(
+            $date,
+            $mealType,
+            $foodName,
+            (int) round((float) $calories),
+            $caloriesEdited,
+            $calorieSourceOrNull,
+            $sourceUrlOrNull,
+            $confidenceOrNull,
+        );
         $sections = $mealEntryRepository->getSectionsForDate($date);
     } catch (InvalidArgumentException $exception) {
         json_response(['message' => $exception->getMessage()], 422);
@@ -597,6 +612,22 @@ if ($requestMethod === 'POST' && $requestPath === '/api/records/meals') {
     json_response([
         'entry' => $entry,
         'meals' => $sections,
+    ]);
+}
+
+// DELETE /api/records/meals/{id} — 食事記録を削除
+if ($requestMethod === 'DELETE' && preg_match('#^/api/records/meals/(\d+)$#', $requestPath, $mealDeleteMatches) === 1) {
+    $entryId = (int) $mealDeleteMatches[1];
+
+    try {
+        $result = $mealEntryRepository->deleteEntry($entryId);
+    } catch (InvalidArgumentException $exception) {
+        json_response(['message' => $exception->getMessage()], 404);
+    }
+
+    json_response([
+        'recordedOn' => $result['recordedOn'],
+        'meals' => $result['meals'],
     ]);
 }
 

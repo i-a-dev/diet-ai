@@ -41,6 +41,10 @@ export interface MealEntrySummary {
   id: number;
   label: string;
   calories: number;
+  caloriesEdited?: boolean;
+  calorieSource?: string | null;
+  sourceUrl?: string | null;
+  confidence?: string | null;
 }
 
 export interface MealSectionSummary {
@@ -76,6 +80,11 @@ interface SaveMealResponse {
     label: string;
     calories: number;
   };
+  meals: MealSectionSummary[];
+}
+
+interface DeleteMealResponse {
+  recordedOn: string;
   meals: MealSectionSummary[];
 }
 
@@ -152,6 +161,9 @@ export interface MealHistoryEntry {
   label: string;
   calories: number;
   caloriesEdited: boolean;
+  calorieSource?: string | null;
+  sourceUrl?: string | null;
+  confidence?: string | null;
   recordedOn: string;
 }
 
@@ -177,10 +189,28 @@ export function saveMeal(
   calories: number,
   date?: string,
   caloriesEdited = false,
+  calorieSource?: string | null,
+  sourceUrl?: string | null,
+  confidence?: string | null,
 ) {
   return request<SaveMealResponse>("/records/meals", {
     method: "POST",
-    body: JSON.stringify({ mealType, foodName, calories, date, caloriesEdited }),
+    body: JSON.stringify({
+      mealType,
+      foodName,
+      calories,
+      date,
+      caloriesEdited,
+      calorieSource: calorieSource ?? null,
+      sourceUrl: sourceUrl ?? null,
+      confidence: confidence ?? null,
+    }),
+  });
+}
+
+export function deleteMeal(entryId: number) {
+  return request<DeleteMealResponse>(`/records/meals/${entryId}`, {
+    method: "DELETE",
   });
 }
 

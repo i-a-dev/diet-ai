@@ -8,8 +8,13 @@ const COL_GAP = 8
 const MEAL_KCAL = '#AAA'
 
 interface MealItem {
+  id?: number
   label: string
   kcal: string
+  caloriesEdited?: boolean
+  calorieSource?: string | null
+  sourceUrl?: string | null
+  confidence?: string | null
 }
 
 interface MealSectionProps {
@@ -19,9 +24,10 @@ interface MealSectionProps {
   items: MealItem[]
   isLast?: boolean
   onAdd?: () => void
+  onItemClick?: (item: MealItem, index: number) => void
 }
 
-export function MealSection({ icon, title, totalKcal, items, isLast = false, onAdd }: MealSectionProps) {
+export function MealSection({ icon, title, totalKcal, items, isLast = false, onAdd, onItemClick }: MealSectionProps) {
   return (
     <div
       style={{
@@ -75,7 +81,12 @@ export function MealSection({ icon, title, totalKcal, items, isLast = false, onA
             }}
           >
             {items.map((item, index) => (
-              <FoodChip key={`${item.label}-${index}`} label={item.label} kcal={item.kcal} />
+              <FoodChip
+                key={item.id ?? `${item.label}-${index}`}
+                label={item.label}
+                kcal={item.kcal}
+                onClick={onItemClick ? () => onItemClick(item, index) : undefined}
+              />
             ))}
           </div>
         )}

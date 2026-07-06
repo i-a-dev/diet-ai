@@ -9,8 +9,7 @@ import {
 import { BottomSheet } from "./BottomSheet.tsx";
 import { ORANGE } from "../constants.ts";
 import { FoodSearchStatus } from "./FoodSearchStatus.tsx";
-import { FoodSearchResultCard } from "./FoodSearchResultCard.tsx";
-import { FoodEstimateCard } from "./FoodEstimateCard.tsx";
+import { FoodResultPreview } from "./FoodResultPreview.tsx";
 import { LowConfidenceEstimateCard } from "./LowConfidenceEstimateCard.tsx";
 import {
   runAiWebSearch,
@@ -22,11 +21,18 @@ import type {
   SearchState,
 } from "../types/foodSearch.ts";
 import { fetchMealHistory, saveUserFood, type MealType } from "../api/client.ts";
+import type { FoodSource, SearchConfidence } from "../types/foodSearch.ts";
+import { mealItemToSearchResult } from "../utils/mealFoodResult.ts";
+import { parseCaloriesEdited } from "../utils/calorieSource.ts";
 
 export interface MealItemInput {
+  id?: number;
   label: string;
   kcal: string;
   caloriesEdited?: boolean;
+  calorieSource?: FoodSource | string | null;
+  sourceUrl?: string | null;
+  confidence?: SearchConfidence | string | null;
 }
 
 interface AddFoodModalProps {
@@ -282,6 +288,9 @@ export function AddFoodModal({
           label: result.displayName,
           kcal: `${calories}kcal`,
           caloriesEdited,
+          calorieSource: result.source,
+          sourceUrl: result.sourceUrl ?? null,
+          confidence: result.confidence,
         };
         await onSave(item);
         if (result.source === "ai_web_search" && !caloriesEdited) {
@@ -311,6 +320,8 @@ export function AddFoodModal({
         label,
         kcal: `${Math.round(parsedKcal)}kcal`,
         caloriesEdited: true,
+        calorieSource: "user_registered",
+        confidence: "low",
       };
       await onSave(item);
       setCompletedResult({
@@ -437,8 +448,9 @@ export function AddFoodModal({
 
     if ((state === "found" || state === "web_found") && selectedResult) {
       return (
-        <FoodSearchResultCard
+        <FoodResultPreview
           result={selectedResult}
+          mode="register"
           onAdd={() => void saveItem(selectedResult)}
         />
       );
@@ -446,8 +458,9 @@ export function AddFoodModal({
 
     if (state === "estimated" && selectedResult) {
       return (
-        <FoodEstimateCard
+        <FoodResultPreview
           result={selectedResult}
+          mode="register"
           onEdit={() => {
             setShowManualEdit(true);
             setManualKcal(String(selectedResult.calories));
@@ -462,9 +475,9 @@ export function AddFoodModal({
         selectedHistoryItem?.caloriesEdited ?? selectedResult.caloriesEdited,
       );
       return (
-        <FoodEstimateCard
-          variant="history"
+        <FoodResultPreview
           result={selectedResult}
+          mode="history"
           caloriesEdited={historyEdited}
           onEdit={() => {
             setShowManualEdit(true);
@@ -589,40 +602,15 @@ export function AddFoodModal({
   );
 }
 
-function parseCaloriesEdited(value: unknown): boolean {
-  return value === true || value === 1 || value === "1" || value === "true";
-}
-
-function mealItemToSearchResult(item: MealItemInput): FoodSearchResult {
-  const calories = parseKcalFromString(item.kcal);
-  const caloriesEdited = parseCaloriesEdited(item.caloriesEdited);
-  return {
-    id: `history-${item.label}-${calories}`,
-    name: item.label,
-    displayName: item.label,
-    amount: 1,
-    unit: "食",
-    calories,
-    protein: null,
-    fat: null,
-    carbs: null,
-    source: "user_registered",
-    confidence: "high",
-    isEstimated: false,
-    barcode: null,
-    brandName: null,
-    rawInput: item.label,
-    caloriesEdited,
-  };
-}
-
-function parseKcalFromString(kcal: string): number {
-  const parsed = Number(kcal.replace(/kcal/i, "").trim());
-  return Number.isFinite(parsed) ? Math.round(parsed) : 0;
-}
-
 function toUniqueMealInputs(
-  history: Array<{ label: string; calories: number; caloriesEdited?: boolean }>,
+  history: Array<{
+    label: string;
+    calories: number;
+    caloriesEdited?: boolean;
+    calorieSource?: string | null;
+    sourceUrl?: string | null;
+    confidence?: string | null;
+  }>,
 ): MealItemInput[] {
   const seen = new Set<string>();
   const unique: MealItemInput[] = [];
@@ -636,6 +624,9 @@ function toUniqueMealInputs(
       label: entry.label,
       kcal: `${entry.calories}kcal`,
       caloriesEdited: parseCaloriesEdited(entry.caloriesEdited),
+      calorieSource: (entry.calorieSource as FoodSource | null | undefined) ?? null,
+      sourceUrl: entry.sourceUrl ?? null,
+      confidence: entry.confidence ?? null,
     });
     if (unique.length >= 12) break;
   }

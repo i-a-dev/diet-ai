@@ -15,6 +15,7 @@ import {
 import {
   type ExerciseEntrySummary,
   type MealSectionSummary,
+  deleteMeal,
   fetchDailyRecord,
   fetchUserProfile,
   saveExercise,
@@ -31,6 +32,7 @@ import {
   type ExerciseInput,
   ExerciseRegisterSheet,
 } from "../ExerciseRegisterSheet.tsx";
+import { MealEntryDetailSheet } from "../MealEntryDetailSheet.tsx";
 import { MealSection } from "../MealSection.tsx";
 import { SecIcon } from "../SecIcon.tsx";
 import { StepsRegisterSheet } from "../StepsRegisterSheet.tsx";
@@ -122,6 +124,11 @@ function createInitialMeals(): Record<MealKey, MealSectionData> {
   };
 }
 
+interface ActiveMealEntry {
+  mealKey: MealKey;
+  item: MealItemInput;
+}
+
 function mapMealSectionsToState(
   sections: MealSectionSummary[] = [],
 ): Record<MealKey, MealSectionData> {
@@ -134,8 +141,13 @@ function mapMealSectionsToState(
     nextMeals[key] = {
       ...nextMeals[key],
       items: section.items.map((item) => ({
+        id: item.id,
         label: item.label,
         kcal: `${item.calories}kcal`,
+        caloriesEdited: item.caloriesEdited,
+        calorieSource: item.calorieSource ?? null,
+        sourceUrl: item.sourceUrl ?? null,
+        confidence: item.confidence ?? null,
       })),
     };
   });
@@ -165,6 +177,9 @@ export function RecordScreen() {
   const [exerciseNotice, setExerciseNotice] = useState<string | null>(null);
   const [activeExerciseNote, setActiveExerciseNote] =
     useState<ExerciseEntrySummary | null>(null);
+  const [activeMealEntry, setActiveMealEntry] =
+    useState<ActiveMealEntry | null>(null);
+  const [isDeletingMeal, setIsDeletingMeal] = useState(false);
   const [dailyIntakeGoalKcal, setDailyIntakeGoalKcal] = useState<number | null>(
     null,
   );
@@ -269,6 +284,9 @@ export function RecordScreen() {
         calories,
         recordedOn ?? selectedDate,
         item.caloriesEdited ?? false,
+        item.calorieSource ?? null,
+        item.sourceUrl ?? null,
+        item.confidence ?? null,
       );
       setMeals(mapMealSectionsToState(data.meals));
       setMealSheetOpen(false);
@@ -281,6 +299,26 @@ export function RecordScreen() {
       );
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleMealDelete = async () => {
+    if (!activeMealEntry?.item.id) return;
+
+    try {
+      setIsDeletingMeal(true);
+      setError(null);
+      const data = await deleteMeal(activeMealEntry.item.id);
+      setMeals(mapMealSectionsToState(data.meals));
+      setActiveMealEntry(null);
+    } catch (deleteError) {
+      setError(
+        deleteError instanceof Error
+          ? deleteError.message
+          : "食事の削除に失敗しました",
+      );
+    } finally {
+      setIsDeletingMeal(false);
     }
   };
 
@@ -743,6 +781,21 @@ export function RecordScreen() {
                 items={meal.items}
                 isLast={meal.isLast}
                 onAdd={() => openMealSheet(key)}
+                onItemClick={(item) => {
+                  if (item.id == null) return;
+                  setActiveMealEntry({
+                    mealKey: key,
+                    item: {
+                      id: item.id,
+                      label: item.label,
+                      kcal: item.kcal,
+                      caloriesEdited: item.caloriesEdited,
+                      calorieSource: item.calorieSource ?? null,
+                      sourceUrl: item.sourceUrl ?? null,
+                      confidence: item.confidence ?? null,
+                    },
+                  });
+                }}
               />
             ),
           )}
@@ -903,6 +956,17 @@ export function RecordScreen() {
           </div>
         )}
       </BottomSheet>
+
+      <MealEntryDetailSheet
+        open={activeMealEntry !== null}
+        mealTitle={
+          activeMealEntry ? meals[activeMealEntry.mealKey].title : ""
+        }
+        item={activeMealEntry?.item ?? null}
+        isDeleting={isDeletingMeal}
+        onClose={() => setActiveMealEntry(null)}
+        onDelete={() => void handleMealDelete()}
+      />
 
       {/* 変更: 食事追加UIを新しい検索フロー対応モーダルへ差し替え。 */}
       <AddFoodModal

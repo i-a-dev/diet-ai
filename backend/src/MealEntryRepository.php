@@ -15,6 +15,24 @@ final class MealEntryRepository
         'snack' => '間食・おやつ',
     ];
 
+    /** @var list<string> */
+    private const ALLOWED_CALORIE_SOURCES = [
+        'regex',
+        'fatsecret',
+        'open_food_facts',
+        'local_db',
+        'claude_estimate',
+        'ai_web_search',
+        'user_registered',
+    ];
+
+    /** @var list<string> */
+    private const ALLOWED_CONFIDENCE_LEVELS = [
+        'high',
+        'medium',
+        'low',
+    ];
+
     private PDO $db;
     private int $userId;
 
@@ -41,7 +59,7 @@ final class MealEntryRepository
         }
 
         $statement = $this->db->prepare(
-            'SELECT id, meal_type, food_name, calories_kcal
+            'SELECT id, meal_type, food_name, calories_kcal, calories_edited, calorie_source, source_url, confidence
              FROM meal_entries
              WHERE user_id = :user_id AND recorded_on = :recorded_on
              ORDER BY id ASC'
@@ -56,18 +74,14 @@ final class MealEntryRepository
 
             $calories = (int) $row['calories_kcal'];
             $sections[$mealType]['calories'] += $calories;
-            $sections[$mealType]['items'][] = [
-                'id' => (int) $row['id'],
-                'label' => (string) $row['food_name'],
-                'calories' => $calories,
-            ];
+            $sections[$mealType]['items'][] = $this->mapMealItemRow($row);
         }
 
         return array_values($sections);
     }
 
     /**
-     * @return array{id: int, mealType: string, label: string, calories: int, caloriesEdited: bool}
+     * @return array{id: int, mealType: string, label: string, calories: int, caloriesEdited: bool, calorieSource: string|null, sourceUrl: string|null, confidence: string|null}
      */
     public function addEntry(
         string $date,
@@ -75,6 +89,9 @@ final class MealEntryRepository
         string $foodName,
         int $caloriesKcal,
         bool $caloriesEdited = false,
+        ?string $calorieSource = null,
+        ?string $sourceUrl = null,
+        ?string $confidence = null,
     ): array
     {
         if (!isset(self::MEAL_LABELS[$mealType])) {
@@ -90,10 +107,14 @@ final class MealEntryRepository
             throw new InvalidArgumentException('calories must be between 1 and 5000');
         }
 
+        $normalizedCalorieSource = $this->normalizeCalorieSource($calorieSource);
+        $normalizedSourceUrl = $this->normalizeSourceUrl($sourceUrl);
+        $normalizedConfidence = $this->normalizeConfidence($confidence);
+
         $now = (new DateTimeImmutable('now', new DateTimeZone('Asia/Tokyo')))->format('Y-m-d H:i:s');
         $statement = $this->db->prepare(
-            'INSERT INTO meal_entries (user_id, recorded_on, meal_type, food_name, calories_kcal, calories_edited, created_at, updated_at)
-             VALUES (:user_id, :recorded_on, :meal_type, :food_name, :calories_kcal, :calories_edited, :created_at, :updated_at)'
+            'INSERT INTO meal_entries (user_id, recorded_on, meal_type, food_name, calories_kcal, calories_edited, calorie_source, source_url, confidence, created_at, updated_at)
+             VALUES (:user_id, :recorded_on, :meal_type, :food_name, :calories_kcal, :calories_edited, :calorie_source, :source_url, :confidence, :created_at, :updated_at)'
         );
         $statement->execute([
             'user_id' => $this->userId,
@@ -102,6 +123,9 @@ final class MealEntryRepository
             'food_name' => $name,
             'calories_kcal' => $caloriesKcal,
             'calories_edited' => $caloriesEdited ? 1 : 0,
+            'calorie_source' => $normalizedCalorieSource,
+            'source_url' => $normalizedSourceUrl,
+            'confidence' => $normalizedConfidence,
             'created_at' => $now,
             'updated_at' => $now,
         ]);
@@ -112,6 +136,115 @@ final class MealEntryRepository
             'label' => $name,
             'calories' => $caloriesKcal,
             'caloriesEdited' => $caloriesEdited,
+            'calorieSource' => $normalizedCalorieSource,
+            'sourceUrl' => $normalizedSourceUrl,
+            'confidence' => $normalizedConfidence,
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     * @return array{id: int, label: string, calories: int, caloriesEdited: bool, calorieSource: string|null, sourceUrl: string|null, confidence: string|null}
+     */
+    private function mapMealItemRow(array $row): array
+    {
+        return [
+            'id' => (int) $row['id'],
+            'label' => (string) $row['food_name'],
+            'calories' => (int) $row['calories_kcal'],
+            'caloriesEdited' => (int) ($row['calories_edited'] ?? 0) === 1,
+            'calorieSource' => isset($row['calorie_source']) && $row['calorie_source'] !== null
+                ? (string) $row['calorie_source']
+                : null,
+            'sourceUrl' => isset($row['source_url']) && $row['source_url'] !== null
+                ? (string) $row['source_url']
+                : null,
+            'confidence' => isset($row['confidence']) && $row['confidence'] !== null
+                ? (string) $row['confidence']
+                : null,
+        ];
+    }
+
+    private function normalizeCalorieSource(?string $calorieSource): ?string
+    {
+        $trimmed = trim((string) $calorieSource);
+        if ($trimmed === '') {
+            return null;
+        }
+
+        if (!in_array($trimmed, self::ALLOWED_CALORIE_SOURCES, true)) {
+            throw new InvalidArgumentException('calorieSource is invalid');
+        }
+
+        return $trimmed;
+    }
+
+    private function normalizeSourceUrl(?string $sourceUrl): ?string
+    {
+        $trimmed = trim((string) $sourceUrl);
+        if ($trimmed === '') {
+            return null;
+        }
+
+        if (filter_var($trimmed, FILTER_VALIDATE_URL) === false) {
+            throw new InvalidArgumentException('sourceUrl must be a valid URL');
+        }
+
+        return $trimmed;
+    }
+
+    private function normalizeConfidence(?string $confidence): ?string
+    {
+        $trimmed = trim((string) $confidence);
+        if ($trimmed === '') {
+            return null;
+        }
+
+        if (!in_array($trimmed, self::ALLOWED_CONFIDENCE_LEVELS, true)) {
+            throw new InvalidArgumentException('confidence must be high|medium|low');
+        }
+
+        return $trimmed;
+    }
+
+    /**
+     * 食事記録を1件削除する。対象が存在しない、または他ユーザーの記録の場合は例外を投げる。
+     *
+     * @return array{recordedOn: string, meals: array<int, array{id: string, name: string, calories: int, items: array<int, array{id: int, label: string, calories: int, caloriesEdited: bool}>}>}
+     */
+    public function deleteEntry(int $entryId): array
+    {
+        if ($entryId <= 0) {
+            throw new InvalidArgumentException('entry id is required');
+        }
+
+        $statement = $this->db->prepare(
+            'SELECT recorded_on
+             FROM meal_entries
+             WHERE id = :id AND user_id = :user_id
+             LIMIT 1'
+        );
+        $statement->execute([
+            'id' => $entryId,
+            'user_id' => $this->userId,
+        ]);
+        $row = $statement->fetch();
+        if ($row === false) {
+            throw new InvalidArgumentException('meal entry not found');
+        }
+
+        $recordedOn = (string) $row['recorded_on'];
+        $deleteStatement = $this->db->prepare(
+            'DELETE FROM meal_entries WHERE id = :id AND user_id = :user_id'
+        );
+        $deleteStatement->execute([
+            'id' => $entryId,
+            'user_id' => $this->userId,
+        ]);
+
+        return [
+            'recordedOn' => $recordedOn,
+            'meals' => $this->getSectionsForDate($recordedOn),
         ];
     }
 
@@ -119,7 +252,7 @@ final class MealEntryRepository
      * 食事履歴を新しい順で取得する。
      * mealType を指定すると、その区分の履歴のみ返す。
      *
-     * @return array<int, array{id: int, mealType: string, label: string, calories: int, caloriesEdited: bool, recordedOn: string}>
+     * @return array<int, array{id: int, mealType: string, label: string, calories: int, caloriesEdited: bool, calorieSource: string|null, sourceUrl: string|null, confidence: string|null, recordedOn: string}>
      */
     public function getHistory(?string $mealType = null, int $limit = 30): array
     {
@@ -131,7 +264,7 @@ final class MealEntryRepository
 
         if ($mealType === null) {
             $statement = $this->db->prepare(
-                'SELECT id, meal_type, food_name, calories_kcal, calories_edited, recorded_on
+                'SELECT id, meal_type, food_name, calories_kcal, calories_edited, calorie_source, source_url, confidence, recorded_on
                  FROM meal_entries
                  WHERE user_id = :user_id
                  ORDER BY id DESC
@@ -142,7 +275,7 @@ final class MealEntryRepository
             $statement->execute();
         } else {
             $statement = $this->db->prepare(
-                'SELECT id, meal_type, food_name, calories_kcal, calories_edited, recorded_on
+                'SELECT id, meal_type, food_name, calories_kcal, calories_edited, calorie_source, source_url, confidence, recorded_on
                  FROM meal_entries
                  WHERE user_id = :user_id AND meal_type = :meal_type
                  ORDER BY id DESC
@@ -156,12 +289,16 @@ final class MealEntryRepository
 
         $history = [];
         foreach ($statement->fetchAll() as $row) {
+            $item = $this->mapMealItemRow($row);
             $history[] = [
-                'id' => (int) $row['id'],
+                'id' => $item['id'],
                 'mealType' => (string) $row['meal_type'],
-                'label' => (string) $row['food_name'],
-                'calories' => (int) $row['calories_kcal'],
-                'caloriesEdited' => (int) ($row['calories_edited'] ?? 0) === 1,
+                'label' => $item['label'],
+                'calories' => $item['calories'],
+                'caloriesEdited' => $item['caloriesEdited'],
+                'calorieSource' => $item['calorieSource'],
+                'sourceUrl' => $item['sourceUrl'],
+                'confidence' => $item['confidence'],
                 'recordedOn' => (string) $row['recorded_on'],
             ];
         }
