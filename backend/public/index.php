@@ -12,6 +12,7 @@ require_once __DIR__ . '/../src/Database.php';
 require_once __DIR__ . '/../src/WeightRepository.php';
 require_once __DIR__ . '/../src/MealEntryRepository.php';
 require_once __DIR__ . '/../src/ActivityRepository.php';
+require_once __DIR__ . '/../src/UserFoodRepository.php';
 require_once __DIR__ . '/../src/CalorieEstimateService.php';
 require_once __DIR__ . '/../src/ExerciseMetEstimateService.php';
 require_once __DIR__ . '/../src/UserProfileRepository.php';
@@ -194,6 +195,7 @@ $userId = (int) $authenticatedUser['id'];
 $weightRepository = new WeightRepository($userId);
 $userProfileRepository = new UserProfileRepository($userId);
 $mealEntryRepository = new MealEntryRepository($userId);
+$userFoodRepository = new UserFoodRepository();
 $activityRepository = new ActivityRepository($userId);
 $chatMessageRepository = new ChatMessageRepository($userId);
 $calorieEstimateService = new CalorieEstimateService();
@@ -612,6 +614,63 @@ if ($requestMethod === 'GET' && $requestPath === '/api/records/meals/history') {
 
     json_response([
         'history' => $history,
+    ]);
+}
+
+// GET /api/foods/search — 自前食品DBを検索
+if ($requestMethod === 'GET' && $requestPath === '/api/foods/search') {
+    $query = trim((string) ($_GET['q'] ?? ''));
+
+    try {
+        $food = $userFoodRepository->searchBestMatch($query);
+    } catch (InvalidArgumentException $exception) {
+        json_response(['message' => $exception->getMessage()], 422);
+    }
+
+    json_response([
+        'food' => $food,
+    ]);
+}
+
+// POST /api/foods — 自前食品DBに登録（同一 displayName は上書き）
+if ($requestMethod === 'POST' && $requestPath === '/api/foods') {
+    $body = json_decode(file_get_contents('php://input') ?: '{}', true);
+    if (!is_array($body)) {
+        json_response(['message' => 'Invalid JSON body'], 422);
+    }
+
+    $displayName = trim((string) ($body['displayName'] ?? ''));
+    $name = trim((string) ($body['name'] ?? ''));
+    $amount = $body['amount'] ?? 1;
+    $unit = trim((string) ($body['unit'] ?? '食'));
+    $calories = $body['calories'] ?? null;
+    $source = trim((string) ($body['source'] ?? 'ai_web_search'));
+    $rawInput = trim((string) ($body['rawInput'] ?? ''));
+    $rawInputOrNull = $rawInput === '' ? null : $rawInput;
+
+    if (!is_numeric($amount)) {
+        json_response(['message' => 'amount is required'], 422);
+    }
+    if (!is_numeric($calories)) {
+        json_response(['message' => 'calories is required'], 422);
+    }
+
+    try {
+        $food = $userFoodRepository->upsert(
+            $displayName,
+            $name,
+            (float) $amount,
+            $unit,
+            (int) round((float) $calories),
+            $source,
+            $rawInputOrNull,
+        );
+    } catch (InvalidArgumentException $exception) {
+        json_response(['message' => $exception->getMessage()], 422);
+    }
+
+    json_response([
+        'food' => $food,
     ]);
 }
 

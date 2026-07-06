@@ -245,7 +245,7 @@ export function fetchMealHistory(options?: {
 
 export interface CalorieEstimateResponse {
   kcal: number;
-  assumed_weight_g: number;
+  assumed_weight_g?: number;
   confidence: "high" | "medium" | "low";
   product_name?: string;
 }
@@ -259,6 +259,41 @@ export function estimateCalories(
   return request<CalorieEstimateResponse>("/foods/estimate-calories", {
     method: "POST",
     body: JSON.stringify({ foodName, mode }),
+  });
+}
+
+export interface UserFoodSummary {
+  id: number;
+  displayName: string;
+  name: string;
+  amount: number;
+  unit: string;
+  calories: number;
+  source: string;
+  rawInput: string | null;
+}
+
+export interface UserFoodSearchResponse {
+  food: UserFoodSummary | null;
+}
+
+export function searchUserFoods(query: string) {
+  const params = new URLSearchParams({ q: query });
+  return request<UserFoodSearchResponse>(`/foods/search?${params.toString()}`);
+}
+
+export function saveUserFood(input: {
+  displayName: string;
+  name: string;
+  amount: number;
+  unit: string;
+  calories: number;
+  source?: string;
+  rawInput?: string;
+}) {
+  return request<{ food: UserFoodSummary }>("/foods", {
+    method: "POST",
+    body: JSON.stringify(input),
   });
 }
 

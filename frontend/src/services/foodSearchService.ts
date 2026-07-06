@@ -1,4 +1,4 @@
-import { estimateCalories } from "../api/client.ts";
+import { estimateCalories, searchUserFoods, type UserFoodSummary } from "../api/client.ts";
 import { consumeWebSearchQuota, getWebSearchQuota } from "./webSearchQuotaService.ts";
 import type {
   FoodSearchProgress,
@@ -64,6 +64,7 @@ function createSteps(): FoodSearchStep[] {
       label: "Open Food Factsで商品情報を検索中",
       status: "pending",
     },
+    { key: "local_db_searching", label: "登録済み食品を検索中", status: "pending" },
     { key: "claude_estimating", label: "AIでカロリーを推定中", status: "pending" },
     { key: "waiting_user_choice", label: "ユーザー選択を待機中", status: "pending" },
     { key: "ai_web_searching", label: "商品情報を検索中", status: "pending" },
@@ -190,33 +191,71 @@ function storeResult(result: FoodSearchResult): void {
   saveCache(cache);
 }
 
+function buildEstimateDisplayName(
+  displayBaseName: string,
+  source: "claude_estimate" | "ai_web_search",
+  assumedWeightG?: number,
+): string {
+  if (source === "ai_web_search") {
+    return displayBaseName;
+  }
+
+  const hasWeight = assumedWeightG != null && assumedWeightG > 0;
+  if (hasWeight) {
+    return `${displayBaseName} ${assumedWeightG}g（推定）`;
+  }
+
+  return `${displayBaseName}（推定）`;
+}
+
 function resultFromEstimate(
   input: string,
   source: "claude_estimate" | "ai_web_search",
   estimate: {
     kcal: number;
-    assumed_weight_g: number;
+    assumed_weight_g?: number;
     confidence: SearchConfidence;
     product_name?: string;
   },
 ): FoodSearchResult {
   const productName = estimate.product_name?.trim();
   const displayBaseName = productName && productName.length > 0 ? productName : input;
+  const assumedWeightG = estimate.assumed_weight_g;
+  const hasWeight = assumedWeightG != null && assumedWeightG > 0;
+  const isAiWebSearch = source === "ai_web_search";
 
   return {
     id: `${source}-${Date.now()}`,
     name: displayBaseName,
-    displayName: `${displayBaseName}（${estimate.assumed_weight_g}g 想定）`,
-    amount: estimate.assumed_weight_g,
-    unit: "g",
+    displayName: buildEstimateDisplayName(displayBaseName, source, assumedWeightG),
+    amount: isAiWebSearch ? 1 : hasWeight ? assumedWeightG : 1,
+    unit: isAiWebSearch ? "食" : hasWeight ? "g" : "食",
     calories: estimate.kcal,
     protein: null,
     fat: null,
     carbs: null,
     source,
     confidence: estimate.confidence,
-    isEstimated: true,
+    isEstimated: !isAiWebSearch,
     rawInput: input,
+  };
+}
+
+function resultFromUserFood(food: UserFoodSummary, rawInput: string): FoodSearchResult {
+  return {
+    id: `local-db-${food.id}`,
+    name: food.name,
+    displayName: food.displayName,
+    amount: food.amount,
+    unit: food.unit,
+    calories: food.calories,
+    protein: null,
+    fat: null,
+    carbs: null,
+    source: "local_db",
+    confidence: "high",
+    isEstimated: food.source === "ai_web_search" || food.source === "claude_estimate",
+    rawInput,
   };
 }
 
@@ -405,6 +444,21 @@ async function searchOpenFoodFacts(
   return best?.result ?? null;
 }
 
+async function searchLocalDb(rawInput: string, query: string): Promise<FoodSearchResult | null> {
+  const searches = [rawInput, query].filter(
+    (value, index, array) => value.trim() !== "" && array.indexOf(value) === index,
+  );
+
+  for (const searchQuery of searches) {
+    const response = await searchUserFoods(searchQuery);
+    if (response.food) {
+      return resultFromUserFood(response.food, rawInput);
+    }
+  }
+
+  return null;
+}
+
 async function estimateWithClaude(rawInput: string, parsed: ParsedFoodInput): Promise<FoodSearchResult> {
   try {
     const estimate = await estimateCalories(rawInput, "no_web");
@@ -488,8 +542,25 @@ export async function searchFoodByText(
       return emitProgress(onProgress, buildProgress("found", steps, offResult, "候補が見つかりました"));
     }
   } catch (error) {
-    console.warn("Open Food Facts failed, fallback to Claude", error);
+    console.warn("Open Food Facts failed, fallback to local DB", error);
     steps = updateStep(steps, "open_food_facts_searching", "done");
+  }
+
+  try {
+    steps = updateStep(steps, "local_db_searching", "active");
+    emitProgress(onProgress, buildProgress("searching", steps, null, "食品データを検索中..."));
+    const localDbResult = await searchLocalDb(input, query);
+    steps = updateStep(steps, "local_db_searching", "done");
+    if (localDbResult) {
+      storeResult(localDbResult);
+      return emitProgress(
+        onProgress,
+        buildProgress("found", steps, localDbResult, "登録済みの食品が見つかりました"),
+      );
+    }
+  } catch (error) {
+    console.warn("Local food DB search failed, fallback to Claude", error);
+    steps = updateStep(steps, "local_db_searching", "done");
   }
 
   steps = updateStep(steps, "claude_estimating", "active");
@@ -523,6 +594,7 @@ export async function runAiWebSearch(
   steps = updateStep(steps, "regex_extracting", "done");
   steps = updateStep(steps, "fatsecret_searching", "done");
   steps = updateStep(steps, "open_food_facts_searching", "done");
+  steps = updateStep(steps, "local_db_searching", "done");
   steps = updateStep(steps, "claude_estimating", "done");
   steps = updateStep(steps, "waiting_user_choice", "done");
   steps = updateStep(steps, "ai_web_searching", "active");

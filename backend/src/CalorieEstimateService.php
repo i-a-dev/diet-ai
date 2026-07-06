@@ -21,7 +21,7 @@ final class CalorieEstimateService
      * - no_web: Web 検索を使わず 1 回のみ推定
      * - web: Web 検索付きで推定
      *
-     * @return array{kcal: int, assumed_weight_g: int, confidence: string, product_name?: string}
+     * @return array{kcal: int, assumed_weight_g?: int, confidence: string, product_name?: string}
      */
     public function estimate(string $foodName, string $mode = 'auto'): array
     {
@@ -74,7 +74,7 @@ final class CalorieEstimateService
     /**
      * Claude API を1回呼び出し、推定結果を返す。
      *
-     * @return array{kcal: int, assumed_weight_g: int, confidence: string, product_name?: string}|'not_food'|null
+     * @return array{kcal: int, assumed_weight_g?: int, confidence: string, product_name?: string}|'not_food'|null
      */
     private function requestEstimate(string $foodName, string $apiKey, bool $withWebSearch): array|string|null
     {
@@ -123,8 +123,10 @@ final class CalorieEstimateService
 【Web検索】
 - 必ずweb_searchで食品名・商品名の公式カロリー・栄養成分を検索してから回答する
 - 日本食品標準成分表、メーカー公式サイト、コンビニ・外食チェーンの公式栄養情報を優先する
-- 検索で公式値が見つかった場合はその値を使い、confidenceはhighにする
+- 検索で公式のカロリーが見つかった場合はその値を使い、confidenceはhighにする
 - 検索で商品名まで特定できた場合は、正式な商品名を product_name に入れる
+- 公式ページにグラム(g)表記の重量がある場合のみ assumed_weight_g にその数値を入れる
+- 公式ページが「1食あたり」「1個あたり」などカロリーのみで重量(g)が無い場合は assumed_weight_g を省略する
 - 検索しても特定できない場合のみ、下記の推定ルールを使う
 TEXT
             : '';
@@ -132,7 +134,7 @@ TEXT
         $confidenceSection = $withWebSearch
             ? <<<'TEXT'
 【confidenceの基準】
-- high: Web検索または公式情報で料理名・重さ・カロリーが特定できた場合
+- high: Web検索または公式情報で商品名とカロリーが特定できた場合（重量gが公式に無くても可）
 - medium: 重さを仮定した、または調理法が不明な場合
 - low: 食品名が曖昧、または量が全く不明な場合
 - 揚げ物・中華料理など油の量が不明な場合は必ずmediumにする
@@ -188,8 +190,10 @@ TEXT;
 最終回答はJSONのみ。前置きや説明は不要。
 
 食品の場合の形式:
-- 通常: {"kcal": 整数, "assumed_weight_g": 整数, "confidence": "high"|"medium"|"low"}
-- 商品名が特定できた場合: {"kcal": 整数, "assumed_weight_g": 整数, "confidence": "high"|"medium"|"low", "product_name": "正式な商品名"}
+- 通常: {"kcal": 整数, "confidence": "high"|"medium"|"low"}
+- 重量(g)が公式または推定で分かる場合: {"kcal": 整数, "assumed_weight_g": 整数, "confidence": "high"|"medium"|"low"}
+- 商品名が特定できた場合: 上記に "product_name": "正式な商品名" を追加
+- 公式ページに重量(g)が無い high の場合は assumed_weight_g を含めない
 非食品の場合の形式: {"error":"not_food"}
 
 食品名: {$foodName}
@@ -294,7 +298,7 @@ PROMPT;
      * Claude のテキスト応答を解析する。
      * 非食品は 'not_food'、食品推定成功は配列、パース失敗は null を返す。
      *
-     * @return array{kcal: int, assumed_weight_g: int, confidence: string, product_name?: string}|'not_food'|null
+     * @return array{kcal: int, assumed_weight_g?: int, confidence: string, product_name?: string}|'not_food'|null
      */
     private function parseResponse(string $text): array|string|null
     {
@@ -360,15 +364,11 @@ PROMPT;
      * kcal・assumed_weight_g・confidence のバリデーションと型変換を行う。
      *
      * @param array<string, mixed> $json
-     * @return array{kcal: int, assumed_weight_g: int, confidence: string, product_name?: string}|null
+     * @return array{kcal: int, assumed_weight_g?: int, confidence: string, product_name?: string}|null
      */
     private function normalizeEstimate(array $json): ?array
     {
         if (!isset($json['kcal']) || !is_numeric($json['kcal'])) {
-            return null;
-        }
-
-        if (!isset($json['assumed_weight_g']) || !is_numeric($json['assumed_weight_g'])) {
             return null;
         }
 
@@ -379,17 +379,22 @@ PROMPT;
         }
 
         $kcal = (int) round((float) $json['kcal']);
-        $assumedWeightG = (int) round((float) $json['assumed_weight_g']);
 
-        if ($kcal <= 0 || $assumedWeightG <= 0) {
+        if ($kcal <= 0) {
             return null;
         }
 
         $normalized = [
             'kcal' => $kcal,
-            'assumed_weight_g' => $assumedWeightG,
             'confidence' => $confidence,
         ];
+
+        if (isset($json['assumed_weight_g']) && is_numeric($json['assumed_weight_g'])) {
+            $assumedWeightG = (int) round((float) $json['assumed_weight_g']);
+            if ($assumedWeightG > 0) {
+                $normalized['assumed_weight_g'] = $assumedWeightG;
+            }
+        }
 
         $productName = trim((string) ($json['product_name'] ?? ''));
         if ($productName !== '') {

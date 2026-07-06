@@ -21,7 +21,7 @@ import type {
   FoodSearchResult,
   SearchState,
 } from "../types/foodSearch.ts";
-import { fetchMealHistory, type MealType } from "../api/client.ts";
+import { fetchMealHistory, saveUserFood, type MealType } from "../api/client.ts";
 
 export interface MealItemInput {
   label: string;
@@ -51,6 +51,11 @@ const INITIAL_STEPS = [
   {
     key: "open_food_facts_searching",
     label: "Open Food Factsで商品情報を検索中",
+    status: "pending",
+  },
+  {
+    key: "local_db_searching",
+    label: "登録済み食品を検索中",
     status: "pending",
   },
   {
@@ -274,11 +279,26 @@ export function AddFoodModal({
       if (result) {
         const { calories, caloriesEdited } = resolveEditedCalories(result);
         const item: MealItemInput = {
-          label: result.name,
+          label: result.displayName,
           kcal: `${calories}kcal`,
           caloriesEdited,
         };
         await onSave(item);
+        if (result.source === "ai_web_search" && !caloriesEdited) {
+          try {
+            await saveUserFood({
+              displayName: item.label,
+              name: result.name,
+              amount: result.amount,
+              unit: result.unit,
+              calories,
+              source: "ai_web_search",
+              rawInput: result.rawInput,
+            });
+          } catch (saveFoodError) {
+            console.warn("Failed to save user food", saveFoodError);
+          }
+        }
         setCompletedResult({ ...result, calories, caloriesEdited });
         setProgress({ ...progress, state: "completed" });
         return;
@@ -478,7 +498,7 @@ export function AddFoodModal({
         <div style={completedCardStyle}>
           <div style={completedTitleStyle}>追加しました</div>
           <div style={completedFoodStyle}>
-            {completedResult.name} / {completedResult.calories}kcal
+            {completedResult.displayName} / {completedResult.calories}kcal
           </div>
           <div style={completedMetaStyle}>
             {mealTitle} 合計: {completedSummary.nextMealTotal}kcal

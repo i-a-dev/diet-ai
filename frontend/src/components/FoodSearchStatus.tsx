@@ -101,6 +101,8 @@ function detectActiveApiLabel(steps: FoodSearchStep[], mode: "food" | "web"): st
       return "FatSecret API";
     case "open_food_facts_searching":
       return "Open Food Facts API";
+    case "local_db_searching":
+      return "自前食品DB";
     case "claude_estimating":
       return "Claude API（AI推定）";
     case "ai_web_searching":

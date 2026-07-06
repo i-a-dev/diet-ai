@@ -2,6 +2,7 @@ export type FoodSource =
   | "regex"
   | "fatsecret"
   | "open_food_facts"
+  | "local_db"
   | "claude_estimate"
   | "ai_web_search"
   | "user_registered";
@@ -52,6 +53,7 @@ export interface FoodSearchStep {
     | "regex_extracting"
     | "fatsecret_searching"
     | "open_food_facts_searching"
+    | "local_db_searching"
     | "claude_estimating"
     | "waiting_user_choice"
     | "ai_web_searching";
