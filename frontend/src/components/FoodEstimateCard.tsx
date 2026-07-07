@@ -23,17 +23,30 @@ export function FoodEstimateCard({
   const isDetail = variant === "detail";
   const isEdited = parseCaloriesEdited(caloriesEdited ?? result.caloriesEdited);
   const showActions = !isDetail;
+  const databaseSourceLabel =
+    result.source === "fatsecret"
+      ? "データ提供：FatSecret"
+      : result.source === "open_food_facts"
+        ? "データ提供：Open Food Facts"
+        : null;
 
   return (
     <div style={cardStyle}>
-      <div style={titleStyle}>
-        {isHistory
-          ? "過去の記録を選択しました"
-          : "AIがカロリーを推定しました"}
-      </div>
-      <div style={badgeRowStyle}>
-        <span style={badgeStyle}>{isHistory ? "履歴" : "推定"}</span>
-      </div>
+      {!isDetail && (
+        <div style={titleStyle}>
+          {isHistory
+            ? "過去の記録を選択しました"
+            : "AIがカロリーを推定しました"}
+        </div>
+      )}
+      {!isDetail && (
+        <div style={badgeRowStyle}>
+          <span style={badgeStyle}>{isHistory ? "履歴" : "推定"}</span>
+        </div>
+      )}
+      {isDetail && databaseSourceLabel && (
+        <div style={databaseSourceStyle}>{databaseSourceLabel}</div>
+      )}
       <div style={nameStyle}>{result.displayName}</div>
       <div style={calorieStyle}>{result.calories} kcal</div>
       {result.items && result.items.length > 0 && (
@@ -111,6 +124,13 @@ const metaStyle: CSSProperties = {
   marginTop: 4,
   color: "#4B5563",
   fontSize: 12,
+};
+
+const databaseSourceStyle: CSSProperties = {
+  marginBottom: 6,
+  fontSize: 12,
+  color: "#6B7280",
+  fontWeight: 600,
 };
 
 const secondaryButtonStyle: CSSProperties = {

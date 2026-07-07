@@ -6,6 +6,10 @@ export function shouldUseEstimateCard(
   result: FoodSearchResult,
   mode: FoodResultDisplayMode,
 ): boolean {
+  if (mode === "detail") {
+    return true;
+  }
+
   if (mode === "history") {
     return (
       result.source === "claude_estimate" || result.source === "user_registered"

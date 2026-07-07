@@ -24,8 +24,10 @@ export function FoodSearchResultCard({
 
   return (
     <div style={cardStyle}>
-      <div style={titleStyle}>候補が見つかりました</div>
-      {databaseSourceLabel && <div style={sourceStyle}>{databaseSourceLabel}</div>}
+      {!isDetail && <div style={titleStyle}>候補が見つかりました</div>}
+      {databaseSourceLabel && (
+        <div style={sourceStyle}>{databaseSourceLabel}</div>
+      )}
       <div style={nameStyle}>{result.displayName}</div>
       <div style={calorieStyle}>{result.calories} kcal</div>
       <CalorieSourceInfo
