@@ -4,7 +4,7 @@ import type {
   FoodSource,
   SearchConfidence,
 } from "../types/foodSearch.ts";
-import { parseCaloriesEdited } from "./calorieSource.ts";
+import { isWebSearchSource, parseCaloriesEdited } from "./calorieSource.ts";
 
 export function parseKcalFromString(kcal: string): number {
   const parsed = Number(kcal.replace(/kcal/i, "").trim());
@@ -50,6 +50,8 @@ function resolveMealItemSource(item: MealItemInput): FoodSource {
     source === "local_db" ||
     source === "claude_estimate" ||
     source === "ai_web_search" ||
+    source === "brave_html" ||
+    source === "claude_web_search" ||
     source === "user_registered"
   ) {
     return source;
@@ -78,7 +80,7 @@ function resolveMealItemConfidence(
     return "medium";
   }
 
-  if (source === "ai_web_search") {
+  if (isWebSearchSource(source)) {
     return "high";
   }
 

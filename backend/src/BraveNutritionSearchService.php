@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 /**
  * Brave Search API で URL を探し、HTML からカロリーを抽出する。
- * 見つからない場合は null を返し、呼び出し元で Claude による商品名・参照 URL 特定後に HTML 抽出する。
  */
 final class BraveNutritionSearchService
 {
@@ -15,14 +14,54 @@ final class BraveNutritionSearchService
     }
 
     /**
-     * @param list<string> $contextTexts 入力や Claude 特定名など、店舗判定に使う追加テキスト
+     * 従来互換: 商品名からカロリーを検索する。
+     *
+     * @param list<string> $contextTexts
      * @return array{kcal: int, confidence: string, product_name?: string, source_url?: string}|null
      */
     public function searchFoodCalories(string $foodName, array $contextTexts = []): ?array
     {
-        $foodName = trim($foodName);
+        $result = $this->searchWithIdentity($foodName, $foodName, $contextTexts, 'calorie');
 
-        if ($foodName === '') {
+        if ($result === null) {
+            return null;
+        }
+
+        return [
+            'kcal' => $result['kcal'],
+            'confidence' => $result['confidence'],
+            'product_name' => $result['product_name'],
+            'source_url' => $result['source_url'],
+        ];
+    }
+
+    /**
+     * 商品同一性を判定しながら Brave + HTML 抽出を行う。
+     *
+     * @param list<string> $contextTexts
+     * @param 'nutrition'|'calorie' $queryStyle
+     * @return array{
+     *   kcal: int,
+     *   confidence: string,
+     *   product_name: string,
+     *   brand?: string,
+     *   source_url: string,
+     *   source: string,
+     *   identity_confidence: string,
+     *   is_official_url: bool
+     * }|null
+     */
+    public function searchWithIdentity(
+        string $foodName,
+        string $userInput,
+        array $contextTexts = [],
+        string $queryStyle = 'nutrition',
+        ?string $brand = null,
+    ): ?array {
+        $foodName = trim($foodName);
+        $userInput = trim($userInput);
+
+        if ($foodName === '' || $userInput === '') {
             return null;
         }
 
@@ -30,11 +69,15 @@ final class BraveNutritionSearchService
             return null;
         }
 
-        $searchQuery = $this->buildCalorieSearchQuery($foodName);
+        $searchQuery = $queryStyle === 'calorie'
+            ? $this->buildCalorieSearchQuery($foodName)
+            : $this->buildNutritionSearchQuery($foodName);
+
         $storeContext = array_values(array_unique(array_filter(array_map(
             'trim',
-            array_merge([$foodName], $contextTexts),
+            array_merge([$foodName, $userInput], $contextTexts),
         ))));
+
         $queriesToTry = array_values(array_unique(array_merge(
             $this->braveSearch->buildFallbackQueries($searchQuery, $storeContext),
             [$searchQuery],
@@ -65,12 +108,27 @@ final class BraveNutritionSearchService
             ]);
             $probeResult = $this->pageExtractor->probeUrls($rankedUrls, ['query' => $foodName]);
 
-            if ($probeResult['best'] !== null) {
-                return $this->toEstimateResult($foodName, $probeResult['best'], $mergedResults);
+            if ($probeResult['best'] === null) {
+                continue;
             }
+
+            return $this->toIdentityResult(
+                $userInput,
+                $foodName,
+                $probeResult['best'],
+                $mergedResults,
+                $brand,
+            );
         }
 
         return null;
+    }
+
+    public function buildNutritionSearchQuery(string $foodName): string
+    {
+        $coreName = $this->stripTrailingAmount(trim($foodName));
+
+        return $coreName . ' 栄養成分 エネルギー kcal';
     }
 
     public function buildCalorieSearchQuery(string $foodName): string
@@ -82,15 +140,7 @@ final class BraveNutritionSearchService
             return $trimmed;
         }
 
-        $coreName = trim((string) preg_replace(
-            '/\s*\d+(?:\.\d+)?\s*(g|ml|個|杯|切れ|袋|本)\s*$/iu',
-            '',
-            $trimmed,
-        ));
-
-        if ($coreName === '') {
-            $coreName = $trimmed;
-        }
+        $coreName = $this->stripTrailingAmount($trimmed);
 
         return $coreName . ' カロリー';
     }
@@ -98,15 +148,61 @@ final class BraveNutritionSearchService
     /**
      * @param array{kcal: int, url: string, score: int} $best
      * @param array<string, array{title: string, url: string, description: string}> $mergedResults
-     * @return array{kcal: int, confidence: string, product_name?: string, source_url?: string}
+     * @return array{
+     *   kcal: int,
+     *   confidence: string,
+     *   product_name: string,
+     *   brand?: string,
+     *   source_url: string,
+     *   source: string,
+     *   identity_confidence: string,
+     *   is_official_url: bool
+     * }
      */
-    private function toEstimateResult(string $foodName, array $best, array $mergedResults): array
-    {
-        return [
+    private function toIdentityResult(
+        string $userInput,
+        string $searchName,
+        array $best,
+        array $mergedResults,
+        ?string $brand,
+    ): array {
+        $sourceUrl = $best['url'];
+        $inferredName = $this->pageExtractor->inferProductNameFromMeta($sourceUrl, $searchName);
+        $productName = $inferredName !== '' ? $inferredName : $searchName;
+        $brandName = $brand !== null && trim($brand) !== '' ? trim($brand) : null;
+        $identityConfidence = $this->pageExtractor->assessProductIdentity(
+            $userInput,
+            $productName,
+            $brandName,
+        );
+        $isOfficialUrl = $this->pageExtractor->isOfficialUrl($sourceUrl);
+        $confidence = $identityConfidence === 'high' ? 'high' : 'medium';
+
+        $result = [
             'kcal' => $best['kcal'],
-            'confidence' => 'high',
-            'product_name' => $foodName,
-            'source_url' => $best['url'],
+            'confidence' => $confidence,
+            'product_name' => $productName,
+            'source_url' => $sourceUrl,
+            'source' => 'brave_html',
+            'identity_confidence' => $identityConfidence,
+            'is_official_url' => $isOfficialUrl,
         ];
+
+        if ($brandName !== null) {
+            $result['brand'] = $brandName;
+        }
+
+        return $result;
+    }
+
+    private function stripTrailingAmount(string $value): string
+    {
+        $coreName = trim((string) preg_replace(
+            '/\s*\d+(?:\.\d+)?\s*(g|ml|個|杯|切れ|袋|本)\s*$/iu',
+            '',
+            $value,
+        ));
+
+        return $coreName !== '' ? $coreName : $value;
     }
 }

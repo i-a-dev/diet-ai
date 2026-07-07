@@ -5,19 +5,22 @@ declare(strict_types=1);
 /**
  * Claude Haiku 4.5 で食品名からカロリー（kcal）を推定するサービス。
  * mode=web のとき:
- * 1. Claude web search で正式な商品名を特定
- * 2. Brave Search（正式商品名 カロリー）→ HTML 抽出
- * 3. 見つからなければ Claude の参照 URL から HTML 抽出
- *    （HTML 失敗時は Claude の kcal をフォールバック）
+ * 1. Brave Search + HTML 抽出（入力そのまま）
+ * 2. 商品同一性が曖昧なら Claude Haiku no_web で商品名候補を生成
+ * 3. 候補ごとに Brave 再検索 + HTML 抽出
+ * 4. それでも見つからなければ Claude Web Search をフォールバック
  */
 final class CalorieEstimateService
 {
     private const API_URL = 'https://api.anthropic.com/v1/messages';
     private const MODEL = 'claude-haiku-4-5-20251001';
     private const SYSTEM_PROMPT = 'あなたは日本の食品・料理全般に詳しいカロリー推定の専門家です。口に入れて摂取するもの（料理・飲み物・お菓子・ゼリー・サプリ・機能性食品・市販品）は食品として扱ってください。明らかに食べないもの（洗剤・化粧品・金属など）だけ {"error":"not_food"} を返してください。商品名が不明確でも食べ物の可能性がある場合は not_food にせず推定してください。食品の場合はJSONのみ返答し、前置きや説明は不要です。';
+    private const PRODUCT_CANDIDATE_SYSTEM_PROMPT = 'あなたは日本の市販食品に詳しい専門家です。Web検索はせず、カロリー推定もしません。入力が食べ物でない場合のみ {"error":"not_food"} を返してください。食品の場合は、日本国内で販売されている可能性が高い市販食品候補を最大3件返してください。JSONのみ返答し、前置きや説明は不要です。';
     private const WEB_SEARCH_SYSTEM_PROMPT = 'あなたは日本の食品・市販品に詳しい専門家です。口に入れて摂取するものは食品として扱ってください。明らかに食べないものだけ {"error":"not_food"} を返してください。食品の場合は web_search で商品を調べ、正式な商品名とその商品の栄養成分・カロリーが載っているページ URL を返してください。まとめ記事・ブログよりメーカー公式・商品詳細ページを優先してください。最終回答はJSONのみ。前置きや説明は不要です。';
     private const WEB_SEARCH_MAX_TOKENS = 1024;
+    private const PRODUCT_CANDIDATE_MAX_TOKENS = 512;
     private const MAX_WEB_SEARCH_URL_FETCHES = 5;
+    private const MAX_PRODUCT_CANDIDATES = 3;
 
     public function __construct(
         private readonly ?BraveNutritionSearchService $braveNutritionSearch = null,
@@ -30,9 +33,26 @@ final class CalorieEstimateService
      * mode:
      * - auto: 従来どおり high 以外で Web 検索を試行
      * - no_web: Web 検索を使わず 1 回のみ推定
-     * - web: Claude で商品名特定 → Brave 検索 → HTML 抽出
+     * - web: Brave → Claude no_web 商品名補正 → Brave 再検索 → Claude Web Search
      *
-     * @return array{kcal: int, assumed_weight_g?: int, confidence: string, product_name?: string, source_url?: string}
+     * @return array{
+     *   kcal?: int,
+     *   assumed_weight_g?: int,
+     *   confidence?: string,
+     *   product_name?: string,
+     *   source_url?: string,
+     *   source?: string,
+     *   identity_confidence?: string,
+     *   needs_confirmation?: bool,
+     *   candidates?: list<array{
+     *     product_name: string,
+     *     brand?: string,
+     *     kcal: int,
+     *     source_url?: string,
+     *     source: string,
+     *     identity_confidence: string
+     *   }>
+     * }
      */
     public function estimate(string $foodName, string $mode = 'auto'): array
     {
@@ -61,46 +81,7 @@ final class CalorieEstimateService
         }
 
         if ($mode === 'web') {
-            $brave = $this->resolveBraveNutritionSearch();
-
-            $claudeResult = $this->requestClaudeWebIdentification($trimmed, $apiKey);
-            if ($claudeResult === 'not_food' || $claudeResult === null) {
-                throw new RuntimeException('カロリーを推定できませんでした。');
-            }
-
-            $productName = $claudeResult['product_name'];
-            $braveResult = $brave->searchFoodCalories($productName, [$trimmed, $productName]);
-            if ($braveResult !== null) {
-                return [
-                    'kcal' => $braveResult['kcal'],
-                    'confidence' => $braveResult['confidence'],
-                    'product_name' => $productName,
-                    'source_url' => $braveResult['source_url'],
-                ];
-            }
-
-            $htmlResult = $this->probeClaudeSourceUrls(
-                $claudeResult['source_urls'],
-                $productName,
-                [$trimmed, $productName],
-            );
-
-            if ($htmlResult !== null) {
-                return [
-                    'kcal' => $htmlResult['kcal'],
-                    'confidence' => 'high',
-                    'product_name' => $productName,
-                    'source_url' => $htmlResult['url'],
-                ];
-            }
-
-            $fallbackConfidence = $claudeResult['confidence'] === 'high' ? 'medium' : $claudeResult['confidence'];
-
-            return [
-                'kcal' => $claudeResult['kcal'],
-                'confidence' => $fallbackConfidence,
-                'product_name' => $productName,
-            ];
+            return $this->estimateWithWebSearchFlow($trimmed, $apiKey);
         }
 
         $initial = $this->requestEstimate($trimmed, $apiKey);
@@ -125,6 +106,460 @@ final class CalorieEstimateService
     private function resolveNutritionPageExtractor(): NutritionPageExtractor
     {
         return $this->nutritionPageExtractor ?? new NutritionPageExtractor();
+    }
+
+    /**
+     * @return array{
+     *   kcal?: int,
+     *   confidence?: string,
+     *   product_name?: string,
+     *   source_url?: string,
+     *   source?: string,
+     *   identity_confidence?: string,
+     *   needs_confirmation?: bool,
+     *   candidates?: list<array{
+     *     product_name: string,
+     *     brand?: string,
+     *     kcal: int,
+     *     source_url?: string,
+     *     source: string,
+     *     identity_confidence: string
+     *   }>
+     * }
+     */
+    private function estimateWithWebSearchFlow(string $trimmed, string $apiKey): array
+    {
+        if ($this->looksLikeHomeCookedMeal($trimmed)) {
+            throw new RuntimeException('商品検索ではなく通常のAI推定をご利用ください。');
+        }
+
+        $brave = $this->resolveBraveNutritionSearch();
+        $candidates = [];
+
+        $directResult = $brave->searchWithIdentity($trimmed, $trimmed, [$trimmed], 'nutrition');
+        if ($directResult !== null) {
+            if ($directResult['identity_confidence'] === 'high') {
+                return $this->formatSingleWebResult($directResult);
+            }
+
+            $candidates[] = $directResult;
+        }
+
+        $aiCandidates = $this->requestClaudeProductCandidates($trimmed, $apiKey);
+        if ($aiCandidates === 'not_food') {
+            throw new RuntimeException('カロリーを推定できませんでした。');
+        }
+
+        foreach ($aiCandidates as $aiCandidate) {
+            $searchName = $this->buildCandidateSearchName($aiCandidate);
+            $queries = $this->buildCandidateSearchQueries($aiCandidate);
+            $found = null;
+
+            foreach ($queries as $queryStyle) {
+                $found = $brave->searchWithIdentity(
+                    $searchName,
+                    $trimmed,
+                    [$trimmed, $searchName, $aiCandidate['brand'] ?? ''],
+                    $queryStyle,
+                    $aiCandidate['brand'] ?? null,
+                );
+
+                if ($found !== null) {
+                    break;
+                }
+            }
+
+            if ($found === null) {
+                continue;
+            }
+
+            if (($aiCandidate['product_name'] ?? '') !== '') {
+                $found['product_name'] = $aiCandidate['product_name'];
+            }
+
+            if (($aiCandidate['brand'] ?? '') !== '') {
+                $found['brand'] = $aiCandidate['brand'];
+            }
+
+            $candidates[] = $found;
+        }
+
+        $candidates = $this->dedupeWebCandidates($candidates);
+        $highCandidates = array_values(array_filter(
+            $candidates,
+            static fn (array $candidate): bool => ($candidate['identity_confidence'] ?? '') === 'high',
+        ));
+
+        if (count($highCandidates) === 1) {
+            return $this->formatSingleWebResult($highCandidates[0]);
+        }
+
+        if ($candidates !== []) {
+            return $this->formatConfirmationResponse($candidates);
+        }
+
+        return $this->estimateWithClaudeWebSearchFallback($trimmed, $apiKey);
+    }
+
+    /**
+     * @param array{
+     *   kcal: int,
+     *   confidence: string,
+     *   product_name: string,
+     *   brand?: string,
+     *   source_url?: string,
+     *   source: string,
+     *   identity_confidence: string
+     * } $result
+     * @return array{
+     *   kcal: int,
+     *   confidence: string,
+     *   product_name: string,
+     *   source_url?: string,
+     *   source: string,
+     *   identity_confidence: string,
+     *   needs_confirmation: bool
+     * }
+     */
+    private function formatSingleWebResult(array $result): array
+    {
+        return [
+            'kcal' => $result['kcal'],
+            'confidence' => $result['confidence'],
+            'product_name' => $result['product_name'],
+            'source_url' => $result['source_url'] ?? null,
+            'source' => $result['source'],
+            'identity_confidence' => $result['identity_confidence'],
+            'needs_confirmation' => false,
+        ];
+    }
+
+    /**
+     * @param list<array{
+     *   kcal: int,
+     *   confidence?: string,
+     *   product_name: string,
+     *   brand?: string,
+     *   source_url?: string,
+     *   source: string,
+     *   identity_confidence: string
+     * }> $candidates
+     * @return array{
+     *   needs_confirmation: bool,
+     *   candidates: list<array{
+     *     product_name: string,
+     *     brand?: string,
+     *     kcal: int,
+     *     source_url?: string,
+     *     source: string,
+     *     identity_confidence: string
+     *   }>
+     * }
+     */
+    private function formatConfirmationResponse(array $candidates): array
+    {
+        $formatted = [];
+
+        foreach ($candidates as $candidate) {
+            $item = [
+                'product_name' => $candidate['product_name'],
+                'kcal' => $candidate['kcal'],
+                'source' => $candidate['source'],
+                'identity_confidence' => $candidate['identity_confidence'],
+            ];
+
+            if (($candidate['brand'] ?? '') !== '') {
+                $item['brand'] = $candidate['brand'];
+            }
+
+            if (($candidate['source_url'] ?? '') !== '') {
+                $item['source_url'] = $candidate['source_url'];
+            }
+
+            $formatted[] = $item;
+        }
+
+        return [
+            'needs_confirmation' => true,
+            'candidates' => $formatted,
+        ];
+    }
+
+    /**
+     * @param list<array{
+     *   kcal: int,
+     *   product_name: string,
+     *   brand?: string,
+     *   source_url?: string,
+     *   source: string,
+     *   identity_confidence: string
+     * }> $candidates
+     * @return list<array{
+     *   kcal: int,
+     *   product_name: string,
+     *   brand?: string,
+     *   source_url?: string,
+     *   source: string,
+     *   identity_confidence: string
+     * }>
+     */
+    private function dedupeWebCandidates(array $candidates): array
+    {
+        $seen = [];
+        $unique = [];
+
+        foreach ($candidates as $candidate) {
+            $key = mb_strtolower(trim($candidate['product_name'])) . '|' . $candidate['kcal'];
+            if (isset($seen[$key])) {
+                continue;
+            }
+
+            $seen[$key] = true;
+            $unique[] = $candidate;
+        }
+
+        return $unique;
+    }
+
+    /**
+     * @param array{product_name: string, brand?: string} $candidate
+     */
+    private function buildCandidateSearchName(array $candidate): string
+    {
+        $brand = trim((string) ($candidate['brand'] ?? ''));
+        $productName = trim((string) ($candidate['product_name'] ?? ''));
+
+        if ($brand !== '' && $productName !== '') {
+            return $brand . ' ' . $productName;
+        }
+
+        return $productName;
+    }
+
+    /**
+     * @param array{product_name: string, brand?: string} $candidate
+     * @return list<'calorie'|'nutrition'>
+     */
+    private function buildCandidateSearchQueries(array $candidate): array
+    {
+        $brand = trim((string) ($candidate['brand'] ?? ''));
+
+        return $brand !== '' ? ['calorie', 'nutrition'] : ['nutrition', 'calorie'];
+    }
+
+    /**
+     * @return array{
+     *   kcal: int,
+     *   confidence: string,
+     *   product_name: string,
+     *   source_url?: string,
+     *   source: string,
+     *   identity_confidence: string,
+     *   needs_confirmation: bool
+     * }|array{
+     *   needs_confirmation: bool,
+     *   candidates: list<array{
+     *     product_name: string,
+     *     brand?: string,
+     *     kcal: int,
+     *     source_url?: string,
+     *     source: string,
+     *     identity_confidence: string
+     *   }>
+     * }
+     */
+    private function estimateWithClaudeWebSearchFallback(string $trimmed, string $apiKey): array
+    {
+        $claudeResult = $this->requestClaudeWebIdentification($trimmed, $apiKey);
+        if ($claudeResult === 'not_food' || $claudeResult === null) {
+            throw new RuntimeException('カロリーを推定できませんでした。');
+        }
+
+        $productName = $claudeResult['product_name'];
+        $htmlResult = $this->probeClaudeSourceUrls(
+            $claudeResult['source_urls'],
+            $productName,
+            [$trimmed, $productName],
+        );
+
+        $extractor = $this->resolveNutritionPageExtractor();
+        $identityConfidence = $extractor->assessProductIdentity($trimmed, $productName);
+
+        if ($htmlResult !== null) {
+            $confidence = $identityConfidence === 'high' ? 'high' : 'medium';
+            $result = [
+                'kcal' => $htmlResult['kcal'],
+                'confidence' => $confidence,
+                'product_name' => $productName,
+                'source_url' => $htmlResult['url'],
+                'source' => 'claude_web_search',
+                'identity_confidence' => $identityConfidence,
+            ];
+
+            if ($identityConfidence === 'high') {
+                return $this->formatSingleWebResult($result);
+            }
+
+            return $this->formatConfirmationResponse([$result]);
+        }
+
+        $fallbackConfidence = $claudeResult['confidence'] === 'high' ? 'medium' : $claudeResult['confidence'];
+        if ($identityConfidence !== 'high') {
+            $fallbackConfidence = $fallbackConfidence === 'high' ? 'medium' : $fallbackConfidence;
+        }
+
+        $result = [
+            'kcal' => $claudeResult['kcal'],
+            'confidence' => $fallbackConfidence,
+            'product_name' => $productName,
+            'source' => 'claude_web_search',
+            'identity_confidence' => $identityConfidence,
+        ];
+
+        if ($identityConfidence === 'high') {
+            return $this->formatSingleWebResult($result);
+        }
+
+        return $this->formatConfirmationResponse([$result]);
+    }
+
+    private function looksLikeHomeCookedMeal(string $foodName): bool
+    {
+        $normalized = mb_strtolower(trim($foodName));
+
+        $markers = [
+            '自炊',
+            '手作り',
+            '自家製',
+            '炒め',
+            '焼き',
+            '煮付け',
+            '定食',
+            'ご飯',
+            '大根',
+            'キャベツ',
+            '鶏むね',
+            '鶏もも',
+            '豚肉',
+            '牛肉',
+            'サラダ',
+            '味噌汁',
+            'スープ',
+            'カレー',
+            'シチュー',
+            '鍋',
+        ];
+
+        $matchCount = 0;
+        foreach ($markers as $marker) {
+            if (mb_strpos($normalized, mb_strtolower($marker)) !== false) {
+                $matchCount++;
+            }
+        }
+
+        return $matchCount >= 2 || mb_strpos($normalized, '自炊') !== false;
+    }
+
+    /**
+     * Claude Haiku no_web で市販食品候補を返す。
+     *
+     * @return list<array{product_name: string, brand: string, confidence: string}>|'not_food'
+     */
+    private function requestClaudeProductCandidates(string $foodName, string $apiKey): array|string
+    {
+        $payload = [
+            'model' => self::MODEL,
+            'max_tokens' => self::PRODUCT_CANDIDATE_MAX_TOKENS,
+            'system' => self::PRODUCT_CANDIDATE_SYSTEM_PROMPT,
+            'messages' => [
+                [
+                    'role' => 'user',
+                    'content' => $this->buildProductCandidatePrompt($foodName),
+                ],
+            ],
+        ];
+
+        $decoded = $this->postToAnthropic($payload, $apiKey, false);
+        $text = $this->extractText($decoded);
+
+        return $this->parseProductCandidateResponse($text);
+    }
+
+    private function buildProductCandidatePrompt(string $foodName): string
+    {
+        return <<<PROMPT
+以下の入力が食品かどうかを判定し、食品の場合は日本国内で販売されている可能性が高い市販食品候補を最大3件返してください。
+カロリー推定はしないでください。Web検索はしないでください。
+
+入力: {$foodName}
+
+最終回答は JSON のみ。前置きや説明は不要。
+
+食品の場合:
+{"candidates":[{"product_name":"正式な商品名","brand":"ブランド名","confidence":"high"|"medium"|"low"}]}
+非食品の場合: {"error":"not_food"}
+PROMPT;
+    }
+
+    /**
+     * @return list<array{product_name: string, brand: string, confidence: string}>|'not_food'
+     */
+    private function parseProductCandidateResponse(string $text): array|string
+    {
+        if ($text === '') {
+            return [];
+        }
+
+        foreach ($this->extractJsonCandidates($text) as $candidate) {
+            $json = json_decode($candidate, true);
+
+            if (!is_array($json)) {
+                continue;
+            }
+
+            if ($this->isNotFoodResponse($json)) {
+                return 'not_food';
+            }
+
+            if (!isset($json['candidates']) || !is_array($json['candidates'])) {
+                continue;
+            }
+
+            $parsed = [];
+
+            foreach ($json['candidates'] as $item) {
+                if (!is_array($item)) {
+                    continue;
+                }
+
+                $productName = trim((string) ($item['product_name'] ?? ''));
+                if ($productName === '') {
+                    continue;
+                }
+
+                $brand = trim((string) ($item['brand'] ?? ''));
+                $confidence = (string) ($item['confidence'] ?? 'medium');
+                if (!in_array($confidence, ['high', 'medium', 'low'], true)) {
+                    $confidence = 'medium';
+                }
+
+                $parsed[] = [
+                    'product_name' => $productName,
+                    'brand' => $brand,
+                    'confidence' => $confidence,
+                ];
+
+                if (count($parsed) >= self::MAX_PRODUCT_CANDIDATES) {
+                    break;
+                }
+            }
+
+            if ($parsed !== []) {
+                return $parsed;
+            }
+        }
+
+        return [];
     }
 
     /**
@@ -734,7 +1169,7 @@ PROMPT;
         $withoutFence = preg_replace('/^```(?:json)?\s*|\s*```$/m', '', $trimmed);
         $candidates[] = trim($withoutFence ?? $trimmed);
 
-        if (preg_match_all('/\{[^{}]*(?:"error"\s*:\s*"not_food"|"kcal"\s*:\s*\d+|"product_name"\s*:|"source_urls"\s*:)[^{}]*\}/s', $text, $matches) === 1) {
+        if (preg_match_all('/\{[^{}]*(?:"error"\s*:\s*"not_food"|"kcal"\s*:\s*\d+|"product_name"\s*:|"source_urls"\s*:|"candidates"\s*:)[^{}]*\}/s', $text, $matches) === 1) {
             foreach ($matches[0] as $match) {
                 $candidates[] = $match;
             }

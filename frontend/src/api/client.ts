@@ -273,12 +273,25 @@ export function fetchMealHistory(options?: {
   );
 }
 
-export interface CalorieEstimateResponse {
+export interface CalorieEstimateCandidate {
+  product_name: string;
+  brand?: string;
   kcal: number;
+  source_url?: string;
+  source: "brave_html" | "claude_web_search";
+  identity_confidence: "high" | "medium" | "low";
+}
+
+export interface CalorieEstimateResponse {
+  kcal?: number;
   assumed_weight_g?: number;
-  confidence: "high" | "medium" | "low";
+  confidence?: "high" | "medium" | "low";
   product_name?: string;
   source_url?: string;
+  source?: "brave_html" | "claude_web_search";
+  identity_confidence?: "high" | "medium" | "low";
+  needs_confirmation?: boolean;
+  candidates?: CalorieEstimateCandidate[];
 }
 
 export type CalorieEstimateMode = "auto" | "no_web" | "web";

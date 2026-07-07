@@ -1,6 +1,8 @@
 import {
   estimateCalories,
   searchUserFoods,
+  type CalorieEstimateCandidate,
+  type CalorieEstimateResponse,
   type UserFoodSummary,
 } from "../api/client.ts";
 import {
@@ -8,12 +10,14 @@ import {
   getWebSearchQuota,
 } from "./webSearchQuotaService.ts";
 import type {
+  FoodSearchCandidate,
   FoodSearchProgress,
   FoodSearchResult,
   FoodSearchStep,
   SearchConfidence,
   SearchState,
 } from "../types/foodSearch.ts";
+import { isWebSearchSource } from "../utils/calorieSource.ts";
 
 const FOOD_SEARCH_CACHE_KEY = "dietai.foodSearchCache.v2";
 const FATSECRET_ENDPOINT = import.meta.env.VITE_FATSECRET_SEARCH_ENDPOINT as
@@ -225,10 +229,10 @@ function storeResult(result: FoodSearchResult): void {
 
 function buildEstimateDisplayName(
   displayBaseName: string,
-  source: "claude_estimate" | "ai_web_search",
+  source: FoodSearchResult["source"],
   assumedWeightG?: number,
 ): string {
-  if (source === "ai_web_search") {
+  if (isWebSearchSource(source)) {
     return displayBaseName;
   }
 
@@ -240,9 +244,91 @@ function buildEstimateDisplayName(
   return `${displayBaseName}（推定）`;
 }
 
+function resolveWebSearchSource(
+  source?: CalorieEstimateResponse["source"] | CalorieEstimateCandidate["source"],
+): "brave_html" | "claude_web_search" | "ai_web_search" {
+  if (source === "brave_html" || source === "claude_web_search") {
+    return source;
+  }
+
+  return "ai_web_search";
+}
+
+function mapEstimateCandidate(
+  candidate: CalorieEstimateCandidate,
+): FoodSearchCandidate {
+  return {
+    product_name: candidate.product_name,
+    brand: candidate.brand,
+    kcal: candidate.kcal,
+    source_url: candidate.source_url ?? null,
+    source: resolveWebSearchSource(candidate.source),
+    identity_confidence: candidate.identity_confidence,
+  };
+}
+
+function resultFromWebEstimate(
+  input: string,
+  estimate: CalorieEstimateResponse,
+): FoodSearchResult {
+  const productName = estimate.product_name?.trim();
+  const displayBaseName =
+    productName && productName.length > 0 ? productName : input;
+  const source = resolveWebSearchSource(estimate.source);
+
+  return {
+    id: `${source}-${Date.now()}`,
+    name: displayBaseName,
+    displayName: displayBaseName,
+    amount: 1,
+    unit: "食",
+    calories: estimate.kcal ?? 0,
+    protein: null,
+    fat: null,
+    carbs: null,
+    source,
+    confidence: estimate.confidence ?? "medium",
+    isEstimated: false,
+    rawInput: input,
+    selectedProductName: displayBaseName,
+    sourceUrl: estimate.source_url?.trim() || null,
+    identityConfidence: estimate.identity_confidence ?? estimate.confidence ?? "medium",
+  };
+}
+
+function resultFromWebCandidate(
+  input: string,
+  candidate: FoodSearchCandidate,
+): FoodSearchResult {
+  const displayName = candidate.brand
+    ? `${candidate.brand} ${candidate.product_name}`
+    : candidate.product_name;
+
+  return {
+    id: `${candidate.source}-${Date.now()}`,
+    name: displayName,
+    displayName,
+    amount: 1,
+    unit: "食",
+    calories: candidate.kcal,
+    protein: null,
+    fat: null,
+    carbs: null,
+    source: candidate.source,
+    confidence:
+      candidate.identity_confidence === "high" ? "high" : "medium",
+    isEstimated: false,
+    rawInput: input,
+    selectedProductName: displayName,
+    brandName: candidate.brand ?? null,
+    sourceUrl: candidate.source_url ?? null,
+    identityConfidence: candidate.identity_confidence,
+  };
+}
+
 function resultFromEstimate(
   input: string,
-  source: "claude_estimate" | "ai_web_search",
+  source: "claude_estimate" | FoodSearchResult["source"],
   estimate: {
     kcal: number;
     assumed_weight_g?: number;
@@ -256,7 +342,7 @@ function resultFromEstimate(
     productName && productName.length > 0 ? productName : input;
   const assumedWeightG = estimate.assumed_weight_g;
   const hasWeight = assumedWeightG != null && assumedWeightG > 0;
-  const isAiWebSearch = source === "ai_web_search";
+  const isAiWebSearch = isWebSearchSource(source);
   const sourceUrl = estimate.source_url?.trim() || null;
 
   return {
@@ -546,7 +632,16 @@ async function estimateWithClaude(
 ): Promise<FoodSearchResult> {
   try {
     const estimate = await estimateCalories(rawInput, "no_web");
-    return resultFromEstimate(rawInput, "claude_estimate", estimate);
+    if (estimate.kcal == null || estimate.confidence == null) {
+      throw new Error("Incomplete estimate response");
+    }
+    return resultFromEstimate(rawInput, "claude_estimate", {
+      kcal: estimate.kcal,
+      assumed_weight_g: estimate.assumed_weight_g,
+      confidence: estimate.confidence,
+      product_name: estimate.product_name,
+      source_url: estimate.source_url,
+    });
   } catch {
     // 変更: どのAPIが失敗しても最後は推定結果を返すため、簡易推定にフォールバック。
     const fallbackCalories =
@@ -576,12 +671,14 @@ function buildProgress(
   steps: FoodSearchStep[],
   result: FoodSearchResult | null,
   message: string,
+  candidates?: FoodSearchCandidate[],
 ): FoodSearchProgress {
   return {
     state,
     steps,
     result,
     message,
+    candidates,
   };
 }
 
@@ -726,17 +823,49 @@ export async function runAiWebSearch(
   try {
     if (quota.remainingCount > 0) {
       const webEstimate = await estimateCalories(input, "web");
-      const result = resultFromEstimate(input, "ai_web_search", webEstimate);
-      storeResult(result);
-      consumeWebSearchQuota();
-      return emitProgress(onProgress, {
-        state: "web_found",
-        steps: updateStep(steps, "ai_web_searching", "done"),
-        result,
-        message: "候補が見つかりました",
-      });
+
+      if (webEstimate.needs_confirmation && (webEstimate.candidates?.length ?? 0) > 0) {
+        const candidates = webEstimate.candidates!.map(mapEstimateCandidate);
+        consumeWebSearchQuota();
+        return emitProgress(onProgress, {
+          state: "needs_confirmation",
+          steps: updateStep(steps, "ai_web_searching", "done"),
+          result: null,
+          candidates,
+          message: "候補商品の確認が必要です",
+        });
+      }
+
+      if (webEstimate.kcal != null) {
+        const result = resultFromWebEstimate(input, webEstimate);
+        storeResult(result);
+        consumeWebSearchQuota();
+        return emitProgress(onProgress, {
+          state: "web_found",
+          steps: updateStep(steps, "ai_web_searching", "done"),
+          result,
+          message: "候補が見つかりました",
+        });
+      }
     }
   } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "商品情報検索に失敗しました";
+
+    if (message.includes("通常のAI推定")) {
+      const fallbackEstimate = await estimateWithClaude(
+        input,
+        parseFoodInputByRegex(input),
+      );
+      return emitProgress(onProgress, {
+        state: "low_confidence_estimate",
+        steps: updateStep(steps, "ai_web_searching", "done"),
+        result: fallbackEstimate,
+        message:
+          "商品検索ではなく、通常のAI推定結果を表示しています。",
+      });
+    }
+
     console.warn(
       "AI web search failed, fallback to low confidence estimate",
       error,
@@ -754,4 +883,13 @@ export async function runAiWebSearch(
     message:
       "Web検索しましたが、うまくヒットしませんでした。AI推定カロリーを表示しています。",
   });
+}
+
+export function buildResultFromSelectedCandidate(
+  rawInput: string,
+  candidate: FoodSearchCandidate,
+): FoodSearchResult {
+  const result = resultFromWebCandidate(rawInput, candidate);
+  storeResult(result);
+  return result;
 }

@@ -643,6 +643,96 @@ final class NutritionPageExtractor
         return (string) mb_substr($html, $start, $end - $start);
     }
 
+    public function isOfficialUrl(string $url): bool
+    {
+        $host = strtolower((string) parse_url(trim($url), PHP_URL_HOST));
+
+        return $host !== '' && $this->isOfficialHost($host);
+    }
+
+    /**
+     * ユーザー入力と候補商品名の同一性を判定する。
+     *
+     * @return 'high'|'medium'|'low'
+     */
+    public function assessProductIdentity(
+        string $userInput,
+        string $candidateProductName,
+        ?string $brand = null,
+    ): string {
+        $userNormalized = $this->normalizeIdentityText($userInput);
+        $candidateNormalized = $this->normalizeIdentityText($candidateProductName);
+
+        if ($userNormalized === '' || $candidateNormalized === '') {
+            return 'low';
+        }
+
+        if ($userNormalized === $candidateNormalized) {
+            return 'high';
+        }
+
+        $userTokens = $this->extractIdentityTokens($userInput);
+        $candidateTokens = $this->extractIdentityTokens($candidateProductName);
+
+        if ($userTokens === [] || $candidateTokens === []) {
+            return 'low';
+        }
+
+        $brandNormalized = $brand !== null && trim($brand) !== ''
+            ? $this->normalizeIdentityText($brand)
+            : '';
+        $userHasBrandHint = $this->inputContainsBrandHint($userNormalized, $brandNormalized, $candidateTokens);
+        $extraCandidateTokens = array_values(array_diff($candidateTokens, $userTokens));
+        $missingUserTokens = array_values(array_diff($userTokens, $candidateTokens));
+
+        if ($missingUserTokens !== []) {
+            $matchedUserTokens = array_values(array_intersect($userTokens, $candidateTokens));
+            if ($matchedUserTokens === []) {
+                return 'low';
+            }
+
+            return 'medium';
+        }
+
+        if ($extraCandidateTokens === []) {
+            return 'high';
+        }
+
+        $extraBrandTokens = array_values(array_filter(
+            $extraCandidateTokens,
+            fn (string $token): bool => $this->isKnownBrandToken($token),
+        ));
+
+        if ($extraBrandTokens !== [] && !$userHasBrandHint) {
+            return 'medium';
+        }
+
+        if ($this->tokensAreEquivalentSuperset($userTokens, $candidateTokens)) {
+            return $userHasBrandHint ? 'high' : 'medium';
+        }
+
+        return 'medium';
+    }
+
+    /**
+     * Brave 検索結果のタイトル等から商品名らしき文字列を推定する。
+     */
+    public function inferProductNameFromMeta(string $url, string $fallback = ''): string
+    {
+        $meta = $this->resultMetaByUrl[$url] ?? ['title' => '', 'description' => ''];
+        $title = trim((string) ($meta['title'] ?? ''));
+
+        if ($title === '') {
+            return $fallback;
+        }
+
+        $title = (string) preg_replace('/\s*[|｜\-–—].*$/u', '', $title);
+        $title = (string) preg_replace('/\s*(栄養成分|カロリー|エネルギー).*$/u', '', $title);
+        $title = trim($title);
+
+        return $title !== '' ? $title : $fallback;
+    }
+
     private function isOfficialHost(string $host): bool
     {
         $officialDomains = [
@@ -666,6 +756,129 @@ final class NutritionPageExtractor
 
         foreach ($officialDomains as $domain) {
             if ($host === $domain || str_ends_with($host, '.' . $domain)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function extractIdentityTokens(string $text): array
+    {
+        $normalized = $this->normalizeIdentityText($text);
+        $normalized = (string) preg_replace(
+            '/\b(栄養成分|エネルギー|kcal|カロリー)\b/u',
+            ' ',
+            $normalized,
+        );
+        $normalized = (string) preg_replace('/\s*\d+(?:\.\d+)?\s*(g|ml|個|杯|切れ|袋|本)\s*/iu', ' ', $normalized);
+        $normalized = (string) preg_replace('/\s+/u', ' ', trim($normalized));
+
+        $parts = preg_split('/[\s　]+/u', $normalized) ?: [];
+        $tokens = [];
+
+        foreach ($parts as $part) {
+            $part = trim($part);
+            if ($part === '' || mb_strlen($part) < 2) {
+                continue;
+            }
+            $tokens[] = $part;
+        }
+
+        return array_values(array_unique($tokens));
+    }
+
+    private function normalizeIdentityText(string $text): string
+    {
+        return $this->normalizeProductMatchText($text);
+    }
+
+    /**
+     * @param list<string> $candidateTokens
+     */
+    private function inputContainsBrandHint(
+        string $userNormalized,
+        string $brandNormalized,
+        array $candidateTokens,
+    ): bool {
+        if ($brandNormalized !== '' && str_contains($userNormalized, $brandNormalized)) {
+            return true;
+        }
+
+        foreach ($candidateTokens as $token) {
+            if (!$this->isKnownBrandToken($token)) {
+                continue;
+            }
+
+            if (str_contains($userNormalized, $token)) {
+                return true;
+            }
+        }
+
+        return $this->textContainsAny($userNormalized, [
+            'セブン',
+            'セブンプレミアム',
+            'ファミリーマート',
+            'ファミマ',
+            'ローソン',
+            'カルビー',
+            '東ハト',
+            '明治',
+            '森永',
+            '日清',
+            '味の素',
+        ]);
+    }
+
+    private function isKnownBrandToken(string $token): bool
+    {
+        return $this->textContainsAny($token, [
+            'セブン',
+            'セブンプレミアム',
+            'ファミリーマート',
+            'ファミマ',
+            'ローソン',
+            'カルビー',
+            '東ハト',
+            '明治',
+            '森永',
+            '日清',
+            '味の素',
+            'キリン',
+            'サントリー',
+            'コカコーラ',
+            'ポッキー',
+            'グリコ',
+            'ハウス',
+            '永谷園',
+        ]);
+    }
+
+    /**
+     * @param list<string> $userTokens
+     * @param list<string> $candidateTokens
+     */
+    private function tokensAreEquivalentSuperset(array $userTokens, array $candidateTokens): bool
+    {
+        foreach ($userTokens as $token) {
+            if (!in_array($token, $candidateTokens, true)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * @param list<string> $needles
+     */
+    private function textContainsAny(string $haystack, array $needles): bool
+    {
+        foreach ($needles as $needle) {
+            if (mb_strpos($haystack, mb_strtolower($needle)) !== false) {
                 return true;
             }
         }

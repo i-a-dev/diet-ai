@@ -93,7 +93,7 @@ function calcProgressRatio(steps: FoodSearchStep[]): number {
 function detectActiveApiLabel(steps: FoodSearchStep[], mode: "food" | "web"): string {
   const activeStep = steps.find((step) => step.status === "active");
   if (!activeStep) {
-    return mode === "web" ? "Claude API（Web検索）" : "待機中";
+    return mode === "web" ? "Brave Search / Claude API" : "待機中";
   }
 
   switch (activeStep.key) {
@@ -106,7 +106,7 @@ function detectActiveApiLabel(steps: FoodSearchStep[], mode: "food" | "web"): st
     case "claude_estimating":
       return "Claude API（AI推定）";
     case "ai_web_searching":
-      return "Claude API（Web検索）";
+      return "Brave Search / Claude API";
     case "regex_extracting":
       return "入力解析（ローカル処理）";
     default:

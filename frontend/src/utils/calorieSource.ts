@@ -1,11 +1,37 @@
-import type { SearchConfidence } from "../types/foodSearch.ts";
+import type { FoodSource } from "../types/foodSearch.ts";
+
+const WEB_SEARCH_SOURCES = new Set<FoodSource>([
+  "ai_web_search",
+  "brave_html",
+  "claude_web_search",
+]);
 
 export function parseCaloriesEdited(value: unknown): boolean {
   return value === true || value === 1 || value === "1" || value === "true";
 }
 
+export function isWebSearchSource(
+  source: FoodSource | string | null | undefined,
+): boolean {
+  return source != null && WEB_SEARCH_SOURCES.has(source as FoodSource);
+}
+
+export function toPersistedCalorieSource(
+  source: FoodSource | string | null | undefined,
+): FoodSource | string | null {
+  if (source == null) {
+    return null;
+  }
+
+  if (isWebSearchSource(source)) {
+    return "ai_web_search";
+  }
+
+  return source;
+}
+
 export function formatConfidenceText(
-  confidence: SearchConfidence | string | null | undefined,
+  confidence: string | null | undefined,
 ): string | null {
   switch (confidence) {
     case "high":
@@ -28,7 +54,7 @@ export function shouldShowConfidence(params: {
   }
 
   const source = params.source ?? null;
-  return source === "ai_web_search" || source === "claude_estimate";
+  return source === "ai_web_search" || source === "claude_estimate" || isWebSearchSource(source);
 }
 
 export function getCalorieSourceLabel(params: {
@@ -41,7 +67,7 @@ export function getCalorieSourceLabel(params: {
   }
 
   const source = params.source ?? null;
-  if (source === "ai_web_search") {
+  if (isWebSearchSource(source)) {
     return "AI Web検索で取得したカロリー";
   }
 
@@ -51,7 +77,7 @@ export function getCalorieSourceLabel(params: {
       source !== "fatsecret" &&
       source !== "open_food_facts" &&
       source !== "local_db" &&
-      source !== "ai_web_search")
+      !isWebSearchSource(source))
   ) {
     return "AI推定で取得したカロリー";
   }
@@ -66,7 +92,7 @@ export function shouldShowCalorieSourceUrl(params: {
 }): boolean {
   return (
     !parseCaloriesEdited(params.caloriesEdited) &&
-    params.source === "ai_web_search" &&
+    isWebSearchSource(params.source) &&
     typeof params.sourceUrl === "string" &&
     params.sourceUrl.trim() !== ""
   );

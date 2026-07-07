@@ -11,11 +11,14 @@ import { ORANGE } from "../constants.ts";
 import { FoodSearchStatus } from "./FoodSearchStatus.tsx";
 import { FoodResultPreview } from "./FoodResultPreview.tsx";
 import { LowConfidenceEstimateCard } from "./LowConfidenceEstimateCard.tsx";
+import { ProductConfirmationCard } from "./ProductConfirmationCard.tsx";
 import {
+  buildResultFromSelectedCandidate,
   runAiWebSearch,
   searchFoodByText,
 } from "../services/foodSearchService.ts";
 import type {
+  FoodSearchCandidate,
   FoodSearchProgress,
   FoodSearchResult,
   SearchState,
@@ -27,7 +30,11 @@ import {
 } from "../api/client.ts";
 import type { FoodSource, SearchConfidence } from "../types/foodSearch.ts";
 import { mealItemToSearchResult } from "../utils/mealFoodResult.ts";
-import { parseCaloriesEdited } from "../utils/calorieSource.ts";
+import {
+  isWebSearchSource,
+  parseCaloriesEdited,
+  toPersistedCalorieSource,
+} from "../utils/calorieSource.ts";
 
 export interface MealItemInput {
   id?: number;
@@ -168,6 +175,7 @@ export function AddFoodModal({
     progress.state === "estimated" ||
     progress.state === "from_history" ||
     progress.state === "low_confidence_estimate" ||
+    progress.state === "needs_confirmation" ||
     progress.state === "web_searching" ||
     progress.state === "web_found" ||
     progress.state === "completed";
@@ -280,6 +288,27 @@ export function AddFoodModal({
     void saveItem(selectedResult);
   }
 
+  function handleCandidateSelect(candidate: FoodSearchCandidate) {
+    const result = buildResultFromSelectedCandidate(inputValue.trim(), candidate);
+    setProgress({
+      ...progress,
+      state: "web_found",
+      result,
+      candidates: undefined,
+      message: "候補が見つかりました",
+    });
+  }
+
+  function handleCandidateManualInput() {
+    setShowManualEdit(true);
+    setProgress({
+      ...progress,
+      state: "error",
+      message: "候補に該当がない場合は、手入力で記録してください。",
+      candidates: undefined,
+    });
+  }
+
   async function saveItem(result: FoodSearchResult | null) {
     const label = inputValue.trim();
     if (label === "") return;
@@ -292,16 +321,16 @@ export function AddFoodModal({
           label: result.displayName,
           kcal: `${calories}kcal`,
           caloriesEdited,
-          calorieSource: result.source,
+          calorieSource: toPersistedCalorieSource(result.source),
           sourceUrl: result.sourceUrl ?? null,
           confidence: result.confidence,
         };
         await onSave(item);
-        if (result.source === "ai_web_search" && !caloriesEdited) {
+        if (isWebSearchSource(result.source) && !caloriesEdited) {
           try {
             await saveUserFood({
               displayName: item.label,
-              name: result.name,
+              name: result.selectedProductName ?? result.name,
               amount: result.amount,
               unit: result.unit,
               calories,
@@ -508,6 +537,16 @@ export function AddFoodModal({
                 "Web検索しましたが、うまくヒットしませんでした。AI推定カロリーを表示しています。")
               : undefined
           }
+        />
+      );
+    }
+
+    if (state === "needs_confirmation" && (progress.candidates?.length ?? 0) > 0) {
+      return (
+        <ProductConfirmationCard
+          candidates={progress.candidates ?? []}
+          onSelect={handleCandidateSelect}
+          onManualInput={handleCandidateManualInput}
         />
       );
     }
