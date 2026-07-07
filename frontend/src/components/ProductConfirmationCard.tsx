@@ -1,41 +1,42 @@
 import type { CSSProperties } from "react";
-import type { FoodSearchCandidate } from "../types/foodSearch.ts";
+import type { FoodConfirmationCandidate } from "../types/foodSearch.ts";
 
 interface ProductConfirmationCardProps {
-  candidates: FoodSearchCandidate[];
-  onSelect: (candidate: FoodSearchCandidate) => void;
+  title?: string;
+  description?: string;
+  candidates: FoodConfirmationCandidate[];
+  onSelect: (candidate: FoodConfirmationCandidate) => void;
   onManualInput: () => void;
 }
 
 export function ProductConfirmationCard({
+  title = "こちらの商品ですか？",
+  description = "入力内容から複数の候補が見つかりました。該当する商品を選んでください。",
   candidates,
   onSelect,
   onManualInput,
 }: ProductConfirmationCardProps) {
   return (
     <div style={cardStyle}>
-      <div style={titleStyle}>こちらの商品ですか？</div>
-      <div style={descriptionStyle}>
-        入力内容から複数の候補が見つかりました。該当する商品を選んでください。
-      </div>
+      <div style={titleStyle}>{title}</div>
+      <div style={descriptionStyle}>{description}</div>
       <div style={listStyle}>
-        {candidates.map((candidate) => {
-          const label = candidate.brand
-            ? `${candidate.brand} ${candidate.product_name}`
-            : candidate.product_name;
-
-          return (
-            <button
-              key={`${label}-${candidate.kcal}-${candidate.source_url ?? "no-url"}`}
-              type="button"
-              onClick={() => onSelect(candidate)}
-              style={candidateButtonStyle}
-            >
-              <span style={candidateNameStyle}>{label}</span>
-              <span style={candidateKcalStyle}>{candidate.kcal} kcal</span>
-            </button>
-          );
-        })}
+        {candidates.map((candidate) => (
+          <button
+            key={candidate.key}
+            type="button"
+            onClick={() => onSelect(candidate)}
+            style={candidateButtonStyle}
+          >
+            <span style={candidateTextWrapStyle}>
+              <span style={candidateNameStyle}>{candidate.label}</span>
+              {candidate.badge && (
+                <span style={candidateBadgeStyle}>{candidate.badge}</span>
+              )}
+            </span>
+            <span style={candidateKcalStyle}>{candidate.kcal} kcal</span>
+          </button>
+        ))}
       </div>
       <button type="button" onClick={onManualInput} style={secondaryButtonStyle}>
         どれでもない / 手入力する
@@ -85,11 +86,29 @@ const candidateButtonStyle: CSSProperties = {
   textAlign: "left",
 };
 
+const candidateTextWrapStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 4,
+  minWidth: 0,
+};
+
 const candidateNameStyle: CSSProperties = {
   fontSize: 14,
   fontWeight: 600,
   color: "#111827",
   lineHeight: 1.4,
+};
+
+const candidateBadgeStyle: CSSProperties = {
+  display: "inline-flex",
+  alignSelf: "flex-start",
+  fontSize: 11,
+  fontWeight: 700,
+  color: "#1D4ED8",
+  background: "#DBEAFE",
+  borderRadius: 999,
+  padding: "2px 8px",
 };
 
 const candidateKcalStyle: CSSProperties = {

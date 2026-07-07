@@ -13,6 +13,8 @@ require_once __DIR__ . '/../src/WeightRepository.php';
 require_once __DIR__ . '/../src/MealEntryRepository.php';
 require_once __DIR__ . '/../src/ActivityRepository.php';
 require_once __DIR__ . '/../src/UserFoodRepository.php';
+require_once __DIR__ . '/../src/FoodSearchNormalizer.php';
+require_once __DIR__ . '/../src/FoodSearchAliasRepository.php';
 require_once __DIR__ . '/../src/CalorieEstimateService.php';
 require_once __DIR__ . '/../src/BraveSearchService.php';
 require_once __DIR__ . '/../src/NutritionPageExtractor.php';
@@ -199,6 +201,7 @@ $weightRepository = new WeightRepository($userId);
 $userProfileRepository = new UserProfileRepository($userId);
 $mealEntryRepository = new MealEntryRepository($userId);
 $userFoodRepository = new UserFoodRepository();
+$foodSearchAliasRepository = new FoodSearchAliasRepository();
 $activityRepository = new ActivityRepository($userId);
 $chatMessageRepository = new ChatMessageRepository($userId);
 $calorieEstimateService = new CalorieEstimateService();
@@ -648,6 +651,62 @@ if ($requestMethod === 'GET' && $requestPath === '/api/records/meals/history') {
 
     json_response([
         'history' => $history,
+    ]);
+}
+
+// GET /api/foods/aliases/search — 学習済みエイリアスを検索
+if ($requestMethod === 'GET' && $requestPath === '/api/foods/aliases/search') {
+    $query = trim((string) ($_GET['q'] ?? ''));
+
+    try {
+        $candidates = $foodSearchAliasRepository->searchByQuery($query, $userId);
+        $queryNormalized = FoodSearchNormalizer::normalize($query);
+        $needsConfirmation = $foodSearchAliasRepository->needsConfirmation($candidates, $query);
+        $autoConfirm = $foodSearchAliasRepository->shouldAutoConfirm($candidates, $query);
+    } catch (InvalidArgumentException $exception) {
+        json_response(['message' => $exception->getMessage()], 422);
+    }
+
+    json_response([
+        'queryNormalized' => $queryNormalized,
+        'candidates' => $candidates,
+        'needsConfirmation' => $needsConfirmation,
+        'autoConfirm' => $autoConfirm,
+    ]);
+}
+
+// POST /api/foods/aliases — エイリアスを作成または selection_count を増やす
+if ($requestMethod === 'POST' && $requestPath === '/api/foods/aliases') {
+    $body = json_decode(file_get_contents('php://input') ?: '{}', true);
+    if (!is_array($body)) {
+        json_response(['message' => 'Invalid JSON body'], 422);
+    }
+
+    $rawQuery = trim((string) ($body['rawQuery'] ?? ''));
+    $foodId = (int) ($body['foodId'] ?? 0);
+    $source = trim((string) ($body['source'] ?? 'user_selected'));
+
+    try {
+        $result = $foodSearchAliasRepository->upsert($rawQuery, $foodId, $source, $userId);
+    } catch (InvalidArgumentException $exception) {
+        json_response(['message' => $exception->getMessage()], 422);
+    }
+
+    json_response($result);
+}
+
+// POST /api/foods/aliases/{id}/select — 候補選択時に selection_count を増やす
+if ($requestMethod === 'POST' && preg_match('#^/api/foods/aliases/(\d+)/select$#', $requestPath, $aliasSelectMatches) === 1) {
+    $aliasId = (int) $aliasSelectMatches[1];
+
+    try {
+        $alias = $foodSearchAliasRepository->incrementSelection($aliasId);
+    } catch (InvalidArgumentException $exception) {
+        json_response(['message' => $exception->getMessage()], 422);
+    }
+
+    json_response([
+        'alias' => $alias,
     ]);
 }
 

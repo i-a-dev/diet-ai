@@ -77,6 +77,7 @@ export function getCalorieSourceLabel(params: {
       source !== "fatsecret" &&
       source !== "open_food_facts" &&
       source !== "local_db" &&
+      source !== "alias_db" &&
       !isWebSearchSource(source))
   ) {
     return "AI推定で取得したカロリー";

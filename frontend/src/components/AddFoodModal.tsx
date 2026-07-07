@@ -13,11 +13,14 @@ import { FoodResultPreview } from "./FoodResultPreview.tsx";
 import { LowConfidenceEstimateCard } from "./LowConfidenceEstimateCard.tsx";
 import { ProductConfirmationCard } from "./ProductConfirmationCard.tsx";
 import {
+  buildResultFromSelectedAlias,
   buildResultFromSelectedCandidate,
   runAiWebSearch,
   searchFoodByText,
 } from "../services/foodSearchService.ts";
 import type {
+  AliasSearchCandidate,
+  FoodConfirmationCandidate,
   FoodSearchCandidate,
   FoodSearchProgress,
   FoodSearchResult,
@@ -26,8 +29,14 @@ import type {
 import {
   fetchMealHistory,
   saveUserFood,
+  selectFoodAlias,
+  upsertFoodAlias,
   type MealType,
 } from "../api/client.ts";
+import {
+  resolveAliasSourceForSave,
+  shouldSaveFoodAlias,
+} from "../utils/foodAliasUtils.ts";
 import type { FoodSource, SearchConfidence } from "../types/foodSearch.ts";
 import { mealItemToSearchResult } from "../utils/mealFoodResult.ts";
 import {
@@ -61,6 +70,16 @@ interface AddFoodModalProps {
 const INITIAL_STEPS = [
   { key: "regex_extracting", label: "入力内容を解析中", status: "pending" },
   {
+    key: "alias_db_searching",
+    label: "よく選ばれている候補を検索中",
+    status: "pending",
+  },
+  {
+    key: "local_db_searching",
+    label: "登録済み食品を検索中",
+    status: "pending",
+  },
+  {
     key: "fatsecret_searching",
     label: "FatSecretで食品データを検索中",
     status: "pending",
@@ -68,11 +87,6 @@ const INITIAL_STEPS = [
   {
     key: "open_food_facts_searching",
     label: "Open Food Factsで商品情報を検索中",
-    status: "pending",
-  },
-  {
-    key: "local_db_searching",
-    label: "登録済み食品を検索中",
     status: "pending",
   },
   {
@@ -176,6 +190,7 @@ export function AddFoodModal({
     progress.state === "from_history" ||
     progress.state === "low_confidence_estimate" ||
     progress.state === "needs_confirmation" ||
+    progress.state === "needs_alias_confirmation" ||
     progress.state === "web_searching" ||
     progress.state === "web_found" ||
     progress.state === "completed";
@@ -288,25 +303,78 @@ export function AddFoodModal({
     void saveItem(selectedResult);
   }
 
-  function handleCandidateSelect(candidate: FoodSearchCandidate) {
-    const result = buildResultFromSelectedCandidate(inputValue.trim(), candidate);
+  function handleCandidateSelect(candidate: FoodConfirmationCandidate) {
+    if (candidate.webCandidate) {
+      const result = buildResultFromSelectedCandidate(
+        inputValue.trim(),
+        candidate.webCandidate,
+      );
+      setProgress({
+        ...progress,
+        state: "web_found",
+        result,
+        candidates: undefined,
+        message: "候補が見つかりました",
+      });
+      return;
+    }
+
+    const aliasCandidate = progress.aliasCandidates?.find(
+      (item) => String(item.aliasId) === candidate.key,
+    );
+    if (!aliasCandidate) return;
+
+    const result = buildResultFromSelectedAlias(inputValue.trim(), aliasCandidate);
     setProgress({
       ...progress,
-      state: "web_found",
+      state: "found",
       result,
-      candidates: undefined,
+      aliasCandidates: undefined,
       message: "候補が見つかりました",
     });
   }
 
+  async function persistFoodAlias(
+    result: FoodSearchResult,
+    foodId: number,
+    caloriesEdited: boolean,
+  ) {
+    if (
+      !shouldSaveFoodAlias({
+        rawQuery: result.rawInput,
+        foodName: result.displayName,
+        source: result.source,
+        caloriesEdited,
+      })
+    ) {
+      return;
+    }
+
+    try {
+      if (result.aliasId) {
+        await selectFoodAlias(result.aliasId);
+        return;
+      }
+
+      await upsertFoodAlias({
+        rawQuery: result.rawInput,
+        foodId,
+        source: resolveAliasSourceForSave(result.source),
+      });
+    } catch (aliasError) {
+      console.warn("Failed to save food alias", aliasError);
+    }
+  }
+
   function handleCandidateManualInput() {
     setShowManualEdit(true);
-    setProgress({
-      ...progress,
-      state: "error",
-      message: "候補に該当がない場合は、手入力で記録してください。",
-      candidates: undefined,
-    });
+      setProgress({
+        ...progress,
+        state: "error",
+        message: "候補に該当がない場合は、手入力で記録してください。",
+        candidates: undefined,
+        aliasCandidates: undefined,
+      });
   }
 
   async function saveItem(result: FoodSearchResult | null) {
@@ -326,9 +394,10 @@ export function AddFoodModal({
           confidence: result.confidence,
         };
         await onSave(item);
+        let savedFoodId = result.selectedFoodId ?? null;
         if (isWebSearchSource(result.source) && !caloriesEdited) {
           try {
-            await saveUserFood({
+            const savedFood = await saveUserFood({
               displayName: item.label,
               name: result.selectedProductName ?? result.name,
               amount: result.amount,
@@ -338,8 +407,41 @@ export function AddFoodModal({
               rawInput: result.rawInput,
               sourceUrl: result.sourceUrl ?? null,
             });
+            savedFoodId = savedFood.food.id;
           } catch (saveFoodError) {
             console.warn("Failed to save user food", saveFoodError);
+          }
+        }
+
+        if (savedFoodId != null) {
+          await persistFoodAlias(result, savedFoodId, caloriesEdited);
+        } else if (
+          result.source === "user_registered" &&
+          !caloriesEdited &&
+          shouldSaveFoodAlias({
+            rawQuery: result.rawInput,
+            foodName: label,
+            source: result.source,
+            caloriesEdited,
+          })
+        ) {
+          try {
+            const savedFood = await saveUserFood({
+              displayName: label,
+              name: label,
+              amount: 1,
+              unit: "食",
+              calories,
+              source: "user_registered",
+              rawInput: result.rawInput,
+            });
+            await persistFoodAlias(
+              { ...result, selectedFoodId: savedFood.food.id },
+              savedFood.food.id,
+              caloriesEdited,
+            );
+          } catch (saveFoodError) {
+            console.warn("Failed to save user food for alias", saveFoodError);
           }
         }
         setCompletedResult({ ...result, calories, caloriesEdited });
@@ -544,7 +646,22 @@ export function AddFoodModal({
     if (state === "needs_confirmation" && (progress.candidates?.length ?? 0) > 0) {
       return (
         <ProductConfirmationCard
-          candidates={progress.candidates ?? []}
+          candidates={toWebConfirmationCandidates(progress.candidates ?? [])}
+          onSelect={handleCandidateSelect}
+          onManualInput={handleCandidateManualInput}
+        />
+      );
+    }
+
+    if (
+      state === "needs_alias_confirmation" &&
+      (progress.aliasCandidates?.length ?? 0) > 0
+    ) {
+      return (
+        <ProductConfirmationCard
+          title="こちらの商品ですか？"
+          description="過去によく選ばれている候補です。該当する商品を選んでください。"
+          candidates={toAliasConfirmationCandidates(progress.aliasCandidates ?? [])}
           onSelect={handleCandidateSelect}
           onManualInput={handleCandidateManualInput}
         />
@@ -644,6 +761,40 @@ export function AddFoodModal({
       )}
     </BottomSheet>
   );
+}
+
+function toWebConfirmationCandidates(
+  candidates: FoodSearchCandidate[],
+): FoodConfirmationCandidate[] {
+  return candidates.map((candidate) => {
+    const label = candidate.brand
+      ? `${candidate.brand} ${candidate.product_name}`
+      : candidate.product_name;
+
+    return {
+      key: `${label}-${candidate.kcal}-${candidate.source_url ?? "no-url"}`,
+      label,
+      kcal: candidate.kcal,
+      webCandidate: candidate,
+    };
+  });
+}
+
+function toAliasConfirmationCandidates(
+  candidates: AliasSearchCandidate[],
+): FoodConfirmationCandidate[] {
+  const topSelectionCount = candidates[0]?.selectionCount ?? 0;
+
+  return candidates.map((candidate) => ({
+    key: String(candidate.aliasId),
+    label: candidate.food.displayName,
+    kcal: candidate.food.calories,
+    badge:
+      candidate.selectionCount === topSelectionCount && topSelectionCount >= 3
+        ? "よく選ばれています"
+        : null,
+    aliasId: candidate.aliasId,
+  }));
 }
 
 function toUniqueMealInputs(

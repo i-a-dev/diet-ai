@@ -1,6 +1,8 @@
 import {
   estimateCalories,
+  searchFoodAliases,
   searchUserFoods,
+  type AliasSearchCandidateResponse,
   type CalorieEstimateCandidate,
   type CalorieEstimateResponse,
   type UserFoodSummary,
@@ -10,6 +12,7 @@ import {
   getWebSearchQuota,
 } from "./webSearchQuotaService.ts";
 import type {
+  AliasSearchCandidate,
   FoodSearchCandidate,
   FoodSearchProgress,
   FoodSearchResult,
@@ -72,6 +75,16 @@ function createSteps(): FoodSearchStep[] {
   return [
     { key: "regex_extracting", label: "入力内容を解析中", status: "pending" },
     {
+      key: "alias_db_searching",
+      label: "よく選ばれている候補を検索中",
+      status: "pending",
+    },
+    {
+      key: "local_db_searching",
+      label: "登録済み食品を検索中",
+      status: "pending",
+    },
+    {
       key: "fatsecret_searching",
       label: "FatSecretで食品データを検索中",
       status: "pending",
@@ -79,11 +92,6 @@ function createSteps(): FoodSearchStep[] {
     {
       key: "open_food_facts_searching",
       label: "Open Food Factsで商品情報を検索中",
-      status: "pending",
-    },
-    {
-      key: "local_db_searching",
-      label: "登録済み食品を検索中",
       status: "pending",
     },
     {
@@ -370,9 +378,13 @@ function resultFromEstimate(
 function resultFromUserFood(
   food: UserFoodSummary,
   rawInput: string,
+  source: FoodSearchResult["source"] = "local_db",
+  aliasMeta?: {
+    aliasId?: number;
+  },
 ): FoodSearchResult {
   return {
-    id: `local-db-${food.id}`,
+    id: `${source}-${food.id}`,
     name: food.name,
     displayName: food.displayName,
     amount: food.amount,
@@ -381,12 +393,86 @@ function resultFromUserFood(
     protein: null,
     fat: null,
     carbs: null,
-    source: "local_db",
+    source,
     confidence: "high",
     isEstimated:
       food.source === "ai_web_search" || food.source === "claude_estimate",
     rawInput,
+    selectedFoodId: food.id,
+    selectedProductName: food.displayName,
+    aliasId: aliasMeta?.aliasId ?? null,
+    originalSource: food.source,
     sourceUrl: food.sourceUrl,
+  };
+}
+
+function mapAliasCandidate(
+  candidate: AliasSearchCandidateResponse,
+): AliasSearchCandidate {
+  return {
+    aliasId: candidate.aliasId,
+    selectionCount: candidate.selectionCount,
+    rejectedCount: candidate.rejectedCount,
+    confidenceScore: candidate.confidenceScore,
+    lastSelectedAt: candidate.lastSelectedAt,
+    source: candidate.source,
+    food: candidate.food,
+  };
+}
+
+function resultFromAliasCandidate(
+  rawInput: string,
+  candidate: AliasSearchCandidate,
+): FoodSearchResult {
+  return resultFromUserFood(candidate.food, rawInput, "alias_db", {
+    aliasId: candidate.aliasId,
+  });
+}
+
+async function searchAliasDb(
+  rawInput: string,
+  query: string,
+): Promise<{
+  result: FoodSearchResult | null;
+  aliasCandidates: AliasSearchCandidate[];
+  needsConfirmation: boolean;
+  autoConfirm: boolean;
+}> {
+  const searches = [rawInput, query].filter(
+    (value, index, array) =>
+      value.trim() !== "" && array.indexOf(value) === index,
+  );
+
+  for (const searchQuery of searches) {
+    const response = await searchFoodAliases(searchQuery);
+    if (response.candidates.length === 0) {
+      continue;
+    }
+
+    const aliasCandidates = response.candidates.map(mapAliasCandidate);
+    if (response.autoConfirm && aliasCandidates.length === 1) {
+      const result = resultFromAliasCandidate(rawInput, aliasCandidates[0]);
+      return {
+        result,
+        aliasCandidates,
+        needsConfirmation: false,
+        autoConfirm: true,
+      };
+    }
+
+    return {
+      result: null,
+      aliasCandidates,
+      needsConfirmation: response.needsConfirmation,
+      autoConfirm: false,
+    };
+  }
+
+  return {
+    result: null,
+    aliasCandidates: [],
+    needsConfirmation: false,
+    autoConfirm: false,
   };
 }
 
@@ -672,6 +758,7 @@ function buildProgress(
   result: FoodSearchResult | null,
   message: string,
   candidates?: FoodSearchCandidate[],
+  aliasCandidates?: AliasSearchCandidate[],
 ): FoodSearchProgress {
   return {
     state,
@@ -679,6 +766,7 @@ function buildProgress(
     result,
     message,
     candidates,
+    aliasCandidates,
   };
 }
 
@@ -701,6 +789,70 @@ export async function searchFoodByText(
   const parsed = parseFoodInputByRegex(input);
   const query = parsed.name || input;
   steps = updateStep(steps, "regex_extracting", "done");
+
+  try {
+    steps = updateStep(steps, "alias_db_searching", "active");
+    emitProgress(
+      onProgress,
+      buildProgress("searching", steps, null, "食品データを検索中..."),
+    );
+    const aliasResult = await searchAliasDb(input, query);
+    steps = updateStep(steps, "alias_db_searching", "done");
+    if (aliasResult.result) {
+      storeResult(aliasResult.result);
+      return emitProgress(
+        onProgress,
+        buildProgress(
+          "found",
+          steps,
+          aliasResult.result,
+          "よく選ばれている候補が見つかりました",
+        ),
+      );
+    }
+    if (aliasResult.needsConfirmation && aliasResult.aliasCandidates.length > 0) {
+      steps = updateStep(steps, "waiting_user_choice", "active");
+      return emitProgress(
+        onProgress,
+        buildProgress(
+          "needs_alias_confirmation",
+          steps,
+          null,
+          "こちらの商品ですか？",
+          undefined,
+          aliasResult.aliasCandidates,
+        ),
+      );
+    }
+  } catch (error) {
+    console.warn("Alias DB search failed, fallback to local DB", error);
+    steps = updateStep(steps, "alias_db_searching", "done");
+  }
+
+  try {
+    steps = updateStep(steps, "local_db_searching", "active");
+    emitProgress(
+      onProgress,
+      buildProgress("searching", steps, null, "食品データを検索中..."),
+    );
+    const localDbResult = await searchLocalDb(input, query);
+    steps = updateStep(steps, "local_db_searching", "done");
+    if (localDbResult) {
+      storeResult(localDbResult);
+      return emitProgress(
+        onProgress,
+        buildProgress(
+          "found",
+          steps,
+          localDbResult,
+          "登録済みの食品が見つかりました",
+        ),
+      );
+    }
+  } catch (error) {
+    console.warn("Local food DB search failed, fallback to FatSecret", error);
+    steps = updateStep(steps, "local_db_searching", "done");
+  }
 
   try {
     steps = updateStep(steps, "fatsecret_searching", "active");
@@ -738,33 +890,8 @@ export async function searchFoodByText(
       );
     }
   } catch (error) {
-    console.warn("Open Food Facts failed, fallback to local DB", error);
+    console.warn("Open Food Facts failed, fallback to Claude", error);
     steps = updateStep(steps, "open_food_facts_searching", "done");
-  }
-
-  try {
-    steps = updateStep(steps, "local_db_searching", "active");
-    emitProgress(
-      onProgress,
-      buildProgress("searching", steps, null, "食品データを検索中..."),
-    );
-    const localDbResult = await searchLocalDb(input, query);
-    steps = updateStep(steps, "local_db_searching", "done");
-    if (localDbResult) {
-      storeResult(localDbResult);
-      return emitProgress(
-        onProgress,
-        buildProgress(
-          "found",
-          steps,
-          localDbResult,
-          "登録済みの食品が見つかりました",
-        ),
-      );
-    }
-  } catch (error) {
-    console.warn("Local food DB search failed, fallback to Claude", error);
-    steps = updateStep(steps, "local_db_searching", "done");
   }
 
   steps = updateStep(steps, "claude_estimating", "active");
@@ -807,9 +934,10 @@ export async function runAiWebSearch(
   const input = rawInput.trim();
   let steps = createSteps();
   steps = updateStep(steps, "regex_extracting", "done");
+  steps = updateStep(steps, "alias_db_searching", "done");
+  steps = updateStep(steps, "local_db_searching", "done");
   steps = updateStep(steps, "fatsecret_searching", "done");
   steps = updateStep(steps, "open_food_facts_searching", "done");
-  steps = updateStep(steps, "local_db_searching", "done");
   steps = updateStep(steps, "claude_estimating", "done");
   steps = updateStep(steps, "waiting_user_choice", "done");
   steps = updateStep(steps, "ai_web_searching", "active");
@@ -890,6 +1018,15 @@ export function buildResultFromSelectedCandidate(
   candidate: FoodSearchCandidate,
 ): FoodSearchResult {
   const result = resultFromWebCandidate(rawInput, candidate);
+  storeResult(result);
+  return result;
+}
+
+export function buildResultFromSelectedAlias(
+  rawInput: string,
+  candidate: AliasSearchCandidate,
+): FoodSearchResult {
+  const result = resultFromAliasCandidate(rawInput, candidate);
   storeResult(result);
   return result;
 }

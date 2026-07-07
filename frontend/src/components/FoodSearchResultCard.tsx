@@ -20,7 +20,9 @@ export function FoodSearchResultCard({
       ? "データ提供：FatSecret"
       : result.source === "open_food_facts"
         ? "データ提供：Open Food Facts"
-        : null;
+        : result.source === "alias_db"
+          ? "よく選ばれている候補"
+          : null;
 
   return (
     <div style={cardStyle}>

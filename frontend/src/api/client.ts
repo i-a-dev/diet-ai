@@ -343,6 +343,70 @@ export function saveUserFood(input: {
   });
 }
 
+export interface AliasSearchCandidateResponse {
+  aliasId: number;
+  selectionCount: number;
+  rejectedCount: number;
+  confidenceScore: number;
+  lastSelectedAt: string | null;
+  source: string;
+  food: UserFoodSummary;
+}
+
+export interface AliasSearchResponse {
+  queryNormalized: string;
+  candidates: AliasSearchCandidateResponse[];
+  needsConfirmation: boolean;
+  autoConfirm: boolean;
+}
+
+export function searchFoodAliases(query: string) {
+  const params = new URLSearchParams({ q: query });
+  return request<AliasSearchResponse>(`/foods/aliases/search?${params.toString()}`);
+}
+
+export function upsertFoodAlias(input: {
+  rawQuery: string;
+  foodId: number;
+  source?: string;
+}) {
+  return request<{
+    alias: {
+      id: number;
+      queryNormalized: string;
+      rawQuerySample: string;
+      foodId: number;
+      selectionCount: number;
+      rejectedCount: number;
+      confidenceScore: number;
+      source: string;
+      lastSelectedAt: string | null;
+    };
+    created: boolean;
+  }>("/foods/aliases", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export function selectFoodAlias(aliasId: number) {
+  return request<{
+    alias: {
+      id: number;
+      queryNormalized: string;
+      rawQuerySample: string;
+      foodId: number;
+      selectionCount: number;
+      rejectedCount: number;
+      confidenceScore: number;
+      source: string;
+      lastSelectedAt: string | null;
+    };
+  }>(`/foods/aliases/${aliasId}/select`, {
+    method: "POST",
+  });
+}
+
 export interface WeightChartPoint {
   label: string;
   value: number | null;

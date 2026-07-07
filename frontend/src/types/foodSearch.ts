@@ -3,6 +3,7 @@ export type FoodSource =
   | "fatsecret"
   | "open_food_facts"
   | "local_db"
+  | "alias_db"
   | "claude_estimate"
   | "ai_web_search"
   | "brave_html"
@@ -21,6 +22,7 @@ export type SearchState =
   | "web_searching"
   | "web_found"
   | "needs_confirmation"
+  | "needs_alias_confirmation"
   | "completed"
   | "error";
 
@@ -31,6 +33,35 @@ export interface FoodSearchCandidate {
   source_url?: string | null;
   source: "brave_html" | "claude_web_search" | "ai_web_search";
   identity_confidence: SearchConfidence;
+}
+
+export interface AliasSearchCandidate {
+  aliasId: number;
+  selectionCount: number;
+  rejectedCount: number;
+  confidenceScore: number;
+  lastSelectedAt: string | null;
+  source: string;
+  food: {
+    id: number;
+    displayName: string;
+    name: string;
+    amount: number;
+    unit: string;
+    calories: number;
+    source: string;
+    rawInput: string | null;
+    sourceUrl: string | null;
+  };
+}
+
+export interface FoodConfirmationCandidate {
+  key: string;
+  label: string;
+  kcal: number;
+  badge?: string | null;
+  aliasId?: number;
+  webCandidate?: FoodSearchCandidate;
 }
 
 export interface FoodResultItem {
@@ -57,6 +88,9 @@ export interface FoodSearchResult {
   brandName?: string | null;
   rawInput: string;
   selectedProductName?: string | null;
+  selectedFoodId?: number | null;
+  aliasId?: number | null;
+  originalSource?: string | null;
   sourceUrl?: string | null;
   identityConfidence?: SearchConfidence | null;
   items?: FoodResultItem[];
@@ -66,6 +100,7 @@ export interface FoodSearchResult {
 export interface FoodSearchStep {
   key:
     | "regex_extracting"
+    | "alias_db_searching"
     | "fatsecret_searching"
     | "open_food_facts_searching"
     | "local_db_searching"
@@ -81,5 +116,6 @@ export interface FoodSearchProgress {
   steps: FoodSearchStep[];
   result: FoodSearchResult | null;
   candidates?: FoodSearchCandidate[];
+  aliasCandidates?: AliasSearchCandidate[];
   message?: string;
 }
