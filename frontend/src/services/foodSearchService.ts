@@ -1,5 +1,12 @@
-import { estimateCalories, searchUserFoods, type UserFoodSummary } from "../api/client.ts";
-import { consumeWebSearchQuota, getWebSearchQuota } from "./webSearchQuotaService.ts";
+import {
+  estimateCalories,
+  searchUserFoods,
+  type UserFoodSummary,
+} from "../api/client.ts";
+import {
+  consumeWebSearchQuota,
+  getWebSearchQuota,
+} from "./webSearchQuotaService.ts";
 import type {
   FoodSearchProgress,
   FoodSearchResult,
@@ -9,7 +16,9 @@ import type {
 } from "../types/foodSearch.ts";
 
 const FOOD_SEARCH_CACHE_KEY = "dietai.foodSearchCache.v2";
-const FATSECRET_ENDPOINT = import.meta.env.VITE_FATSECRET_SEARCH_ENDPOINT as string | undefined;
+const FATSECRET_ENDPOINT = import.meta.env.VITE_FATSECRET_SEARCH_ENDPOINT as
+  | string
+  | undefined;
 
 interface ParsedFoodInput {
   name: string;
@@ -58,15 +67,31 @@ type ProgressListener = (progress: FoodSearchProgress) => void;
 function createSteps(): FoodSearchStep[] {
   return [
     { key: "regex_extracting", label: "入力内容を解析中", status: "pending" },
-    { key: "fatsecret_searching", label: "FatSecretで食品データを検索中", status: "pending" },
+    {
+      key: "fatsecret_searching",
+      label: "FatSecretで食品データを検索中",
+      status: "pending",
+    },
     {
       key: "open_food_facts_searching",
       label: "Open Food Factsで商品情報を検索中",
       status: "pending",
     },
-    { key: "local_db_searching", label: "登録済み食品を検索中", status: "pending" },
-    { key: "claude_estimating", label: "AIでカロリーを推定中", status: "pending" },
-    { key: "waiting_user_choice", label: "ユーザー選択を待機中", status: "pending" },
+    {
+      key: "local_db_searching",
+      label: "登録済み食品を検索中",
+      status: "pending",
+    },
+    {
+      key: "claude_estimating",
+      label: "AIでカロリーを推定中",
+      status: "pending",
+    },
+    {
+      key: "waiting_user_choice",
+      label: "ユーザー選択を待機中",
+      status: "pending",
+    },
     { key: "ai_web_searching", label: "商品情報を検索中", status: "pending" },
   ];
 }
@@ -89,7 +114,9 @@ function emitProgress(
 
 function parseFoodInputByRegex(input: string): ParsedFoodInput {
   const trimmed = input.trim();
-  const matched = trimmed.match(/^(.+?)\s*(\d+(?:\.\d+)?)\s*(g|ml|個|杯|切れ|袋|本)$/i);
+  const matched = trimmed.match(
+    /^(.+?)\s*(\d+(?:\.\d+)?)\s*(g|ml|個|杯|切れ|袋|本)$/i,
+  );
   if (!matched) {
     return {
       name: trimmed,
@@ -108,7 +135,12 @@ function parseFoodInputByRegex(input: string): ParsedFoodInput {
 const MIN_FOOD_RELEVANCE_SCORE = 50;
 
 function normalizeFoodText(text: string): string {
-  return text.trim().toLowerCase().replace(/\u3000/g, " ").replace(/\s+/g, " ").normalize("NFKC");
+  return text
+    .trim()
+    .toLowerCase()
+    .replace(/\u3000/g, " ")
+    .replace(/\s+/g, " ")
+    .normalize("NFKC");
 }
 
 function scoreFoodRelevance(query: string, candidateName: string): number {
@@ -220,7 +252,8 @@ function resultFromEstimate(
   },
 ): FoodSearchResult {
   const productName = estimate.product_name?.trim();
-  const displayBaseName = productName && productName.length > 0 ? productName : input;
+  const displayBaseName =
+    productName && productName.length > 0 ? productName : input;
   const assumedWeightG = estimate.assumed_weight_g;
   const hasWeight = assumedWeightG != null && assumedWeightG > 0;
   const isAiWebSearch = source === "ai_web_search";
@@ -229,7 +262,11 @@ function resultFromEstimate(
   return {
     id: `${source}-${Date.now()}`,
     name: displayBaseName,
-    displayName: buildEstimateDisplayName(displayBaseName, source, assumedWeightG),
+    displayName: buildEstimateDisplayName(
+      displayBaseName,
+      source,
+      assumedWeightG,
+    ),
     amount: isAiWebSearch ? 1 : hasWeight ? assumedWeightG : 1,
     unit: isAiWebSearch ? "食" : hasWeight ? "g" : "食",
     calories: estimate.kcal,
@@ -244,7 +281,10 @@ function resultFromEstimate(
   };
 }
 
-function resultFromUserFood(food: UserFoodSummary, rawInput: string): FoodSearchResult {
+function resultFromUserFood(
+  food: UserFoodSummary,
+  rawInput: string,
+): FoodSearchResult {
   return {
     id: `local-db-${food.id}`,
     name: food.name,
@@ -257,14 +297,22 @@ function resultFromUserFood(food: UserFoodSummary, rawInput: string): FoodSearch
     carbs: null,
     source: "local_db",
     confidence: "high",
-    isEstimated: food.source === "ai_web_search" || food.source === "claude_estimate",
+    isEstimated:
+      food.source === "ai_web_search" || food.source === "claude_estimate",
     rawInput,
     sourceUrl: food.sourceUrl,
   };
 }
 
-function resultFromFatSecret(food: FatSecretFood, parsed: ParsedFoodInput, rawInput: string): FoodSearchResult {
-  const ratio = parsed.unit.toLowerCase() === food.unit.toLowerCase() ? parsed.amount / food.amount : 1;
+function resultFromFatSecret(
+  food: FatSecretFood,
+  parsed: ParsedFoodInput,
+  rawInput: string,
+): FoodSearchResult {
+  const ratio =
+    parsed.unit.toLowerCase() === food.unit.toLowerCase()
+      ? parsed.amount / food.amount
+      : 1;
   const ratioOrOne = Number.isFinite(ratio) && ratio > 0 ? ratio : 1;
 
   return {
@@ -274,9 +322,13 @@ function resultFromFatSecret(food: FatSecretFood, parsed: ParsedFoodInput, rawIn
     amount: parsed.amount,
     unit: parsed.unit,
     calories: Math.round(food.calories * ratioOrOne),
-    protein: food.protein == null ? null : Number((food.protein * ratioOrOne).toFixed(1)),
+    protein:
+      food.protein == null
+        ? null
+        : Number((food.protein * ratioOrOne).toFixed(1)),
     fat: food.fat == null ? null : Number((food.fat * ratioOrOne).toFixed(1)),
-    carbs: food.carbs == null ? null : Number((food.carbs * ratioOrOne).toFixed(1)),
+    carbs:
+      food.carbs == null ? null : Number((food.carbs * ratioOrOne).toFixed(1)),
     source: "fatsecret",
     confidence: "high",
     isEstimated: false,
@@ -310,7 +362,8 @@ function resultFromOpenFoodFacts(
   const servingUnit = product.serving_quantity_unit?.trim();
   const hasKcal100 = Number.isFinite(kcal100) && (kcal100 ?? 0) > 0;
   const hasKcalServing = Number.isFinite(kcalServing) && (kcalServing ?? 0) > 0;
-  const hasServingQuantity = Number.isFinite(servingQuantity) && servingQuantity > 0;
+  const hasServingQuantity =
+    Number.isFinite(servingQuantity) && servingQuantity > 0;
 
   if (!hasKcal100 && !hasKcalServing) return null;
 
@@ -330,9 +383,13 @@ function resultFromOpenFoodFacts(
     if (hasServingQuantity && servingUnit) {
       amount = servingQuantity;
       unit = servingUnit;
-      ratio = servingUnit.toLowerCase() === "g" && hasKcal100 ? servingQuantity / 100 : 1;
+      ratio =
+        servingUnit.toLowerCase() === "g" && hasKcal100
+          ? servingQuantity / 100
+          : 1;
       canScaleMacroBy100g = servingUnit.toLowerCase() === "g" && hasKcal100;
-      displaySuffix = product.serving_size?.trim() || `${servingQuantity}${servingUnit}`;
+      displaySuffix =
+        product.serving_size?.trim() || `${servingQuantity}${servingUnit}`;
     } else {
       amount = 1;
       unit = "食";
@@ -340,13 +397,19 @@ function resultFromOpenFoodFacts(
       canScaleMacroBy100g = false;
       displaySuffix = product.serving_size?.trim() || "1食";
     }
-  } else if (hasKcal100 && hasServingQuantity && servingUnit && servingUnit.toLowerCase() === "g") {
+  } else if (
+    hasKcal100 &&
+    hasServingQuantity &&
+    servingUnit &&
+    servingUnit.toLowerCase() === "g"
+  ) {
     ratio = servingQuantity / 100;
     canScaleMacroBy100g = true;
     calories = Math.round((kcal100 ?? 0) * ratio);
     amount = servingQuantity;
     unit = servingUnit;
-    displaySuffix = product.serving_size?.trim() || `${servingQuantity}${servingUnit}`;
+    displaySuffix =
+      product.serving_size?.trim() || `${servingQuantity}${servingUnit}`;
   } else if (hasKcal100) {
     calories = Math.round(kcal100 ?? 0);
     amount = 100;
@@ -386,15 +449,25 @@ function resultFromOpenFoodFacts(
   };
 }
 
-async function searchFatSecret(query: string, parsed: ParsedFoodInput, rawInput: string): Promise<FoodSearchResult | null> {
+async function searchFatSecret(
+  query: string,
+  parsed: ParsedFoodInput,
+  rawInput: string,
+): Promise<FoodSearchResult | null> {
   // 変更: FatSecret 失敗時もフロー継続できるよう、呼び出し失敗を上位で握りつぶす設計。
   if (FATSECRET_ENDPOINT) {
-    const response = await fetch(`${FATSECRET_ENDPOINT}?q=${encodeURIComponent(query)}`);
+    const response = await fetch(
+      `${FATSECRET_ENDPOINT}?q=${encodeURIComponent(query)}`,
+    );
     if (!response.ok) {
       throw new Error("FatSecret request failed");
     }
     const json = (await response.json()) as { foods?: FatSecretFood[] };
-    const found = pickBestRelevantCandidate(query, json.foods ?? [], (food) => food.name);
+    const found = pickBestRelevantCandidate(
+      query,
+      json.foods ?? [],
+      (food) => food.name,
+    );
     if (found) {
       return resultFromFatSecret(found, parsed, rawInput);
     }
@@ -448,9 +521,13 @@ async function searchOpenFoodFacts(
   return best?.result ?? null;
 }
 
-async function searchLocalDb(rawInput: string, query: string): Promise<FoodSearchResult | null> {
+async function searchLocalDb(
+  rawInput: string,
+  query: string,
+): Promise<FoodSearchResult | null> {
   const searches = [rawInput, query].filter(
-    (value, index, array) => value.trim() !== "" && array.indexOf(value) === index,
+    (value, index, array) =>
+      value.trim() !== "" && array.indexOf(value) === index,
   );
 
   for (const searchQuery of searches) {
@@ -463,13 +540,19 @@ async function searchLocalDb(rawInput: string, query: string): Promise<FoodSearc
   return null;
 }
 
-async function estimateWithClaude(rawInput: string, parsed: ParsedFoodInput): Promise<FoodSearchResult> {
+async function estimateWithClaude(
+  rawInput: string,
+  parsed: ParsedFoodInput,
+): Promise<FoodSearchResult> {
   try {
     const estimate = await estimateCalories(rawInput, "no_web");
     return resultFromEstimate(rawInput, "claude_estimate", estimate);
   } catch {
     // 変更: どのAPIが失敗しても最後は推定結果を返すため、簡易推定にフォールバック。
-    const fallbackCalories = parsed.unit.toLowerCase() === "g" ? Math.max(Math.round(parsed.amount * 1.6), 80) : 220;
+    const fallbackCalories =
+      parsed.unit.toLowerCase() === "g"
+        ? Math.max(Math.round(parsed.amount * 1.6), 80)
+        : 220;
     return {
       id: `claude-fallback-${Date.now()}`,
       name: parsed.name,
@@ -514,14 +597,20 @@ export async function searchFoodByText(
   }
 
   steps = updateStep(steps, "regex_extracting", "active");
-  emitProgress(onProgress, buildProgress("searching", steps, null, "食品データを検索中..."));
+  emitProgress(
+    onProgress,
+    buildProgress("searching", steps, null, "食品データを検索中..."),
+  );
   const parsed = parseFoodInputByRegex(input);
   const query = parsed.name || input;
   steps = updateStep(steps, "regex_extracting", "done");
 
   try {
     steps = updateStep(steps, "fatsecret_searching", "active");
-    emitProgress(onProgress, buildProgress("searching", steps, null, "食品データを検索中..."));
+    emitProgress(
+      onProgress,
+      buildProgress("searching", steps, null, "食品データを検索中..."),
+    );
     const fatSecretResult = await searchFatSecret(query, parsed, input);
     steps = updateStep(steps, "fatsecret_searching", "done");
     if (fatSecretResult) {
@@ -538,12 +627,18 @@ export async function searchFoodByText(
 
   try {
     steps = updateStep(steps, "open_food_facts_searching", "active");
-    emitProgress(onProgress, buildProgress("searching", steps, null, "食品データを検索中..."));
+    emitProgress(
+      onProgress,
+      buildProgress("searching", steps, null, "食品データを検索中..."),
+    );
     const offResult = await searchOpenFoodFacts(query, parsed, input);
     steps = updateStep(steps, "open_food_facts_searching", "done");
     if (offResult) {
       storeResult(offResult);
-      return emitProgress(onProgress, buildProgress("found", steps, offResult, "候補が見つかりました"));
+      return emitProgress(
+        onProgress,
+        buildProgress("found", steps, offResult, "候補が見つかりました"),
+      );
     }
   } catch (error) {
     console.warn("Open Food Facts failed, fallback to local DB", error);
@@ -552,14 +647,22 @@ export async function searchFoodByText(
 
   try {
     steps = updateStep(steps, "local_db_searching", "active");
-    emitProgress(onProgress, buildProgress("searching", steps, null, "食品データを検索中..."));
+    emitProgress(
+      onProgress,
+      buildProgress("searching", steps, null, "食品データを検索中..."),
+    );
     const localDbResult = await searchLocalDb(input, query);
     steps = updateStep(steps, "local_db_searching", "done");
     if (localDbResult) {
       storeResult(localDbResult);
       return emitProgress(
         onProgress,
-        buildProgress("found", steps, localDbResult, "登録済みの食品が見つかりました"),
+        buildProgress(
+          "found",
+          steps,
+          localDbResult,
+          "登録済みの食品が見つかりました",
+        ),
       );
     }
   } catch (error) {
@@ -568,7 +671,10 @@ export async function searchFoodByText(
   }
 
   steps = updateStep(steps, "claude_estimating", "active");
-  emitProgress(onProgress, buildProgress("searching", steps, null, "食品データを検索中..."));
+  emitProgress(
+    onProgress,
+    buildProgress("searching", steps, null, "食品データを検索中..."),
+  );
   const claudeResult = await estimateWithClaude(input, parsed);
   steps = updateStep(steps, "claude_estimating", "done");
   storeResult(claudeResult);
@@ -586,7 +692,15 @@ export async function searchFoodByText(
     );
   }
 
-  return emitProgress(onProgress, buildProgress("estimated", steps, claudeResult, "AIがカロリーを推定しました"));
+  return emitProgress(
+    onProgress,
+    buildProgress(
+      "estimated",
+      steps,
+      claudeResult,
+      "AIがカロリーを推定しました",
+    ),
+  );
 }
 
 export async function runAiWebSearch(
@@ -603,7 +717,10 @@ export async function runAiWebSearch(
   steps = updateStep(steps, "waiting_user_choice", "done");
   steps = updateStep(steps, "ai_web_searching", "active");
 
-  emitProgress(onProgress, buildProgress("web_searching", steps, null, "商品情報を検索中..."));
+  emitProgress(
+    onProgress,
+    buildProgress("web_searching", steps, null, "商品情報を検索中..."),
+  );
   const quota = getWebSearchQuota();
 
   try {
@@ -620,14 +737,21 @@ export async function runAiWebSearch(
       });
     }
   } catch (error) {
-    console.warn("AI web search failed, fallback to low confidence estimate", error);
+    console.warn(
+      "AI web search failed, fallback to low confidence estimate",
+      error,
+    );
   }
 
-  const fallbackEstimate = await estimateWithClaude(input, parseFoodInputByRegex(input));
+  const fallbackEstimate = await estimateWithClaude(
+    input,
+    parseFoodInputByRegex(input),
+  );
   return emitProgress(onProgress, {
     state: "low_confidence_estimate",
     steps: updateStep(steps, "ai_web_searching", "done"),
     result: fallbackEstimate,
-    message: "Web検索しましたが、うまくヒットしませんでした。AI推定カロリーを表示しています。",
+    message:
+      "Web検索しましたが、うまくヒットしませんでした。AI推定カロリーを表示しています。",
   });
 }

@@ -175,6 +175,10 @@ final class NutritionPageExtractor
                 }
             }
 
+            if ($pageBest === null && $this->isFamilyMartGoodsDetailUrl($url)) {
+                $pageBest = $this->extractFamilyMartNutritionKcal($html, $query);
+            }
+
             if ($pageBest === null) {
                 $attempts[] = $this->attemptRow($url, $score, 'ok_no_kcal', null, null);
                 continue;
@@ -770,6 +774,52 @@ final class NutritionPageExtractor
     private function isKirinDetailUrl(string $url): bool
     {
         return str_contains($url, 'products.kirin.co.jp/softdrink/softdrink/detail.html');
+    }
+
+    private function isFamilyMartGoodsDetailUrl(string $url): bool
+    {
+        $host = strtolower((string) parse_url($url, PHP_URL_HOST));
+        $path = (string) parse_url($url, PHP_URL_PATH);
+
+        if ($host !== 'www.family.co.jp' && $host !== 'family.co.jp') {
+            return false;
+        }
+
+        return preg_match('#/goods/[^/]+/\d+\.html$#', $path) === 1;
+    }
+
+    /**
+     * ファミリーマート公式商品ページの栄養成分表（item_nutritional_info）から熱量を抽出する。
+     *
+     * @return array{kcal: int, score: int, hasDecimal: bool, note?: string}|null
+     */
+    private function extractFamilyMartNutritionKcal(string $html, string $query): ?array
+    {
+        if (!preg_match(
+            '/<div[^>]*class="item_nutritional_info"[^>]*>[\s\S]*?<td[^>]*class="tit_nut"[^>]*>\s*熱量[\s\S]*?<\/tr>\s*<tr>[\s\S]*?<td[^>]*class="con_nut"[^>]*>\s*(\d{1,4}(?:\.\d+)?)\s*<\/td>/iu',
+            $html,
+            $match,
+        )) {
+            return null;
+        }
+
+        $rawValue = (string) ($match[1] ?? '');
+        $kcal = (int) round((float) $rawValue);
+
+        if ($kcal < 10 || $kcal > 5000) {
+            return null;
+        }
+
+        if ($this->shouldRejectKcalCandidate($kcal, $query, '', $html)) {
+            return null;
+        }
+
+        return [
+            'kcal' => $kcal,
+            'score' => 110,
+            'hasDecimal' => str_contains($rawValue, '.'),
+            'note' => 'family_mart_nutrition_table',
+        ];
     }
 
     private function fetchKirinNutritionHtml(string $detailUrl): ?string

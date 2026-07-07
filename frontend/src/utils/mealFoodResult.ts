@@ -31,7 +31,8 @@ export function mealItemToSearchResult(item: MealItemInput): FoodSearchResult {
     confidence,
     isEstimated:
       source === "claude_estimate" ||
-      (source === "user_registered" && parseCaloriesEdited(item.caloriesEdited)),
+      (source === "user_registered" &&
+        parseCaloriesEdited(item.caloriesEdited)),
     barcode: null,
     brandName: null,
     rawInput: item.label,

@@ -20,7 +20,11 @@ import type {
   FoodSearchResult,
   SearchState,
 } from "../types/foodSearch.ts";
-import { fetchMealHistory, saveUserFood, type MealType } from "../api/client.ts";
+import {
+  fetchMealHistory,
+  saveUserFood,
+  type MealType,
+} from "../api/client.ts";
 import type { FoodSource, SearchConfidence } from "../types/foodSearch.ts";
 import { mealItemToSearchResult } from "../utils/mealFoodResult.ts";
 import { parseCaloriesEdited } from "../utils/calorieSource.ts";
@@ -625,7 +629,8 @@ function toUniqueMealInputs(
       label: entry.label,
       kcal: `${entry.calories}kcal`,
       caloriesEdited: parseCaloriesEdited(entry.caloriesEdited),
-      calorieSource: (entry.calorieSource as FoodSource | null | undefined) ?? null,
+      calorieSource:
+        (entry.calorieSource as FoodSource | null | undefined) ?? null,
       sourceUrl: entry.sourceUrl ?? null,
       confidence: entry.confidence ?? null,
     });
