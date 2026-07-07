@@ -8,6 +8,7 @@ interface FoodEstimateCardProps {
   result: FoodSearchResult;
   onEdit: () => void;
   onAdd: () => void;
+  onSearchWeb?: () => void;
   variant?: "estimate" | "history" | "detail";
   caloriesEdited?: boolean;
 }
@@ -16,6 +17,7 @@ export function FoodEstimateCard({
   result,
   onEdit,
   onAdd,
+  onSearchWeb,
   variant = "estimate",
   caloriesEdited,
 }: FoodEstimateCardProps) {
@@ -62,14 +64,25 @@ export function FoodEstimateCard({
         confidence={result.confidence}
       />
       {showActions && (
-        <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-          <button type="button" onClick={onEdit} style={secondaryButtonStyle}>
-            内容を編集する
-          </button>
-          <button type="button" onClick={onAdd} style={primaryButtonStyle}>
-            {isHistory ? "登録する" : "この内容で追加する"}
-          </button>
-        </div>
+        <>
+          <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+            <button type="button" onClick={onEdit} style={secondaryButtonStyle}>
+              内容を編集する
+            </button>
+            <button type="button" onClick={onAdd} style={primaryButtonStyle}>
+              {isHistory ? "登録する" : "この内容で追加する"}
+            </button>
+          </div>
+          {variant === "estimate" && onSearchWeb && (
+            <button
+              type="button"
+              onClick={onSearchWeb}
+              style={webSearchLinkButtonStyle}
+            >
+              AI web検索を行う
+            </button>
+          )}
+        </>
       )}
     </div>
   );
@@ -155,4 +168,18 @@ const primaryButtonStyle: CSSProperties = {
   fontSize: 13,
   padding: "10px 8px",
   cursor: "pointer",
+};
+
+const webSearchLinkButtonStyle: CSSProperties = {
+  display: "block",
+  width: "100%",
+  marginTop: 8,
+  border: "none",
+  background: "transparent",
+  color: "#6B7280",
+  fontWeight: 500,
+  fontSize: 12,
+  padding: "4px 0 0",
+  cursor: "pointer",
+  textAlign: "center",
 };

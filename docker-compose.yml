@@ -33,6 +33,7 @@ services:
       - DB_USERNAME=${DB_USERNAME:-diet_ai}
       - DB_PASSWORD=${DB_PASSWORD:-diet_ai}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - BRAVE_SEARCH_API_KEY=${BRAVE_SEARCH_API_KEY:-}
       - MAIL_DRIVER=${MAIL_DRIVER:-log}
       - MAIL_FROM=${MAIL_FROM:-noreply@diet-ai.local}
       - FRONTEND_URL=${FRONTEND_URL:-http://localhost:5173}

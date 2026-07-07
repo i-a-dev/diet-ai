@@ -14,6 +14,7 @@ interface FoodResultPreviewProps {
   caloriesEdited?: boolean;
   onEdit?: () => void;
   onAdd?: () => void;
+  onSearchWeb?: () => void;
 }
 
 export function FoodResultPreview({
@@ -22,6 +23,7 @@ export function FoodResultPreview({
   caloriesEdited,
   onEdit,
   onAdd,
+  onSearchWeb,
 }: FoodResultPreviewProps) {
   if (shouldUseEstimateCard(result, mode)) {
     return (
@@ -33,6 +35,7 @@ export function FoodResultPreview({
         caloriesEdited={caloriesEdited}
         onEdit={onEdit ?? (() => {})}
         onAdd={onAdd ?? (() => {})}
+        onSearchWeb={onSearchWeb}
       />
     );
   }

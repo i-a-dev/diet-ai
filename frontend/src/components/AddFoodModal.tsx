@@ -466,6 +466,7 @@ export function AddFoodModal({
             setManualKcal(String(selectedResult.calories));
           }}
           onAdd={() => void saveItem(selectedResult)}
+          onSearchWeb={() => void handleWebSearch()}
         />
       );
     }
