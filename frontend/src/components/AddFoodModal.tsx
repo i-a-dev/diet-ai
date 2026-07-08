@@ -15,6 +15,7 @@ import { ProductConfirmationCard } from "./ProductConfirmationCard.tsx";
 import {
   buildResultFromSelectedAlias,
   buildResultFromSelectedCandidate,
+  buildResultFromSelectedLocalDb,
   runAiWebSearch,
   searchFoodByText,
 } from "../services/foodSearchService.ts";
@@ -24,6 +25,7 @@ import type {
   FoodSearchCandidate,
   FoodSearchProgress,
   FoodSearchResult,
+  LocalDbSearchCandidate,
   SearchState,
 } from "../types/foodSearch.ts";
 import {
@@ -222,6 +224,7 @@ export function AddFoodModal({
     progress.state === "low_confidence_estimate" ||
     progress.state === "needs_confirmation" ||
     progress.state === "needs_alias_confirmation" ||
+    progress.state === "needs_local_db_confirmation" ||
     progress.state === "web_searching" ||
     progress.state === "web_found" ||
     progress.state === "completed";
@@ -341,8 +344,13 @@ export function AddFoodModal({
   function handleCandidateSelect(candidate: FoodConfirmationCandidate) {
     const aliasCandidates = progress.aliasCandidates ?? [];
     const webCandidates = progress.candidates ?? [];
+    const localDbCandidates = progress.localDbCandidates ?? [];
     registrationContextRef.current.candidateCount =
-      aliasCandidates.length > 0 ? aliasCandidates.length : webCandidates.length;
+      aliasCandidates.length > 0
+        ? aliasCandidates.length
+        : localDbCandidates.length > 0
+          ? localDbCandidates.length
+          : webCandidates.length;
 
     if (candidate.webCandidate) {
       const rank =
@@ -362,6 +370,26 @@ export function AddFoodModal({
         result,
         candidates: undefined,
         message: "候補が見つかりました",
+      });
+      return;
+    }
+
+    if (candidate.localDbCandidate) {
+      const rank =
+        localDbCandidates.findIndex(
+          (item) => item.foodId === candidate.localDbCandidate?.foodId,
+        ) + 1;
+      aliasCandidateRankRef.current = rank > 0 ? rank : null;
+      const result = buildResultFromSelectedLocalDb(
+        inputValue.trim(),
+        candidate.localDbCandidate,
+      );
+      setProgress({
+        ...progress,
+        state: "found",
+        result,
+        localDbCandidates: undefined,
+        message: "登録済みの食品が見つかりました",
       });
       return;
     }
@@ -761,11 +789,26 @@ export function AddFoodModal({
     }
 
     if (state === "needs_confirmation" && (progress.candidates?.length ?? 0) > 0) {
+      const isVariantAmbiguous =
+        progress.confirmationReason === "variant_ambiguous";
+      const baseName =
+        progress.candidates?.[0]?.base_product_name ??
+        progress.candidates?.[0]?.product_name ??
+        inputValue.trim();
+
       return (
         <ProductConfirmationCard
+          title={isVariantAmbiguous ? "サイズを選んでください" : "こちらの商品ですか？"}
+          description={
+            isVariantAmbiguous
+              ? `${baseName} のサイズ・容量が複数見つかりました。該当するものを選んでください。`
+              : "入力内容から複数の候補が見つかりました。該当する商品を選んでください。"
+          }
           candidates={toWebConfirmationCandidates(progress.candidates ?? [])}
           onSelect={handleCandidateSelect}
           onManualInput={handleCandidateManualInput}
+          onSearchWeb={() => void handleWebSearch()}
+          searchWebDisabled={isSearching}
         />
       );
     }
@@ -781,6 +824,36 @@ export function AddFoodModal({
           candidates={toAliasConfirmationCandidates(progress.aliasCandidates ?? [])}
           onSelect={handleCandidateSelect}
           onManualInput={handleCandidateManualInput}
+          onSearchWeb={() => void handleWebSearch()}
+          searchWebDisabled={isSearching}
+        />
+      );
+    }
+
+    if (
+      state === "needs_local_db_confirmation" &&
+      (progress.localDbCandidates?.length ?? 0) > 0
+    ) {
+      const isVariantAmbiguous =
+        progress.confirmationReason === "variant_ambiguous";
+      const baseName =
+        progress.localDbCandidates?.[0]?.baseProductName ?? inputValue.trim();
+
+      return (
+        <ProductConfirmationCard
+          title={isVariantAmbiguous ? "サイズを選んでください" : "こちらの商品ですか？"}
+          description={
+            isVariantAmbiguous
+              ? `${baseName} のサイズ・容量が複数見つかりました。該当するものを選んでください。`
+              : "登録済みの候補です。該当する商品を選んでください。"
+          }
+          candidates={toLocalDbConfirmationCandidates(
+            progress.localDbCandidates ?? [],
+          )}
+          onSelect={handleCandidateSelect}
+          onManualInput={handleCandidateManualInput}
+          onSearchWeb={() => void handleWebSearch()}
+          searchWebDisabled={isSearching}
         />
       );
     }
@@ -884,15 +957,36 @@ function toWebConfirmationCandidates(
   candidates: FoodSearchCandidate[],
 ): FoodConfirmationCandidate[] {
   return candidates.map((candidate) => {
+    const baseName = candidate.base_product_name ?? candidate.product_name;
+    const variantLabel = candidate.variant_label ?? "通常サイズ";
     const label = candidate.brand
-      ? `${candidate.brand} ${candidate.product_name}`
-      : candidate.product_name;
+      ? `${candidate.brand} ${baseName}`
+      : baseName;
 
     return {
-      key: `${label}-${candidate.kcal}-${candidate.source_url ?? "no-url"}`,
+      key: `${label}-${variantLabel}-${candidate.kcal}-${candidate.source_url ?? "no-url"}`,
       label,
       kcal: candidate.kcal,
+      badge: variantLabel,
       webCandidate: candidate,
+    };
+  });
+}
+
+function toLocalDbConfirmationCandidates(
+  candidates: LocalDbSearchCandidate[],
+): FoodConfirmationCandidate[] {
+  return candidates.map((candidate) => {
+    const variantLabel = candidate.variantLabel.trim();
+    const showVariantBadge =
+      variantLabel !== "" && variantLabel !== "通常サイズ";
+
+    return {
+      key: String(candidate.foodId),
+      label: candidate.name,
+      kcal: candidate.calories,
+      badge: showVariantBadge ? variantLabel : null,
+      localDbCandidate: candidate,
     };
   });
 }
@@ -907,9 +1001,10 @@ function toAliasConfirmationCandidates(
     label: candidate.food.displayName,
     kcal: candidate.food.calories,
     badge:
-      candidate.selectionCount === topSelectionCount && topSelectionCount >= 3
+      candidate.food.variantLabel ??
+      (candidate.selectionCount === topSelectionCount && topSelectionCount >= 3
         ? "よく選ばれています"
-        : null,
+        : null),
     aliasId: candidate.aliasId,
   }));
 }

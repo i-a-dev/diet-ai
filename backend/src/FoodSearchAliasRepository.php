@@ -76,7 +76,12 @@ final class FoodSearchAliasRepository
                 f.calories_kcal,
                 f.source AS food_source,
                 f.raw_input,
-                f.source_url
+                f.source_url,
+                f.brand_name,
+                f.base_product_name,
+                f.variant_label,
+                f.package_size,
+                f.serving_weight_g
              FROM food_search_aliases a
              INNER JOIN user_foods f ON f.id = a.food_id
              WHERE a.query_normalized = :query_exact
@@ -315,6 +320,11 @@ final class FoodSearchAliasRepository
             return false;
         }
 
+        $inputAnalysis = (new FoodVariantAnalyzer())->analyzeInput($rawQuery);
+        if (($inputAnalysis['variant_risk'] ?? 'low') !== 'low') {
+            return false;
+        }
+
         if (FoodSearchNormalizer::isAmbiguousQuery($rawQuery)) {
             return false;
         }
@@ -335,6 +345,11 @@ final class FoodSearchAliasRepository
         }
 
         if (count($candidates) > 1) {
+            return true;
+        }
+
+        $inputAnalysis = (new FoodVariantAnalyzer())->analyzeInput($rawQuery);
+        if (($inputAnalysis['variant_risk'] ?? 'low') !== 'low' && !($inputAnalysis['has_explicit_variant'] ?? false)) {
             return true;
         }
 
@@ -437,6 +452,21 @@ final class FoodSearchAliasRepository
                 'rawInput' => $row['raw_input'] === null ? null : (string) $row['raw_input'],
                 'sourceUrl' => isset($row['source_url']) && $row['source_url'] !== null
                     ? (string) $row['source_url']
+                    : null,
+                'brandName' => isset($row['brand_name']) && $row['brand_name'] !== null
+                    ? (string) $row['brand_name']
+                    : null,
+                'baseProductName' => isset($row['base_product_name']) && $row['base_product_name'] !== null
+                    ? (string) $row['base_product_name']
+                    : null,
+                'variantLabel' => isset($row['variant_label']) && $row['variant_label'] !== null
+                    ? (string) $row['variant_label']
+                    : null,
+                'packageSize' => isset($row['package_size']) && $row['package_size'] !== null
+                    ? (string) $row['package_size']
+                    : null,
+                'servingWeightG' => isset($row['serving_weight_g']) && $row['serving_weight_g'] !== null
+                    ? (float) $row['serving_weight_g']
                     : null,
             ],
         ];

@@ -1,4 +1,5 @@
 import type { CSSProperties } from "react";
+import { ORANGE } from "../constants.ts";
 import type { FoodConfirmationCandidate } from "../types/foodSearch.ts";
 
 interface ProductConfirmationCardProps {
@@ -7,6 +8,8 @@ interface ProductConfirmationCardProps {
   candidates: FoodConfirmationCandidate[];
   onSelect: (candidate: FoodConfirmationCandidate) => void;
   onManualInput: () => void;
+  onSearchWeb?: () => void;
+  searchWebDisabled?: boolean;
 }
 
 export function ProductConfirmationCard({
@@ -15,6 +18,8 @@ export function ProductConfirmationCard({
   candidates,
   onSelect,
   onManualInput,
+  onSearchWeb,
+  searchWebDisabled = false,
 }: ProductConfirmationCardProps) {
   return (
     <div style={cardStyle}>
@@ -41,6 +46,19 @@ export function ProductConfirmationCard({
       <button type="button" onClick={onManualInput} style={secondaryButtonStyle}>
         どれでもない / 手入力する
       </button>
+      {onSearchWeb && (
+        <button
+          type="button"
+          onClick={onSearchWeb}
+          disabled={searchWebDisabled}
+          style={{
+            ...primaryButtonStyle,
+            opacity: searchWebDisabled ? 0.45 : 1,
+          }}
+        >
+          AI Web検索
+        </button>
+      )}
     </div>
   );
 }
@@ -126,6 +144,19 @@ const secondaryButtonStyle: CSSProperties = {
   background: "#fff",
   color: "#4B5563",
   fontWeight: 600,
+  fontSize: 14,
+  padding: "11px 12px",
+  cursor: "pointer",
+};
+
+const primaryButtonStyle: CSSProperties = {
+  width: "100%",
+  marginTop: 8,
+  border: "none",
+  borderRadius: 10,
+  background: ORANGE,
+  color: "#fff",
+  fontWeight: 700,
   fontSize: 14,
   padding: "11px 12px",
   cursor: "pointer",

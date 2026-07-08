@@ -25,6 +25,8 @@ final class CalorieEstimateService
     public function __construct(
         private readonly ?BraveNutritionSearchService $braveNutritionSearch = null,
         private readonly ?NutritionPageExtractor $nutritionPageExtractor = null,
+        private readonly ?FoodVariantAnalyzer $variantAnalyzer = null,
+        private readonly ?FoodSearchAliasRepository $foodSearchAliasRepository = null,
     ) {
     }
 
@@ -50,8 +52,14 @@ final class CalorieEstimateService
      *     kcal: int,
      *     source_url?: string,
      *     source: string,
-     *     identity_confidence: string
-     *   }>
+     *     identity_confidence: string,
+     *     base_product_name?: string,
+     *     variant_label?: string,
+     *     variant_confidence?: string,
+     *     serving_weight_g?: int|null,
+     *     package_size?: string|null
+     *   }>,
+     *   reason?: string
      * }
      */
     public function estimate(string $foodName, string $mode = 'auto'): array
@@ -108,6 +116,16 @@ final class CalorieEstimateService
         return $this->nutritionPageExtractor ?? new NutritionPageExtractor();
     }
 
+    private function resolveVariantAnalyzer(): FoodVariantAnalyzer
+    {
+        return $this->variantAnalyzer ?? new FoodVariantAnalyzer();
+    }
+
+    private function resolveFoodSearchAliasRepository(): FoodSearchAliasRepository
+    {
+        return $this->foodSearchAliasRepository ?? new FoodSearchAliasRepository();
+    }
+
     /**
      * @return array{
      *   kcal?: int,
@@ -116,15 +134,14 @@ final class CalorieEstimateService
      *   source_url?: string,
      *   source?: string,
      *   identity_confidence?: string,
+     *   base_product_name?: string,
+     *   variant_label?: string,
+     *   variant_confidence?: string,
+     *   serving_weight_g?: int|null,
+     *   package_size?: string|null,
      *   needs_confirmation?: bool,
-     *   candidates?: list<array{
-     *     product_name: string,
-     *     brand?: string,
-     *     kcal: int,
-     *     source_url?: string,
-     *     source: string,
-     *     identity_confidence: string
-     *   }>
+     *   reason?: string,
+     *   candidates?: list<array<string, mixed>>
      * }
      */
     private function estimateWithWebSearchFlow(string $trimmed, string $apiKey): array
@@ -133,72 +150,235 @@ final class CalorieEstimateService
             throw new RuntimeException('商品検索ではなく通常のAI推定をご利用ください。');
         }
 
+        $variantAnalyzer = $this->resolveVariantAnalyzer();
+        $inputAnalysis = $variantAnalyzer->analyzeInput($trimmed);
         $brave = $this->resolveBraveNutritionSearch();
-        $candidates = [];
-
-        $directResult = $brave->searchWithIdentity($trimmed, $trimmed, [$trimmed], 'nutrition');
-        if ($directResult !== null) {
-            if ($directResult['identity_confidence'] === 'high') {
-                return $this->formatSingleWebResult($directResult);
-            }
-
-            $candidates[] = $directResult;
-        }
+        $candidates = $brave->collectCandidates($trimmed, $trimmed, [$trimmed], $inputAnalysis);
 
         $aiCandidates = $this->requestClaudeProductCandidates($trimmed, $apiKey);
-        if ($aiCandidates === 'not_food') {
+        if ($aiCandidates === 'not_food' && $candidates === []) {
             throw new RuntimeException('カロリーを推定できませんでした。');
         }
 
-        foreach ($aiCandidates as $aiCandidate) {
-            $searchName = $this->buildCandidateSearchName($aiCandidate);
-            $queries = $this->buildCandidateSearchQueries($aiCandidate);
-            $found = null;
-
-            foreach ($queries as $queryStyle) {
+        if (is_array($aiCandidates) && !$this->hasStrongVariantCoverage($candidates)) {
+            foreach ($aiCandidates as $aiCandidate) {
+                $searchName = $this->buildCandidateSearchName($aiCandidate);
                 $found = $brave->searchWithIdentity(
                     $searchName,
                     $trimmed,
                     [$trimmed, $searchName, $aiCandidate['brand'] ?? ''],
-                    $queryStyle,
+                    'calorie',
                     $aiCandidate['brand'] ?? null,
                 );
 
-                if ($found !== null) {
-                    break;
+                if ($found === null) {
+                    continue;
                 }
-            }
 
-            if ($found === null) {
+                if (($aiCandidate['product_name'] ?? '') !== '') {
+                    $found['product_name'] = $aiCandidate['product_name'];
+                }
+
+                if (($aiCandidate['brand'] ?? '') !== '') {
+                    $found['brand'] = $aiCandidate['brand'];
+                }
+
+                $variant = $variantAnalyzer->analyzeProduct($found['product_name']);
+                $found['base_product_name'] = $variant['base_product_name'];
+                $found['variant_label'] = $variant['variant_label'];
+                $found['variant_confidence'] = $variant['variant_confidence'];
+                $found['serving_weight_g'] = $variant['serving_weight_g'];
+                $found['package_size'] = $variant['package_size'];
+                $candidates[] = $found;
+            }
+        }
+
+        $candidates = array_merge($candidates, $this->aliasCandidatesAsWebResults($trimmed));
+        $candidates = $this->dedupeWebCandidates($candidates);
+
+        if ($candidates !== []) {
+            return $this->resolveWebSearchOutcome($trimmed, $candidates, $inputAnalysis);
+        }
+
+        return $this->estimateWithClaudeWebSearchFallback($trimmed, $apiKey, $inputAnalysis);
+    }
+
+    /**
+     * Brave 側でサイズ違い候補が十分集まっている場合、AI 候補の再検索を省略する。
+     *
+     * @param list<array<string, mixed>> $candidates
+     */
+    private function hasStrongVariantCoverage(array $candidates): bool
+    {
+        if (count($candidates) < 2) {
+            return false;
+        }
+
+        $variantAnalyzer = $this->resolveVariantAnalyzer();
+        $mapped = array_map(
+            static fn (array $candidate): array => [
+                'variant_label' => $candidate['variant_label'] ?? '通常サイズ',
+                'base_product_name' => $candidate['base_product_name'] ?? $candidate['product_name'] ?? '',
+                'kcal' => $candidate['kcal'] ?? 0,
+            ],
+            $candidates,
+        );
+
+        if (!$variantAnalyzer->hasDistinctVariants($mapped)) {
+            return false;
+        }
+
+        $variantKcals = [];
+        foreach ($candidates as $candidate) {
+            $key = $variantAnalyzer->buildCandidateDedupeKey($candidate);
+            $kcal = (int) ($candidate['kcal'] ?? 0);
+            if ($kcal <= 0) {
                 continue;
             }
 
-            if (($aiCandidate['product_name'] ?? '') !== '') {
-                $found['product_name'] = $aiCandidate['product_name'];
+            if (!isset($variantKcals[$key])) {
+                $variantKcals[$key] = $kcal;
+                continue;
             }
 
-            if (($aiCandidate['brand'] ?? '') !== '') {
-                $found['brand'] = $aiCandidate['brand'];
+            if ($variantKcals[$key] !== $kcal) {
+                return false;
             }
-
-            $candidates[] = $found;
         }
 
-        $candidates = $this->dedupeWebCandidates($candidates);
-        $highCandidates = array_values(array_filter(
+        return count($variantKcals) >= 2;
+    }
+
+    /**
+     * @param list<array<string, mixed>> $candidates
+     * @param array{
+     *   variant_risk: string,
+     *   has_explicit_variant: bool,
+     *   input_variant_label?: string|null,
+     *   input_serving_weight_g?: int|null,
+     *   input_package_size?: string|null
+     * } $inputAnalysis
+     * @return array<string, mixed>
+     */
+    private function resolveWebSearchOutcome(string $trimmed, array $candidates, array $inputAnalysis): array
+    {
+        $variantAnalyzer = $this->resolveVariantAnalyzer();
+
+        if ($variantAnalyzer->canAutoConfirm($inputAnalysis, $candidates)) {
+            return $this->formatSingleWebResult($candidates[0]);
+        }
+
+        $reason = $variantAnalyzer->hasDistinctVariants($candidates)
+            ? 'variant_ambiguous'
+            : 'identity_ambiguous';
+
+        if (($inputAnalysis['variant_risk'] ?? 'low') !== 'low' && count($candidates) >= 1) {
+            $reason = 'variant_ambiguous';
+        }
+
+        $candidates = $this->filterVariantConfirmationCandidates($candidates, $reason);
+
+        return $this->formatConfirmationResponse($candidates, $reason);
+    }
+
+    /**
+     * サイズ確認 UI では、ブログ記事などの「通常サイズ」候補を除外する。
+     *
+     * @param list<array<string, mixed>> $candidates
+     * @return list<array<string, mixed>>
+     */
+    private function filterVariantConfirmationCandidates(array $candidates, string $reason): array
+    {
+        if ($reason !== 'variant_ambiguous') {
+            return $candidates;
+        }
+
+        $variantAnalyzer = $this->resolveVariantAnalyzer();
+        $explicitVariants = array_values(array_filter(
             $candidates,
-            static fn (array $candidate): bool => ($candidate['identity_confidence'] ?? '') === 'high',
+            static function (array $candidate): bool {
+                $variant = trim((string) ($candidate['variant_label'] ?? '通常サイズ'));
+
+                return $variant !== '' && $variant !== '通常サイズ';
+            },
         ));
 
-        if (count($highCandidates) === 1) {
-            return $this->formatSingleWebResult($highCandidates[0]);
+        if (count($explicitVariants) < 2) {
+            return $candidates;
         }
 
-        if ($candidates !== []) {
-            return $this->formatConfirmationResponse($candidates);
+        $distinct = [];
+        foreach ($explicitVariants as $candidate) {
+            $key = $variantAnalyzer->buildCandidateDedupeKey($candidate);
+            if (!isset($distinct[$key])) {
+                $distinct[$key] = $candidate;
+                continue;
+            }
+
+            $distinct[$key] = $this->preferWebCandidate($distinct[$key], $candidate);
         }
 
-        return $this->estimateWithClaudeWebSearchFallback($trimmed, $apiKey);
+        return array_values($distinct);
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    private function aliasCandidatesAsWebResults(string $rawQuery): array
+    {
+        $aliasCandidates = $this->resolveFoodSearchAliasRepository()->searchByQuery($rawQuery, null, 10);
+        if ($aliasCandidates === []) {
+            return [];
+        }
+
+        $variantAnalyzer = $this->resolveVariantAnalyzer();
+        $pageExtractor = $this->resolveNutritionPageExtractor();
+        $results = [];
+
+        foreach ($aliasCandidates as $aliasCandidate) {
+            $food = $aliasCandidate['food'];
+            $productName = (string) ($food['displayName'] ?? $food['name'] ?? '');
+            if ($productName === '') {
+                continue;
+            }
+
+            $variant = $variantAnalyzer->analyzeProduct($productName, (float) ($food['amount'] ?? 1));
+            $identityConfidence = $pageExtractor->assessProductIdentity(
+                $rawQuery,
+                $productName,
+            );
+
+            $calories = (int) $food['calories'];
+            $sourceUrl = $food['sourceUrl'] ?? null;
+            if (is_string($sourceUrl) && trim($sourceUrl) !== '') {
+                $probed = $pageExtractor->probeSingleUrl(trim($sourceUrl), $productName);
+                if ($probed !== null && ($probed['kcal'] ?? 0) > 0) {
+                    $calories = (int) $probed['kcal'];
+                } elseif ($variant['variant_label'] !== '通常サイズ') {
+                    // 保存済み alias の URL / kcal がサイズと一致しない場合は候補から外す。
+                    continue;
+                }
+            }
+
+            $results[] = [
+                'kcal' => $calories,
+                'confidence' => 'high',
+                'product_name' => $productName,
+                'source_url' => $sourceUrl,
+                'source' => 'alias_db',
+                'identity_confidence' => $identityConfidence,
+                'is_official_url' => false,
+                'base_product_name' => $variant['base_product_name'],
+                'variant_label' => $variant['variant_label'],
+                'variant_confidence' => $variant['variant_confidence'],
+                'serving_weight_g' => $variant['serving_weight_g'],
+                'package_size' => $variant['package_size'],
+                'alias_id' => $aliasCandidate['aliasId'],
+                'selection_count' => $aliasCandidate['selectionCount'],
+            ];
+        }
+
+        return $results;
     }
 
     /**
@@ -223,7 +403,7 @@ final class CalorieEstimateService
      */
     private function formatSingleWebResult(array $result): array
     {
-        return [
+        $formatted = [
             'kcal' => $result['kcal'],
             'confidence' => $result['confidence'],
             'product_name' => $result['product_name'],
@@ -232,31 +412,27 @@ final class CalorieEstimateService
             'identity_confidence' => $result['identity_confidence'],
             'needs_confirmation' => false,
         ];
+
+        foreach ([
+            'base_product_name',
+            'variant_label',
+            'variant_confidence',
+            'serving_weight_g',
+            'package_size',
+        ] as $field) {
+            if (array_key_exists($field, $result) && $result[$field] !== null && $result[$field] !== '') {
+                $formatted[$field] = $result[$field];
+            }
+        }
+
+        return $formatted;
     }
 
     /**
-     * @param list<array{
-     *   kcal: int,
-     *   confidence?: string,
-     *   product_name: string,
-     *   brand?: string,
-     *   source_url?: string,
-     *   source: string,
-     *   identity_confidence: string
-     * }> $candidates
-     * @return array{
-     *   needs_confirmation: bool,
-     *   candidates: list<array{
-     *     product_name: string,
-     *     brand?: string,
-     *     kcal: int,
-     *     source_url?: string,
-     *     source: string,
-     *     identity_confidence: string
-     *   }>
-     * }
+     * @param list<array<string, mixed>> $candidates
+     * @return array{needs_confirmation: bool, reason: string, candidates: list<array<string, mixed>>}
      */
-    private function formatConfirmationResponse(array $candidates): array
+    private function formatConfirmationResponse(array $candidates, string $reason = 'identity_ambiguous'): array
     {
         $formatted = [];
 
@@ -268,12 +444,19 @@ final class CalorieEstimateService
                 'identity_confidence' => $candidate['identity_confidence'],
             ];
 
-            if (($candidate['brand'] ?? '') !== '') {
-                $item['brand'] = $candidate['brand'];
-            }
-
-            if (($candidate['source_url'] ?? '') !== '') {
-                $item['source_url'] = $candidate['source_url'];
+            foreach ([
+                'brand',
+                'source_url',
+                'base_product_name',
+                'variant_label',
+                'variant_confidence',
+                'serving_weight_g',
+                'package_size',
+                'alias_id',
+            ] as $field) {
+                if (($candidate[$field] ?? null) !== null && ($candidate[$field] ?? '') !== '') {
+                    $item[$field] = $candidate[$field];
+                }
             }
 
             $formatted[] = $item;
@@ -281,44 +464,79 @@ final class CalorieEstimateService
 
         return [
             'needs_confirmation' => true,
+            'reason' => $reason,
             'candidates' => $formatted,
         ];
     }
 
     /**
-     * @param list<array{
-     *   kcal: int,
-     *   product_name: string,
-     *   brand?: string,
-     *   source_url?: string,
-     *   source: string,
-     *   identity_confidence: string
-     * }> $candidates
-     * @return list<array{
-     *   kcal: int,
-     *   product_name: string,
-     *   brand?: string,
-     *   source_url?: string,
-     *   source: string,
-     *   identity_confidence: string
-     * }>
+     * @param list<array<string, mixed>> $candidates
+     * @return list<array<string, mixed>>
      */
     private function dedupeWebCandidates(array $candidates): array
     {
-        $seen = [];
-        $unique = [];
+        $variantAnalyzer = $this->resolveVariantAnalyzer();
+        $byKey = [];
 
         foreach ($candidates as $candidate) {
-            $key = mb_strtolower(trim($candidate['product_name'])) . '|' . $candidate['kcal'];
-            if (isset($seen[$key])) {
+            $key = $variantAnalyzer->buildCandidateDedupeKey($candidate);
+            if (!isset($byKey[$key])) {
+                $byKey[$key] = $candidate;
                 continue;
             }
 
-            $seen[$key] = true;
-            $unique[] = $candidate;
+            $byKey[$key] = $this->preferWebCandidate($byKey[$key], $candidate);
         }
 
-        return $unique;
+        return array_values($byKey);
+    }
+
+    /**
+     * @param array<string, mixed> $current
+     * @param array<string, mixed> $incoming
+     * @return array<string, mixed>
+     */
+    private function preferWebCandidate(array $current, array $incoming): array
+    {
+        return $this->webCandidateQualityScore($incoming) > $this->webCandidateQualityScore($current)
+            ? $incoming
+            : $current;
+    }
+
+    /**
+     * @param array<string, mixed> $candidate
+     */
+    private function webCandidateQualityScore(array $candidate): int
+    {
+        $score = 0;
+
+        if (($candidate['is_official_url'] ?? false) === true) {
+            $score += 120;
+        }
+
+        $source = (string) ($candidate['source'] ?? '');
+        if ($source === 'brave_html') {
+            $score += 60;
+        } elseif ($source === 'claude_web_search') {
+            $score += 40;
+        } elseif ($source === 'alias_db') {
+            $score += 10;
+        }
+
+        if (!empty($candidate['source_url'])) {
+            $host = strtolower((string) parse_url((string) $candidate['source_url'], PHP_URL_HOST));
+            if (str_contains($host, 'kalori.jp')) {
+                $score += 30;
+            }
+            if (str_contains($host, 'fatsecret')) {
+                $score -= 80;
+            }
+            $score += 5;
+        }
+
+        $score += min(mb_strlen((string) ($candidate['product_name'] ?? '')), 40);
+
+        return $score;
     }
 
     /**
@@ -364,12 +582,20 @@ final class CalorieEstimateService
      *     kcal: int,
      *     source_url?: string,
      *     source: string,
-     *     identity_confidence: string
-     *   }>
+     *     identity_confidence: string,
+     *     base_product_name?: string,
+     *     variant_label?: string,
+     *     variant_confidence?: string,
+     *     serving_weight_g?: int|null,
+     *     package_size?: string|null
+     *   }>,
+     *   reason?: string
      * }
      */
-    private function estimateWithClaudeWebSearchFallback(string $trimmed, string $apiKey): array
+    private function estimateWithClaudeWebSearchFallback(string $trimmed, string $apiKey, ?array $inputAnalysis = null): array
     {
+        $inputAnalysis ??= $this->resolveVariantAnalyzer()->analyzeInput($trimmed);
+        $variantAnalyzer = $this->resolveVariantAnalyzer();
         $claudeResult = $this->requestClaudeWebIdentification($trimmed, $apiKey);
         if ($claudeResult === 'not_food' || $claudeResult === null) {
             throw new RuntimeException('カロリーを推定できませんでした。');
@@ -385,6 +611,8 @@ final class CalorieEstimateService
         $extractor = $this->resolveNutritionPageExtractor();
         $identityConfidence = $extractor->assessProductIdentity($trimmed, $productName);
 
+        $variant = $variantAnalyzer->analyzeProduct($productName);
+
         if ($htmlResult !== null) {
             $confidence = $identityConfidence === 'high' ? 'high' : 'medium';
             $result = [
@@ -394,13 +622,14 @@ final class CalorieEstimateService
                 'source_url' => $htmlResult['url'],
                 'source' => 'claude_web_search',
                 'identity_confidence' => $identityConfidence,
+                'base_product_name' => $variant['base_product_name'],
+                'variant_label' => $variant['variant_label'],
+                'variant_confidence' => $variant['variant_confidence'],
+                'serving_weight_g' => $variant['serving_weight_g'],
+                'package_size' => $variant['package_size'],
             ];
 
-            if ($identityConfidence === 'high') {
-                return $this->formatSingleWebResult($result);
-            }
-
-            return $this->formatConfirmationResponse([$result]);
+            return $this->resolveWebSearchOutcome($trimmed, [$result], $inputAnalysis);
         }
 
         $fallbackConfidence = $claudeResult['confidence'] === 'high' ? 'medium' : $claudeResult['confidence'];
@@ -414,13 +643,14 @@ final class CalorieEstimateService
             'product_name' => $productName,
             'source' => 'claude_web_search',
             'identity_confidence' => $identityConfidence,
+            'base_product_name' => $variant['base_product_name'],
+            'variant_label' => $variant['variant_label'],
+            'variant_confidence' => $variant['variant_confidence'],
+            'serving_weight_g' => $variant['serving_weight_g'],
+            'package_size' => $variant['package_size'],
         ];
 
-        if ($identityConfidence === 'high') {
-            return $this->formatSingleWebResult($result);
-        }
-
-        return $this->formatConfirmationResponse([$result]);
+        return $this->resolveWebSearchOutcome($trimmed, [$result], $inputAnalysis);
     }
 
     private function looksLikeHomeCookedMeal(string $foodName): bool
@@ -490,6 +720,7 @@ final class CalorieEstimateService
         return <<<PROMPT
 以下の入力が食品かどうかを判定し、食品の場合は日本国内で販売されている可能性が高い市販食品候補を最大3件返してください。
 カロリー推定はしないでください。Web検索はしないでください。
+サイズ違い（S/M/L、BIG、内容量違い）がある商品は、サイズごとに別候補として返してください。
 
 入力: {$foodName}
 

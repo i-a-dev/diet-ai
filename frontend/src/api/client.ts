@@ -1,5 +1,6 @@
 import { clearAuthToken, getAuthToken } from "../auth/tokenStorage.ts";
 import type { SaveMealPayload } from "../utils/mealSavePayload.ts";
+import type { SearchConfidence } from "../types/foodSearch.ts";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "/api";
 
@@ -286,8 +287,14 @@ export interface CalorieEstimateCandidate {
   brand?: string;
   kcal: number;
   source_url?: string;
-  source: "brave_html" | "claude_web_search";
+  source: "brave_html" | "claude_web_search" | "alias_db";
   identity_confidence: "high" | "medium" | "low";
+  base_product_name?: string;
+  variant_label?: string;
+  variant_confidence?: "high" | "medium" | "low";
+  serving_weight_g?: number | null;
+  package_size?: string | null;
+  alias_id?: number;
 }
 
 export interface CalorieEstimateResponse {
@@ -298,7 +305,13 @@ export interface CalorieEstimateResponse {
   source_url?: string;
   source?: "brave_html" | "claude_web_search";
   identity_confidence?: "high" | "medium" | "low";
+  base_product_name?: string;
+  variant_label?: string;
+  variant_confidence?: "high" | "medium" | "low";
+  serving_weight_g?: number | null;
+  package_size?: string | null;
   needs_confirmation?: boolean;
+  reason?: "variant_ambiguous" | "identity_ambiguous";
   candidates?: CalorieEstimateCandidate[];
 }
 
@@ -324,10 +337,34 @@ export interface UserFoodSummary {
   source: string;
   rawInput: string | null;
   sourceUrl: string | null;
+  brandName?: string | null;
+  baseProductName?: string | null;
+  variantLabel?: string | null;
+  packageSize?: string | null;
+  servingWeightG?: number | null;
+}
+
+export interface LocalDbSearchCandidateResponse {
+  foodId: number;
+  name: string;
+  calories: number;
+  source: "local_db";
+  baseProductName: string;
+  variantLabel: string;
+  confidence: SearchConfidence;
+  amount: number;
+  unit: string;
+  rawInput?: string | null;
+  sourceUrl?: string | null;
+  servingWeightG?: number | null;
+  packageSize?: string | null;
 }
 
 export interface UserFoodSearchResponse {
   food: UserFoodSummary | null;
+  candidates?: LocalDbSearchCandidateResponse[];
+  needsConfirmation?: boolean;
+  reason?: "variant_ambiguous" | "identity_ambiguous" | null;
 }
 
 export function searchUserFoods(query: string) {

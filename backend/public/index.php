@@ -20,6 +20,7 @@ require_once __DIR__ . '/../src/DailyNutritionSummaryRepository.php';
 require_once __DIR__ . '/../src/CalorieEstimateService.php';
 require_once __DIR__ . '/../src/BraveSearchService.php';
 require_once __DIR__ . '/../src/NutritionPageExtractor.php';
+require_once __DIR__ . '/../src/FoodVariantAnalyzer.php';
 require_once __DIR__ . '/../src/BraveNutritionSearchService.php';
 require_once __DIR__ . '/../src/ExerciseMetEstimateService.php';
 require_once __DIR__ . '/../src/UserProfileRepository.php';
@@ -760,13 +761,16 @@ if ($requestMethod === 'GET' && $requestPath === '/api/foods/search') {
     $query = trim((string) ($_GET['q'] ?? ''));
 
     try {
-        $food = $userFoodRepository->searchBestMatch($query);
+        $searchResult = $userFoodRepository->searchCandidates($query);
     } catch (InvalidArgumentException $exception) {
         json_response(['message' => $exception->getMessage()], 422);
     }
 
     json_response([
-        'food' => $food,
+        'food' => $searchResult['food'],
+        'candidates' => $searchResult['candidates'],
+        'needsConfirmation' => $searchResult['needsConfirmation'],
+        'reason' => $searchResult['reason'],
     ]);
 }
 
@@ -787,6 +791,11 @@ if ($requestMethod === 'POST' && $requestPath === '/api/foods') {
     $rawInputOrNull = $rawInput === '' ? null : $rawInput;
     $sourceUrl = trim((string) ($body['sourceUrl'] ?? ''));
     $sourceUrlOrNull = $sourceUrl === '' ? null : $sourceUrl;
+    $brandName = trim((string) ($body['brandName'] ?? ''));
+    $baseProductName = trim((string) ($body['baseProductName'] ?? ''));
+    $variantLabel = trim((string) ($body['variantLabel'] ?? ''));
+    $packageSize = trim((string) ($body['packageSize'] ?? ''));
+    $servingWeightG = $body['servingWeightG'] ?? null;
 
     if (!is_numeric($amount)) {
         json_response(['message' => 'amount is required'], 422);
@@ -805,6 +814,11 @@ if ($requestMethod === 'POST' && $requestPath === '/api/foods') {
             $source,
             $rawInputOrNull,
             $sourceUrlOrNull,
+            $brandName !== '' ? $brandName : null,
+            $baseProductName !== '' ? $baseProductName : null,
+            $variantLabel !== '' ? $variantLabel : null,
+            $packageSize !== '' ? $packageSize : null,
+            is_numeric($servingWeightG) ? (float) $servingWeightG : null,
         );
     } catch (InvalidArgumentException $exception) {
         json_response(['message' => $exception->getMessage()], 422);

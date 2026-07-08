@@ -5,18 +5,16 @@ import {
   type AliasSearchCandidateResponse,
   type CalorieEstimateCandidate,
   type CalorieEstimateResponse,
+  type LocalDbSearchCandidateResponse,
   type UserFoodSummary,
 } from "../api/client.ts";
-import {
-  consumeWebSearchQuota,
-  getWebSearchQuota,
-} from "./webSearchQuotaService.ts";
 import type {
   AliasSearchCandidate,
   FoodSearchCandidate,
   FoodSearchProgress,
   FoodSearchResult,
   FoodSearchStep,
+  LocalDbSearchCandidate,
   SearchConfidence,
   SearchState,
 } from "../types/foodSearch.ts";
@@ -254,8 +252,12 @@ function buildEstimateDisplayName(
 
 function resolveWebSearchSource(
   source?: CalorieEstimateResponse["source"] | CalorieEstimateCandidate["source"],
-): "brave_html" | "claude_web_search" | "ai_web_search" {
-  if (source === "brave_html" || source === "claude_web_search") {
+): FoodSearchCandidate["source"] {
+  if (
+    source === "brave_html" ||
+    source === "claude_web_search" ||
+    source === "alias_db"
+  ) {
     return source;
   }
 
@@ -272,6 +274,12 @@ function mapEstimateCandidate(
     source_url: candidate.source_url ?? null,
     source: resolveWebSearchSource(candidate.source),
     identity_confidence: candidate.identity_confidence,
+    base_product_name: candidate.base_product_name,
+    variant_label: candidate.variant_label,
+    variant_confidence: candidate.variant_confidence,
+    serving_weight_g: candidate.serving_weight_g ?? null,
+    package_size: candidate.package_size ?? null,
+    alias_id: candidate.alias_id,
   };
 }
 
@@ -311,18 +319,26 @@ function resultFromWebCandidate(
   const displayName = candidate.brand
     ? `${candidate.brand} ${candidate.product_name}`
     : candidate.product_name;
+  const amount =
+    candidate.serving_weight_g != null && candidate.serving_weight_g > 0
+      ? candidate.serving_weight_g
+      : 1;
+  const unit =
+    candidate.serving_weight_g != null && candidate.serving_weight_g > 0
+      ? "g"
+      : "食";
 
   return {
     id: `${candidate.source}-${Date.now()}`,
     name: displayName,
     displayName,
-    amount: 1,
-    unit: "食",
+    amount,
+    unit,
     calories: candidate.kcal,
     protein: null,
     fat: null,
     carbs: null,
-    source: candidate.source,
+    source: candidate.source === "alias_db" ? "alias_db" : candidate.source,
     confidence:
       candidate.identity_confidence === "high" ? "high" : "medium",
     isEstimated: false,
@@ -331,6 +347,7 @@ function resultFromWebCandidate(
     brandName: candidate.brand ?? null,
     sourceUrl: candidate.source_url ?? null,
     identityConfidence: candidate.identity_confidence,
+    aliasId: candidate.alias_id ?? null,
   };
 }
 
@@ -683,10 +700,35 @@ async function searchOpenFoodFacts(
   return best?.result ?? null;
 }
 
+function mapLocalDbCandidate(
+  candidate: LocalDbSearchCandidateResponse,
+): LocalDbSearchCandidate {
+  return {
+    foodId: candidate.foodId,
+    name: candidate.name,
+    calories: candidate.calories,
+    source: "local_db",
+    baseProductName: candidate.baseProductName,
+    variantLabel: candidate.variantLabel,
+    confidence: candidate.confidence,
+    amount: candidate.amount,
+    unit: candidate.unit,
+    rawInput: candidate.rawInput ?? null,
+    sourceUrl: candidate.sourceUrl ?? null,
+    servingWeightG: candidate.servingWeightG ?? null,
+    packageSize: candidate.packageSize ?? null,
+  };
+}
+
 async function searchLocalDb(
   rawInput: string,
   query: string,
-): Promise<FoodSearchResult | null> {
+): Promise<{
+  result: FoodSearchResult | null;
+  localDbCandidates: LocalDbSearchCandidate[];
+  needsConfirmation: boolean;
+  confirmationReason: FoodSearchProgress["confirmationReason"];
+}> {
   const searches = [rawInput, query].filter(
     (value, index, array) =>
       value.trim() !== "" && array.indexOf(value) === index,
@@ -694,12 +736,33 @@ async function searchLocalDb(
 
   for (const searchQuery of searches) {
     const response = await searchUserFoods(searchQuery);
+    const localDbCandidates = (response.candidates ?? []).map(mapLocalDbCandidate);
+
+    if (response.needsConfirmation && localDbCandidates.length > 0) {
+      return {
+        result: null,
+        localDbCandidates,
+        needsConfirmation: true,
+        confirmationReason: response.reason ?? "variant_ambiguous",
+      };
+    }
+
     if (response.food) {
-      return resultFromUserFood(response.food, rawInput);
+      return {
+        result: resultFromUserFood(response.food, rawInput),
+        localDbCandidates,
+        needsConfirmation: false,
+        confirmationReason: null,
+      };
     }
   }
 
-  return null;
+  return {
+    result: null,
+    localDbCandidates: [],
+    needsConfirmation: false,
+    confirmationReason: null,
+  };
 }
 
 async function estimateWithClaude(
@@ -749,6 +812,8 @@ function buildProgress(
   message: string,
   candidates?: FoodSearchCandidate[],
   aliasCandidates?: AliasSearchCandidate[],
+  confirmationReason?: FoodSearchProgress["confirmationReason"],
+  localDbCandidates?: LocalDbSearchCandidate[],
 ): FoodSearchProgress {
   return {
     state,
@@ -757,6 +822,8 @@ function buildProgress(
     message,
     candidates,
     aliasCandidates,
+    localDbCandidates,
+    confirmationReason,
   };
 }
 
@@ -827,15 +894,36 @@ export async function searchFoodByText(
     );
     const localDbResult = await searchLocalDb(input, query);
     steps = updateStep(steps, "local_db_searching", "done");
-    if (localDbResult) {
-      storeResult(localDbResult);
+    if (localDbResult.result) {
+      storeResult(localDbResult.result);
       return emitProgress(
         onProgress,
         buildProgress(
           "found",
           steps,
-          localDbResult,
+          localDbResult.result,
           "登録済みの食品が見つかりました",
+        ),
+      );
+    }
+    if (
+      localDbResult.needsConfirmation &&
+      localDbResult.localDbCandidates.length > 0
+    ) {
+      steps = updateStep(steps, "waiting_user_choice", "active");
+      const isVariantAmbiguous =
+        localDbResult.confirmationReason === "variant_ambiguous";
+      return emitProgress(
+        onProgress,
+        buildProgress(
+          "needs_local_db_confirmation",
+          steps,
+          null,
+          isVariantAmbiguous ? "サイズを選んでください" : "こちらの商品ですか？",
+          undefined,
+          undefined,
+          localDbResult.confirmationReason,
+          localDbResult.localDbCandidates,
         ),
       );
     }
@@ -936,35 +1024,34 @@ export async function runAiWebSearch(
     onProgress,
     buildProgress("web_searching", steps, null, "商品情報を検索中..."),
   );
-  const quota = getWebSearchQuota();
 
   try {
-    if (quota.remainingCount > 0) {
-      const webEstimate = await estimateCalories(input, "web");
+    const webEstimate = await estimateCalories(input, "web");
 
-      if (webEstimate.needs_confirmation && (webEstimate.candidates?.length ?? 0) > 0) {
-        const candidates = webEstimate.candidates!.map(mapEstimateCandidate);
-        consumeWebSearchQuota();
-        return emitProgress(onProgress, {
-          state: "needs_confirmation",
-          steps: updateStep(steps, "ai_web_searching", "done"),
-          result: null,
-          candidates,
-          message: "候補商品の確認が必要です",
-        });
-      }
+    if (webEstimate.needs_confirmation && (webEstimate.candidates?.length ?? 0) > 0) {
+      const candidates = webEstimate.candidates!.map(mapEstimateCandidate);
+      return emitProgress(onProgress, {
+        state: "needs_confirmation",
+        steps: updateStep(steps, "ai_web_searching", "done"),
+        result: null,
+        candidates,
+        confirmationReason: webEstimate.reason ?? "identity_ambiguous",
+        message:
+          webEstimate.reason === "variant_ambiguous"
+            ? "サイズを選んでください"
+            : "候補商品の確認が必要です",
+      });
+    }
 
-      if (webEstimate.kcal != null) {
-        const result = resultFromWebEstimate(input, webEstimate);
-        storeResult(result);
-        consumeWebSearchQuota();
-        return emitProgress(onProgress, {
-          state: "web_found",
-          steps: updateStep(steps, "ai_web_searching", "done"),
-          result,
-          message: "候補が見つかりました",
-        });
-      }
+    if (webEstimate.kcal != null) {
+      const result = resultFromWebEstimate(input, webEstimate);
+      storeResult(result);
+      return emitProgress(onProgress, {
+        state: "web_found",
+        steps: updateStep(steps, "ai_web_searching", "done"),
+        result,
+        message: "候補が見つかりました",
+      });
     }
   } catch (error) {
     const message =
@@ -1008,6 +1095,30 @@ export function buildResultFromSelectedCandidate(
   candidate: FoodSearchCandidate,
 ): FoodSearchResult {
   const result = resultFromWebCandidate(rawInput, candidate);
+  storeResult(result);
+  return result;
+}
+
+export function buildResultFromSelectedLocalDb(
+  rawInput: string,
+  candidate: LocalDbSearchCandidate,
+): FoodSearchResult {
+  const food: UserFoodSummary = {
+    id: candidate.foodId,
+    displayName: candidate.name,
+    name: candidate.name,
+    amount: candidate.amount,
+    unit: candidate.unit,
+    calories: candidate.calories,
+    source: "local_db",
+    rawInput: candidate.rawInput ?? null,
+    sourceUrl: candidate.sourceUrl ?? null,
+    baseProductName: candidate.baseProductName,
+    variantLabel: candidate.variantLabel,
+    packageSize: candidate.packageSize ?? null,
+    servingWeightG: candidate.servingWeightG ?? null,
+  };
+  const result = resultFromUserFood(food, rawInput, "local_db");
   storeResult(result);
   return result;
 }

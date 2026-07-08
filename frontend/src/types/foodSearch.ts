@@ -23,6 +23,7 @@ export type SearchState =
   | "web_found"
   | "needs_confirmation"
   | "needs_alias_confirmation"
+  | "needs_local_db_confirmation"
   | "completed"
   | "error";
 
@@ -31,8 +32,14 @@ export interface FoodSearchCandidate {
   brand?: string;
   kcal: number;
   source_url?: string | null;
-  source: "brave_html" | "claude_web_search" | "ai_web_search";
+  source: "brave_html" | "claude_web_search" | "ai_web_search" | "alias_db";
   identity_confidence: SearchConfidence;
+  base_product_name?: string;
+  variant_label?: string;
+  variant_confidence?: SearchConfidence;
+  serving_weight_g?: number | null;
+  package_size?: string | null;
+  alias_id?: number;
 }
 
 export interface AliasSearchCandidate {
@@ -52,7 +59,26 @@ export interface AliasSearchCandidate {
     source: string;
     rawInput: string | null;
     sourceUrl: string | null;
+    variantLabel?: string | null;
+    baseProductName?: string | null;
+    servingWeightG?: number | null;
   };
+}
+
+export interface LocalDbSearchCandidate {
+  foodId: number;
+  name: string;
+  calories: number;
+  source: "local_db";
+  baseProductName: string;
+  variantLabel: string;
+  confidence: SearchConfidence;
+  amount: number;
+  unit: string;
+  rawInput?: string | null;
+  sourceUrl?: string | null;
+  servingWeightG?: number | null;
+  packageSize?: string | null;
 }
 
 export interface FoodConfirmationCandidate {
@@ -62,6 +88,7 @@ export interface FoodConfirmationCandidate {
   badge?: string | null;
   aliasId?: number;
   webCandidate?: FoodSearchCandidate;
+  localDbCandidate?: LocalDbSearchCandidate;
 }
 
 export interface FoodResultItem {
@@ -119,5 +146,7 @@ export interface FoodSearchProgress {
   result: FoodSearchResult | null;
   candidates?: FoodSearchCandidate[];
   aliasCandidates?: AliasSearchCandidate[];
+  localDbCandidates?: LocalDbSearchCandidate[];
+  confirmationReason?: "variant_ambiguous" | "identity_ambiguous" | null;
   message?: string;
 }

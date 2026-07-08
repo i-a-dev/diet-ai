@@ -101,10 +101,45 @@ final class NutritionPageExtractor
             return null;
         }
 
-        $ranked = $this->rankUrls([$url], ['query' => $productName]);
-        $result = $this->probeUrls($ranked, ['query' => $productName], 1);
+        $probeQuery = $this->simplifyProbeQuery($productName);
+        $ranked = [[
+            'url' => $url,
+            'score' => $this->scoreWebSearchUrl($url, $probeQuery),
+        ]];
+        $result = $this->probeUrls($ranked, ['query' => $probeQuery], 1, false);
 
         return $result['best'];
+    }
+
+    /**
+     * HTML 抽出用に、検索クエリを商品名+サイズ中心の短い文字列へ整える。
+     */
+    public function simplifyProbeQuery(string $query): string
+    {
+        $value = trim($query);
+        $value = (string) preg_replace('/\s*(カロリー|栄養成分|エネルギー|kcal).*$/iu', '', $value);
+        $value = (string) preg_replace('/\s+/u', ' ', trim($value));
+
+        if (preg_match('/^(.*?)(L|M|S)サイズ$/iu', $value, $match) === 1) {
+            $base = trim($match[1]);
+            $size = strtoupper($match[2]);
+
+            if (mb_strpos($base, 'ポテト') !== false || mb_strpos($base, 'マック') !== false) {
+                return 'マックフライポテト ' . $size;
+            }
+
+            return $base . ' ' . $size;
+        }
+
+        if (preg_match('/^(.*?)(L|M|S)サイズ$/iu', $value, $match) !== 1
+            && preg_match('/\b(l|m|s)\b/u', mb_strtolower($value), $sizeMatch) === 1) {
+            $size = strtoupper($sizeMatch[1]);
+            if (mb_strpos($value, 'ポテト') !== false || mb_strpos($value, 'マック') !== false) {
+                return 'マックフライポテト ' . $size;
+            }
+        }
+
+        return $value;
     }
 
     /**
@@ -163,6 +198,15 @@ final class NutritionPageExtractor
                 continue;
             }
 
+            $resolvedUrl = $this->resolveKaloriVariantUrl($html, $url, $query);
+            if ($resolvedUrl !== null && $resolvedUrl !== $url) {
+                $resolvedHtml = $this->fetchPublicHtml($resolvedUrl);
+                if ($resolvedHtml !== null) {
+                    $url = $resolvedUrl;
+                    $html = $resolvedHtml;
+                }
+            }
+
             $pageBest = $this->extractBestLabeledKcalFromHtml($html, $query, $url);
 
             if ($pageBest === null && $this->isKirinDetailUrl($url)) {
@@ -177,6 +221,10 @@ final class NutritionPageExtractor
 
             if ($pageBest === null && $this->isFamilyMartGoodsDetailUrl($url)) {
                 $pageBest = $this->extractFamilyMartNutritionKcal($html, $query);
+            }
+
+            if ($pageBest !== null && !$this->extractedKcalMatchesQueryVariant($html, $query)) {
+                $pageBest = null;
             }
 
             if ($pageBest === null) {
@@ -287,6 +335,8 @@ final class NutritionPageExtractor
             'www.muji.com' => 40,
             'greenbeans.com' => 25,
             'kalori.jp' => 20,
+            'mcdonalds.co.jp' => 50,
+            'www.mcdonalds.co.jp' => 50,
         ];
 
         foreach ($officialDomains as $domain => $bonus) {
@@ -477,6 +527,7 @@ final class NutritionPageExtractor
             ['priority' => 95, 'pattern' => '/エネルギー\s*(\d{1,4}(?:\.\d+)?)\s*\(\s*[Kk]cal\s*\)/u'],
             ['priority' => 92, 'pattern' => '/エネルギー[^0-9]{0,40}(\d{1,4}(?:\.\d+)?)\s*kcal/isu'],
             ['priority' => 90, 'pattern' => '/>(\d{1,4}(?:\.\d+)?)\s*kcal\s*<\/td>/iu'],
+            ['priority' => 89, 'pattern' => '/>(\d{1,4}(?:\.\d+)?)kcal\s*<\//iu'],
             ['priority' => 88, 'pattern' => '/>(\d{1,4}(?:\.\d+)?)\s*kcal\s*<\/div>/iu'],
             ['priority' => 85, 'pattern' => '/カロリー[^0-9]{0,40}(\d{1,4}(?:\.\d+)?)\s*kcal/isu'],
             ['priority' => 75, 'pattern' => '/"energy(?:_kcal)?"\s*:\s*"?(\d{1,4}(?:\.\d+)?)"?/iu'],
@@ -728,6 +779,9 @@ final class NutritionPageExtractor
 
         $title = (string) preg_replace('/\s*[|｜\-–—].*$/u', '', $title);
         $title = (string) preg_replace('/\s*(栄養成分|カロリー|エネルギー).*$/u', '', $title);
+        $title = (string) preg_replace('/\s*\d+(?:\.\d+)?\s*kcal.*$/iu', '', $title);
+        $title = (string) preg_replace('/\s+\d{2,4}$/u', '', $title);
+        $title = (string) preg_replace('/の$/u', '', $title);
         $title = trim($title);
 
         return $title !== '' ? $title : $fallback;
@@ -752,6 +806,7 @@ final class NutritionPageExtractor
             '31ice.co.jp',
             'nongshim.co.jp',
             'muji.com',
+            'mcdonalds.co.jp',
         ];
 
         foreach ($officialDomains as $domain) {
@@ -761,6 +816,83 @@ final class NutritionPageExtractor
         }
 
         return false;
+    }
+
+    /**
+     * kalori.jp の商品ページで、クエリのサイズに合う兄弟商品 URL を返す。
+     */
+    private function resolveKaloriVariantUrl(string $html, string $url, string $query): ?string
+    {
+        $host = strtolower((string) parse_url($url, PHP_URL_HOST));
+        if ($host === '' || !str_contains($host, 'kalori.jp')) {
+            return null;
+        }
+
+        $variantMarker = $this->extractKaloriVariantMarker($query);
+        if ($variantMarker === null) {
+            return null;
+        }
+
+        if (preg_match_all(
+            '/href="(\/ja\/shops\/[^"]+\/products\/\d+\/)"[^>]*>([^<]*)</iu',
+            $html,
+            $matches,
+            PREG_SET_ORDER,
+        ) >= 1) {
+            foreach ($matches as $match) {
+                $linkText = (string) ($match[2] ?? '');
+                if (mb_strpos($linkText, $variantMarker) !== false) {
+                    return 'https://kalori.jp' . $match[1];
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private function extractedKcalMatchesQueryVariant(string $html, string $query): bool
+    {
+        $variantMarker = $this->extractKaloriVariantMarker($query);
+        if ($variantMarker === null) {
+            return true;
+        }
+
+        $title = '';
+        if (preg_match('/<title[^>]*>(.*?)<\/title>/isu', $html, $match) === 1) {
+            $title = html_entity_decode(strip_tags($match[1]), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        }
+
+        if ($title === '' && preg_match('/property="og:title"\s+content="([^"]+)"/iu', $html, $match) === 1) {
+            $title = html_entity_decode($match[1], ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        }
+
+        $haystack = mb_strtolower($title);
+
+        return match ($variantMarker) {
+            '(L)' => preg_match('/\(l\)|lサイズ|ｌサイズ/u', $haystack) === 1,
+            '(M)' => preg_match('/\(m\)|mサイズ|ｍサイズ/u', $haystack) === 1,
+            '(S)' => preg_match('/\(s\)|sサイズ|ｓサイズ/u', $haystack) === 1,
+            default => true,
+        };
+    }
+
+    private function extractKaloriVariantMarker(string $query): ?string
+    {
+        $normalized = mb_strtolower(trim($query));
+
+        if (preg_match('/\(l\)|lサイズ|ｌサイズ|ポテト l|フライド.*\bl\b/u', $normalized) === 1) {
+            return '(L)';
+        }
+
+        if (preg_match('/\(m\)|mサイズ|ｍサイズ|ポテト m|フライド.*\bm\b/u', $normalized) === 1) {
+            return '(M)';
+        }
+
+        if (preg_match('/\(s\)|sサイズ|ｓサイズ|ポテト s|フライド.*\bs\b/u', $normalized) === 1) {
+            return '(S)';
+        }
+
+        return null;
     }
 
     /**
