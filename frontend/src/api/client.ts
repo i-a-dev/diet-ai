@@ -1,4 +1,5 @@
 import { clearAuthToken, getAuthToken } from "../auth/tokenStorage.ts";
+import type { SaveMealPayload } from "../utils/mealSavePayload.ts";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "/api";
 
@@ -45,6 +46,17 @@ export interface MealEntrySummary {
   calorieSource?: string | null;
   sourceUrl?: string | null;
   confidence?: string | null;
+  foodId?: number | null;
+  rawInput?: string | null;
+  amount?: number | null;
+  unit?: string | null;
+  servingLabel?: string | null;
+  servingWeightG?: number | null;
+  proteinG?: number | null;
+  fatG?: number | null;
+  carbsG?: number | null;
+  fiberG?: number | null;
+  sodiumMg?: number | null;
 }
 
 export interface MealSectionSummary {
@@ -52,6 +64,29 @@ export interface MealSectionSummary {
   name: string;
   calories: number;
   items: MealEntrySummary[];
+}
+
+export interface DailyNutritionSummary {
+  recordedOn: string;
+  totalKcal: number;
+  totalProteinG: number | null;
+  totalFatG: number | null;
+  totalCarbsG: number | null;
+  totalFiberG: number | null;
+  totalSodiumMg: number | null;
+  breakfastKcal: number;
+  lunchKcal: number;
+  dinnerKcal: number;
+  snackKcal: number;
+  mealEntryCount: number;
+  estimatedEntryCount: number;
+  editedEntryCount: number;
+  lowConfidenceEntryCount: number;
+  aiWebSearchEntryCount: number;
+  userRegisteredEntryCount: number;
+  pfcKnownEntryCount: number;
+  topFoods: Array<{ name: string; kcal: number }> | null;
+  summaryText: string | null;
 }
 
 interface DailyRecordResponse {
@@ -67,6 +102,7 @@ interface DailyRecordResponse {
     entries: ExerciseEntrySummary[];
     burnedCalories: number;
   };
+  nutritionSummary?: DailyNutritionSummary | null;
 }
 
 interface SaveWeightResponse {
@@ -74,18 +110,15 @@ interface SaveWeightResponse {
 }
 
 interface SaveMealResponse {
-  entry: {
-    id: number;
-    mealType: MealType;
-    label: string;
-    calories: number;
-  };
+  entry: MealEntrySummary & { mealType?: MealType };
   meals: MealSectionSummary[];
+  nutritionSummary?: DailyNutritionSummary;
 }
 
 interface DeleteMealResponse {
   recordedOn: string;
   meals: MealSectionSummary[];
+  nutritionSummary?: DailyNutritionSummary;
 }
 
 export interface StepsSummary {
@@ -155,15 +188,8 @@ interface ExerciseHistoryResponse {
   history: ExerciseHistoryEntry[];
 }
 
-export interface MealHistoryEntry {
-  id: number;
+export interface MealHistoryEntry extends MealEntrySummary {
   mealType: MealType;
-  label: string;
-  calories: number;
-  caloriesEdited: boolean;
-  calorieSource?: string | null;
-  sourceUrl?: string | null;
-  confidence?: string | null;
   recordedOn: string;
 }
 
@@ -183,28 +209,10 @@ export function saveWeight(weight: number, date?: string) {
   });
 }
 
-export function saveMeal(
-  mealType: MealType,
-  foodName: string,
-  calories: number,
-  date?: string,
-  caloriesEdited = false,
-  calorieSource?: string | null,
-  sourceUrl?: string | null,
-  confidence?: string | null,
-) {
+export function saveMeal(payload: SaveMealPayload) {
   return request<SaveMealResponse>("/records/meals", {
     method: "POST",
-    body: JSON.stringify({
-      mealType,
-      foodName,
-      calories,
-      date,
-      caloriesEdited,
-      calorieSource: calorieSource ?? null,
-      sourceUrl: sourceUrl ?? null,
-      confidence: confidence ?? null,
-    }),
+    body: JSON.stringify(payload),
   });
 }
 

@@ -15,6 +15,8 @@ require_once __DIR__ . '/../src/ActivityRepository.php';
 require_once __DIR__ . '/../src/UserFoodRepository.php';
 require_once __DIR__ . '/../src/FoodSearchNormalizer.php';
 require_once __DIR__ . '/../src/FoodSearchAliasRepository.php';
+require_once __DIR__ . '/../src/FoodRegistrationEventRepository.php';
+require_once __DIR__ . '/../src/DailyNutritionSummaryRepository.php';
 require_once __DIR__ . '/../src/CalorieEstimateService.php';
 require_once __DIR__ . '/../src/BraveSearchService.php';
 require_once __DIR__ . '/../src/NutritionPageExtractor.php';
@@ -202,6 +204,8 @@ $userProfileRepository = new UserProfileRepository($userId);
 $mealEntryRepository = new MealEntryRepository($userId);
 $userFoodRepository = new UserFoodRepository();
 $foodSearchAliasRepository = new FoodSearchAliasRepository();
+$foodRegistrationEventRepository = new FoodRegistrationEventRepository($userId);
+$dailyNutritionSummaryRepository = new DailyNutritionSummaryRepository($userId);
 $activityRepository = new ActivityRepository($userId);
 $chatMessageRepository = new ChatMessageRepository($userId);
 $calorieEstimateService = new CalorieEstimateService();
@@ -210,6 +214,7 @@ $chatCoachService = new ChatCoachService(
     $userProfileRepository,
     $weightRepository,
     $mealEntryRepository,
+    $dailyNutritionSummaryRepository,
     $activityRepository,
     $chatMessageRepository
 );
@@ -381,6 +386,10 @@ if ($requestMethod === 'GET' && $requestPath === '/api/records/daily') {
     $mealSections = $mealEntryRepository->getSectionsForDate($date);
     $stepsSummary = $activityRepository->getStepsForDate($date);
     $exerciseSummary = $activityRepository->getExercisesForDate($date);
+    $nutritionSummary = $dailyNutritionSummaryRepository->getForDate($date);
+    if ($nutritionSummary === null) {
+        $nutritionSummary = $dailyNutritionSummaryRepository->recalculateForDate($date);
+    }
 
     json_response([
         'date' => $weightSummary['dateLabel'] ?? WeightRepository::formatDateLabel($date),
@@ -389,6 +398,7 @@ if ($requestMethod === 'GET' && $requestPath === '/api/records/daily') {
         'meals' => $mealSections,
         'steps' => $stepsSummary,
         'exercises' => $exerciseSummary,
+        'nutritionSummary' => $nutritionSummary,
     ]);
 }
 
@@ -579,17 +589,14 @@ if ($requestMethod === 'POST' && $requestPath === '/api/records/weight') {
 // POST /api/records/meals — 食事を登録
 if ($requestMethod === 'POST' && $requestPath === '/api/records/meals') {
     $body = json_decode(file_get_contents('php://input') ?: '{}', true);
+    if (!is_array($body)) {
+        json_response(['message' => 'Invalid JSON body'], 422);
+    }
+
     $date = trim((string) ($body['date'] ?? WeightRepository::todayDate()));
     $mealType = trim((string) ($body['mealType'] ?? ''));
     $foodName = trim((string) ($body['foodName'] ?? ''));
     $calories = $body['calories'] ?? null;
-    $caloriesEdited = filter_var($body['caloriesEdited'] ?? false, FILTER_VALIDATE_BOOLEAN);
-    $calorieSource = trim((string) ($body['calorieSource'] ?? ''));
-    $calorieSourceOrNull = $calorieSource === '' ? null : $calorieSource;
-    $sourceUrl = trim((string) ($body['sourceUrl'] ?? ''));
-    $sourceUrlOrNull = $sourceUrl === '' ? null : $sourceUrl;
-    $confidence = trim((string) ($body['confidence'] ?? ''));
-    $confidenceOrNull = $confidence === '' ? null : $confidence;
 
     if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
         json_response(['message' => 'date must be YYYY-MM-DD'], 422);
@@ -599,18 +606,53 @@ if ($requestMethod === 'POST' && $requestPath === '/api/records/meals') {
         json_response(['message' => 'calories is required'], 422);
     }
 
+    $caloriesEdited = filter_var($body['caloriesEdited'] ?? false, FILTER_VALIDATE_BOOLEAN);
+    $calorieSource = trim((string) ($body['calorieSource'] ?? ''));
+    $sourceUrl = trim((string) ($body['sourceUrl'] ?? ''));
+    $confidence = trim((string) ($body['confidence'] ?? ''));
+
+    $entryOptions = [
+        'caloriesEdited' => $caloriesEdited,
+        'calorieSource' => $calorieSource === '' ? null : $calorieSource,
+        'sourceUrl' => $sourceUrl === '' ? null : $sourceUrl,
+        'confidence' => $confidence === '' ? null : $confidence,
+        'foodId' => $body['foodId'] ?? null,
+        'rawInput' => $body['rawInput'] ?? null,
+        'amount' => $body['amount'] ?? null,
+        'unit' => $body['unit'] ?? null,
+        'servingLabel' => $body['servingLabel'] ?? null,
+        'servingWeightG' => $body['servingWeightG'] ?? null,
+        'proteinG' => $body['proteinG'] ?? null,
+        'fatG' => $body['fatG'] ?? null,
+        'carbsG' => $body['carbsG'] ?? null,
+        'fiberG' => $body['fiberG'] ?? null,
+        'sodiumMg' => $body['sodiumMg'] ?? null,
+    ];
+
     try {
         $entry = $mealEntryRepository->addEntry(
             $date,
             $mealType,
             $foodName,
             (int) round((float) $calories),
-            $caloriesEdited,
-            $calorieSourceOrNull,
-            $sourceUrlOrNull,
-            $confidenceOrNull,
+            $entryOptions,
         );
         $sections = $mealEntryRepository->getSectionsForDate($date);
+        $nutritionSummary = $dailyNutritionSummaryRepository->recalculateForDate($date);
+
+        if (isset($body['registrationMetrics']) && is_array($body['registrationMetrics'])) {
+            $foodRegistrationEventRepository->recordFromMetrics(
+                (int) $entry['id'],
+                $date,
+                $mealType,
+                $foodName,
+                (int) round((float) $calories),
+                $caloriesEdited,
+                $entry['calorieSource'] ?? null,
+                isset($entry['foodId']) ? (int) $entry['foodId'] : null,
+                $body['registrationMetrics'],
+            );
+        }
     } catch (InvalidArgumentException $exception) {
         json_response(['message' => $exception->getMessage()], 422);
     }
@@ -618,6 +660,7 @@ if ($requestMethod === 'POST' && $requestPath === '/api/records/meals') {
     json_response([
         'entry' => $entry,
         'meals' => $sections,
+        'nutritionSummary' => $nutritionSummary,
     ]);
 }
 
@@ -627,6 +670,7 @@ if ($requestMethod === 'DELETE' && preg_match('#^/api/records/meals/(\d+)$#', $r
 
     try {
         $result = $mealEntryRepository->deleteEntry($entryId);
+        $nutritionSummary = $dailyNutritionSummaryRepository->recalculateForDate($result['recordedOn']);
     } catch (InvalidArgumentException $exception) {
         json_response(['message' => $exception->getMessage()], 404);
     }
@@ -634,6 +678,7 @@ if ($requestMethod === 'DELETE' && preg_match('#^/api/records/meals/(\d+)$#', $r
     json_response([
         'recordedOn' => $result['recordedOn'],
         'meals' => $result['meals'],
+        'nutritionSummary' => $nutritionSummary,
     ]);
 }
 

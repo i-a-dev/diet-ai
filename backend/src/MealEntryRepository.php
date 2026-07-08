@@ -18,6 +18,7 @@ final class MealEntryRepository
     /** @var list<string> */
     private const ALLOWED_CALORIE_SOURCES = [
         'regex',
+        'alias_db',
         'fatsecret',
         'open_food_facts',
         'local_db',
@@ -33,6 +34,10 @@ final class MealEntryRepository
         'low',
     ];
 
+    private const MEAL_ENTRY_SELECT = 'id, meal_type, food_name, calories_kcal, calories_edited, calorie_source,
+        source_url, confidence, food_id, raw_input, amount, unit, serving_label, serving_weight_g,
+        protein_g, fat_g, carbs_g, fiber_g, sodium_mg';
+
     private PDO $db;
     private int $userId;
 
@@ -43,11 +48,11 @@ final class MealEntryRepository
     }
 
     /**
-     * @return array<int, array{id: string, name: string, calories: int, items: array<int, array{id: int, label: string, calories: int}>}>
+     * @return array<int, array{id: string, name: string, calories: int, items: array<int, array<string, mixed>}>}
      */
     public function getSectionsForDate(string $date): array
     {
-        /** @var array<string, array{id: string, name: string, calories: int, items: array<int, array{id: int, label: string, calories: int}>}> $sections */
+        /** @var array<string, array{id: string, name: string, calories: int, items: array<int, array<string, mixed>}>} $sections */
         $sections = [];
         foreach (self::MEAL_LABELS as $mealType => $label) {
             $sections[$mealType] = [
@@ -59,7 +64,7 @@ final class MealEntryRepository
         }
 
         $statement = $this->db->prepare(
-            'SELECT id, meal_type, food_name, calories_kcal, calories_edited, calorie_source, source_url, confidence
+            'SELECT ' . self::MEAL_ENTRY_SELECT . '
              FROM meal_entries
              WHERE user_id = :user_id AND recorded_on = :recorded_on
              ORDER BY id ASC'
@@ -81,19 +86,16 @@ final class MealEntryRepository
     }
 
     /**
-     * @return array{id: int, mealType: string, label: string, calories: int, caloriesEdited: bool, calorieSource: string|null, sourceUrl: string|null, confidence: string|null}
+     * @param array<string, mixed> $options
+     * @return array<string, mixed>
      */
     public function addEntry(
         string $date,
         string $mealType,
         string $foodName,
         int $caloriesKcal,
-        bool $caloriesEdited = false,
-        ?string $calorieSource = null,
-        ?string $sourceUrl = null,
-        ?string $confidence = null,
-    ): array
-    {
+        array $options = [],
+    ): array {
         if (!isset(self::MEAL_LABELS[$mealType])) {
             throw new InvalidArgumentException('mealType must be breakfast|lunch|dinner|snack');
         }
@@ -107,14 +109,41 @@ final class MealEntryRepository
             throw new InvalidArgumentException('calories must be between 1 and 5000');
         }
 
-        $normalizedCalorieSource = $this->normalizeCalorieSource($calorieSource);
-        $normalizedSourceUrl = $this->normalizeSourceUrl($sourceUrl);
-        $normalizedConfidence = $this->normalizeConfidence($confidence);
+        $caloriesEdited = filter_var($options['caloriesEdited'] ?? false, FILTER_VALIDATE_BOOLEAN);
+        $normalizedCalorieSource = $this->normalizeCalorieSource(
+            isset($options['calorieSource']) ? (string) $options['calorieSource'] : null
+        );
+        $normalizedSourceUrl = $this->normalizeSourceUrl(
+            isset($options['sourceUrl']) ? (string) $options['sourceUrl'] : null
+        );
+        $normalizedConfidence = $this->normalizeConfidence(
+            isset($options['confidence']) ? (string) $options['confidence'] : null
+        );
+        $foodId = $this->normalizeOptionalInt($options['foodId'] ?? null);
+        $rawInput = $this->normalizeOptionalString($options['rawInput'] ?? null, 255);
+        $amount = $this->normalizeOptionalDecimal($options['amount'] ?? null, 0, 10000);
+        $unit = $this->normalizeOptionalString($options['unit'] ?? null, 20);
+        $servingLabel = $this->normalizeOptionalString($options['servingLabel'] ?? null, 100);
+        $servingWeightG = $this->normalizeOptionalDecimal($options['servingWeightG'] ?? null, 0, 10000);
+        $proteinG = $this->normalizeNutrient($options['proteinG'] ?? null, 500);
+        $fatG = $this->normalizeNutrient($options['fatG'] ?? null, 500);
+        $carbsG = $this->normalizeNutrient($options['carbsG'] ?? null, 500);
+        $fiberG = $this->normalizeNutrient($options['fiberG'] ?? null, 500);
+        $sodiumMg = $this->normalizeNutrient($options['sodiumMg'] ?? null, 100000);
 
         $now = (new DateTimeImmutable('now', new DateTimeZone('Asia/Tokyo')))->format('Y-m-d H:i:s');
         $statement = $this->db->prepare(
-            'INSERT INTO meal_entries (user_id, recorded_on, meal_type, food_name, calories_kcal, calories_edited, calorie_source, source_url, confidence, created_at, updated_at)
-             VALUES (:user_id, :recorded_on, :meal_type, :food_name, :calories_kcal, :calories_edited, :calorie_source, :source_url, :confidence, :created_at, :updated_at)'
+            'INSERT INTO meal_entries (
+                user_id, recorded_on, meal_type, food_name, calories_kcal, calories_edited,
+                calorie_source, source_url, confidence, food_id, raw_input, amount, unit,
+                serving_label, serving_weight_g, protein_g, fat_g, carbs_g, fiber_g, sodium_mg,
+                created_at, updated_at
+             ) VALUES (
+                :user_id, :recorded_on, :meal_type, :food_name, :calories_kcal, :calories_edited,
+                :calorie_source, :source_url, :confidence, :food_id, :raw_input, :amount, :unit,
+                :serving_label, :serving_weight_g, :protein_g, :fat_g, :carbs_g, :fiber_g, :sodium_mg,
+                :created_at, :updated_at
+             )'
         );
         $statement->execute([
             'user_id' => $this->userId,
@@ -126,25 +155,49 @@ final class MealEntryRepository
             'calorie_source' => $normalizedCalorieSource,
             'source_url' => $normalizedSourceUrl,
             'confidence' => $normalizedConfidence,
+            'food_id' => $foodId,
+            'raw_input' => $rawInput,
+            'amount' => $amount,
+            'unit' => $unit,
+            'serving_label' => $servingLabel,
+            'serving_weight_g' => $servingWeightG,
+            'protein_g' => $proteinG,
+            'fat_g' => $fatG,
+            'carbs_g' => $carbsG,
+            'fiber_g' => $fiberG,
+            'sodium_mg' => $sodiumMg,
             'created_at' => $now,
             'updated_at' => $now,
         ]);
 
-        return [
-            'id' => (int) $this->db->lastInsertId(),
-            'mealType' => $mealType,
-            'label' => $name,
-            'calories' => $caloriesKcal,
-            'caloriesEdited' => $caloriesEdited,
-            'calorieSource' => $normalizedCalorieSource,
-            'sourceUrl' => $normalizedSourceUrl,
+        $entryId = (int) $this->db->lastInsertId();
+
+        return $this->mapMealItemRow([
+            'id' => $entryId,
+            'meal_type' => $mealType,
+            'food_name' => $name,
+            'calories_kcal' => $caloriesKcal,
+            'calories_edited' => $caloriesEdited ? 1 : 0,
+            'calorie_source' => $normalizedCalorieSource,
+            'source_url' => $normalizedSourceUrl,
             'confidence' => $normalizedConfidence,
-        ];
+            'food_id' => $foodId,
+            'raw_input' => $rawInput,
+            'amount' => $amount,
+            'unit' => $unit,
+            'serving_label' => $servingLabel,
+            'serving_weight_g' => $servingWeightG,
+            'protein_g' => $proteinG,
+            'fat_g' => $fatG,
+            'carbs_g' => $carbsG,
+            'fiber_g' => $fiberG,
+            'sodium_mg' => $sodiumMg,
+        ]) + ['mealType' => $mealType];
     }
 
     /**
      * @param array<string, mixed> $row
-     * @return array{id: int, label: string, calories: int, caloriesEdited: bool, calorieSource: string|null, sourceUrl: string|null, confidence: string|null}
+     * @return array<string, mixed>
      */
     private function mapMealItemRow(array $row): array
     {
@@ -162,6 +215,39 @@ final class MealEntryRepository
             'confidence' => isset($row['confidence']) && $row['confidence'] !== null
                 ? (string) $row['confidence']
                 : null,
+            'foodId' => isset($row['food_id']) && $row['food_id'] !== null
+                ? (int) $row['food_id']
+                : null,
+            'rawInput' => isset($row['raw_input']) && $row['raw_input'] !== null
+                ? (string) $row['raw_input']
+                : null,
+            'amount' => isset($row['amount']) && $row['amount'] !== null
+                ? (float) $row['amount']
+                : null,
+            'unit' => isset($row['unit']) && $row['unit'] !== null
+                ? (string) $row['unit']
+                : null,
+            'servingLabel' => isset($row['serving_label']) && $row['serving_label'] !== null
+                ? (string) $row['serving_label']
+                : null,
+            'servingWeightG' => isset($row['serving_weight_g']) && $row['serving_weight_g'] !== null
+                ? (float) $row['serving_weight_g']
+                : null,
+            'proteinG' => isset($row['protein_g']) && $row['protein_g'] !== null
+                ? (float) $row['protein_g']
+                : null,
+            'fatG' => isset($row['fat_g']) && $row['fat_g'] !== null
+                ? (float) $row['fat_g']
+                : null,
+            'carbsG' => isset($row['carbs_g']) && $row['carbs_g'] !== null
+                ? (float) $row['carbs_g']
+                : null,
+            'fiberG' => isset($row['fiber_g']) && $row['fiber_g'] !== null
+                ? (float) $row['fiber_g']
+                : null,
+            'sodiumMg' => isset($row['sodium_mg']) && $row['sodium_mg'] !== null
+                ? (float) $row['sodium_mg']
+                : null,
         ];
     }
 
@@ -170,6 +256,10 @@ final class MealEntryRepository
         $trimmed = trim((string) $calorieSource);
         if ($trimmed === '') {
             return null;
+        }
+
+        if (in_array($trimmed, ['brave_html', 'claude_web_search'], true)) {
+            $trimmed = 'ai_web_search';
         }
 
         if (!in_array($trimmed, self::ALLOWED_CALORIE_SOURCES, true)) {
@@ -207,10 +297,76 @@ final class MealEntryRepository
         return $trimmed;
     }
 
+    private function normalizeOptionalInt(mixed $value): ?int
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        if (!is_numeric($value)) {
+            throw new InvalidArgumentException('foodId must be numeric');
+        }
+
+        $intValue = (int) $value;
+        if ($intValue <= 0) {
+            return null;
+        }
+
+        return $intValue;
+    }
+
+    private function normalizeOptionalString(mixed $value, int $maxLength): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        $trimmed = trim((string) $value);
+        if ($trimmed === '') {
+            return null;
+        }
+
+        return mb_substr($trimmed, 0, $maxLength);
+    }
+
+    private function normalizeOptionalDecimal(mixed $value, float $min, float $max): ?float
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        if (!is_numeric($value)) {
+            throw new InvalidArgumentException('numeric field is invalid');
+        }
+
+        $floatValue = (float) $value;
+        if ($floatValue < $min || $floatValue > $max) {
+            throw new InvalidArgumentException('numeric field is out of range');
+        }
+
+        return round($floatValue, 2);
+    }
+
+    private function normalizeNutrient(mixed $value, float $max): ?float
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        if (!is_numeric($value)) {
+            throw new InvalidArgumentException('nutrient value must be numeric');
+        }
+
+        $floatValue = (float) $value;
+        if ($floatValue < 0 || $floatValue > $max) {
+            throw new InvalidArgumentException('nutrient value is out of range');
+        }
+
+        return round($floatValue, 2);
+    }
+
     /**
-     * 食事記録を1件削除する。対象が存在しない、または他ユーザーの記録の場合は例外を投げる。
-     *
-     * @return array{recordedOn: string, meals: array<int, array{id: string, name: string, calories: int, items: array<int, array{id: int, label: string, calories: int, caloriesEdited: bool}>}>}
+     * @return array{recordedOn: string, meals: array<int, array{id: string, name: string, calories: int, items: array<int, array<string, mixed>>}>}
      */
     public function deleteEntry(int $entryId): array
     {
@@ -249,10 +405,7 @@ final class MealEntryRepository
     }
 
     /**
-     * 食事履歴を新しい順で取得する。
-     * mealType を指定すると、その区分の履歴のみ返す。
-     *
-     * @return array<int, array{id: int, mealType: string, label: string, calories: int, caloriesEdited: bool, calorieSource: string|null, sourceUrl: string|null, confidence: string|null, recordedOn: string}>
+     * @return array<int, array<string, mixed>>
      */
     public function getHistory(?string $mealType = null, int $limit = 30): array
     {
@@ -262,9 +415,11 @@ final class MealEntryRepository
             throw new InvalidArgumentException('mealType must be breakfast|lunch|dinner|snack');
         }
 
+        $select = self::MEAL_ENTRY_SELECT . ', recorded_on';
+
         if ($mealType === null) {
             $statement = $this->db->prepare(
-                'SELECT id, meal_type, food_name, calories_kcal, calories_edited, calorie_source, source_url, confidence, recorded_on
+                'SELECT ' . $select . '
                  FROM meal_entries
                  WHERE user_id = :user_id
                  ORDER BY id DESC
@@ -275,7 +430,7 @@ final class MealEntryRepository
             $statement->execute();
         } else {
             $statement = $this->db->prepare(
-                'SELECT id, meal_type, food_name, calories_kcal, calories_edited, calorie_source, source_url, confidence, recorded_on
+                'SELECT ' . $select . '
                  FROM meal_entries
                  WHERE user_id = :user_id AND meal_type = :meal_type
                  ORDER BY id DESC
@@ -290,15 +445,8 @@ final class MealEntryRepository
         $history = [];
         foreach ($statement->fetchAll() as $row) {
             $item = $this->mapMealItemRow($row);
-            $history[] = [
-                'id' => $item['id'],
+            $history[] = $item + [
                 'mealType' => (string) $row['meal_type'],
-                'label' => $item['label'],
-                'calories' => $item['calories'],
-                'caloriesEdited' => $item['caloriesEdited'],
-                'calorieSource' => $item['calorieSource'],
-                'sourceUrl' => $item['sourceUrl'],
-                'confidence' => $item['confidence'],
                 'recordedOn' => (string) $row['recorded_on'],
             ];
         }
@@ -307,8 +455,6 @@ final class MealEntryRepository
     }
 
     /**
-     * 指定期間の日別摂取カロリー合計を返す（記録なしの日は 0）。
-     *
      * @return array<int, array{label: string, value: int, date: string}>
      */
     public function getDailyTotalsBetween(string $startDate, string $endDate): array

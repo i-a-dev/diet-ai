@@ -450,20 +450,10 @@ async function searchAliasDb(
     }
 
     const aliasCandidates = response.candidates.map(mapAliasCandidate);
-    if (response.autoConfirm && aliasCandidates.length === 1) {
-      const result = resultFromAliasCandidate(rawInput, aliasCandidates[0]);
-      return {
-        result,
-        aliasCandidates,
-        needsConfirmation: false,
-        autoConfirm: true,
-      };
-    }
-
     return {
       result: null,
       aliasCandidates,
-      needsConfirmation: response.needsConfirmation,
+      needsConfirmation: true,
       autoConfirm: false,
     };
   }

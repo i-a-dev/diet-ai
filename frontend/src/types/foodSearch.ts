@@ -1,9 +1,9 @@
 export type FoodSource =
   | "regex"
+  | "alias_db"
   | "fatsecret"
   | "open_food_facts"
   | "local_db"
-  | "alias_db"
   | "claude_estimate"
   | "ai_web_search"
   | "brave_html"
@@ -81,6 +81,8 @@ export interface FoodSearchResult {
   protein: number | null;
   fat: number | null;
   carbs: number | null;
+  fiber?: number | null;
+  sodium?: number | null;
   source: FoodSource;
   confidence: SearchConfidence;
   isEstimated: boolean;

@@ -39,6 +39,9 @@ import { StepsRegisterSheet } from "../StepsRegisterSheet.tsx";
 import { TopNav } from "../TopNav.tsx";
 import { WeightRegisterSheet } from "../WeightRegisterSheet.tsx";
 import { WeightSparkline } from "../WeightSparkline.tsx";
+import {
+  buildRegistrationMetricsFromSteps,
+} from "../../utils/registrationMetrics.ts";
 import { ORANGE } from "../../constants.ts";
 
 type MealKey = "breakfast" | "lunch" | "dinner" | "snack";
@@ -148,6 +151,17 @@ function mapMealSectionsToState(
         calorieSource: item.calorieSource ?? null,
         sourceUrl: item.sourceUrl ?? null,
         confidence: item.confidence ?? null,
+        foodId: item.foodId ?? null,
+        rawInput: item.rawInput ?? null,
+        amount: item.amount ?? null,
+        unit: item.unit ?? null,
+        servingLabel: item.servingLabel ?? null,
+        servingWeightG: item.servingWeightG ?? null,
+        proteinG: item.proteinG ?? null,
+        fatG: item.fatG ?? null,
+        carbsG: item.carbsG ?? null,
+        fiberG: item.fiberG ?? null,
+        sodiumMg: item.sodiumMg ?? null,
       })),
     };
   });
@@ -278,16 +292,36 @@ export function RecordScreen() {
     try {
       setIsSaving(true);
       setError(null);
-      const data = await saveMeal(
-        activeMealKey,
-        item.label,
+
+      const date = recordedOn ?? selectedDate;
+      const data = await saveMeal({
+        mealType: activeMealKey,
+        foodName: item.label,
         calories,
-        recordedOn ?? selectedDate,
-        item.caloriesEdited ?? false,
-        item.calorieSource ?? null,
-        item.sourceUrl ?? null,
-        item.confidence ?? null,
-      );
+        date,
+        caloriesEdited: item.caloriesEdited ?? false,
+        calorieSource: item.calorieSource ?? null,
+        sourceUrl: item.sourceUrl ?? null,
+        confidence: item.confidence ?? null,
+        foodId: item.foodId ?? null,
+        rawInput: item.rawInput ?? null,
+        amount: item.amount ?? null,
+        unit: item.unit ?? null,
+        servingLabel: item.servingLabel ?? null,
+        servingWeightG: item.servingWeightG ?? null,
+        proteinG: item.proteinG ?? null,
+        fatG: item.fatG ?? null,
+        carbsG: item.carbsG ?? null,
+        fiberG: item.fiberG ?? null,
+        sodiumMg: item.sodiumMg ?? null,
+        registrationMetrics:
+          item.registrationMetrics ??
+          buildRegistrationMetricsFromSteps({
+            rawInput: item.rawInput ?? item.label,
+            selectedSource: String(item.calorieSource ?? "user_registered"),
+            steps: [],
+          }),
+      });
       setMeals(mapMealSectionsToState(data.meals));
       setMealSheetOpen(false);
       setActiveMealKey(null);

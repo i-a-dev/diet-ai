@@ -21,12 +21,14 @@ export function mealItemToSearchResult(item: MealItemInput): FoodSearchResult {
     id: `meal-item-${item.id ?? item.label}-${calories}`,
     name: item.label,
     displayName: item.label,
-    amount: 1,
-    unit: "食",
+    amount: item.amount ?? 1,
+    unit: item.unit ?? "食",
     calories,
-    protein: null,
-    fat: null,
-    carbs: null,
+    protein: item.proteinG ?? null,
+    fat: item.fatG ?? null,
+    carbs: item.carbsG ?? null,
+    fiber: item.fiberG ?? null,
+    sodium: item.sodiumMg ?? null,
     source,
     confidence,
     isEstimated:
@@ -35,9 +37,10 @@ export function mealItemToSearchResult(item: MealItemInput): FoodSearchResult {
         parseCaloriesEdited(item.caloriesEdited)),
     barcode: null,
     brandName: null,
-    rawInput: item.label,
+    rawInput: item.rawInput ?? item.label,
     sourceUrl: item.sourceUrl ?? null,
     caloriesEdited,
+    selectedFoodId: item.foodId ?? null,
   };
 }
 
@@ -45,6 +48,7 @@ function resolveMealItemSource(item: MealItemInput): FoodSource {
   const source = item.calorieSource;
   if (
     source === "regex" ||
+    source === "alias_db" ||
     source === "fatsecret" ||
     source === "open_food_facts" ||
     source === "local_db" ||

@@ -27,6 +27,10 @@ export function toPersistedCalorieSource(
     return "ai_web_search";
   }
 
+  if (source === "alias_db") {
+    return "alias_db";
+  }
+
   return source;
 }
 
@@ -67,6 +71,10 @@ export function getCalorieSourceLabel(params: {
   }
 
   const source = params.source ?? null;
+  if (source === "alias_db") {
+    return "よく選ばれている食品";
+  }
+
   if (isWebSearchSource(source)) {
     return "AI Web検索で取得したカロリー";
   }

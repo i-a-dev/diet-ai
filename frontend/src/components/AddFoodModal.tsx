@@ -31,6 +31,7 @@ import {
   saveUserFood,
   selectFoodAlias,
   upsertFoodAlias,
+  type MealHistoryEntry,
   type MealType,
 } from "../api/client.ts";
 import {
@@ -39,6 +40,10 @@ import {
 } from "../utils/foodAliasUtils.ts";
 import type { FoodSource, SearchConfidence } from "../types/foodSearch.ts";
 import { mealItemToSearchResult } from "../utils/mealFoodResult.ts";
+import {
+  buildRegistrationMetricsFromSteps,
+  type RegistrationMetrics,
+} from "../utils/registrationMetrics.ts";
 import {
   isWebSearchSource,
   parseCaloriesEdited,
@@ -53,6 +58,18 @@ export interface MealItemInput {
   calorieSource?: FoodSource | string | null;
   sourceUrl?: string | null;
   confidence?: SearchConfidence | string | null;
+  foodId?: number | null;
+  rawInput?: string | null;
+  amount?: number | null;
+  unit?: string | null;
+  servingLabel?: string | null;
+  servingWeightG?: number | null;
+  proteinG?: number | null;
+  fatG?: number | null;
+  carbsG?: number | null;
+  fiberG?: number | null;
+  sodiumMg?: number | null;
+  registrationMetrics?: import("../utils/registrationMetrics.ts").RegistrationMetrics | null;
 }
 
 interface AddFoodModalProps {
@@ -65,6 +82,14 @@ interface AddFoodModalProps {
   dailyGoalKcal: number | null;
   onClose: () => void;
   onSave: (item: MealItemInput) => Promise<void> | void;
+}
+
+interface RegistrationContext {
+  searchStartedAt?: number;
+  selectedSource?: string;
+  candidateCount?: number;
+  selectedCandidateRank?: number | null;
+  webSearchCountDelta?: number;
 }
 
 const INITIAL_STEPS = [
@@ -137,6 +162,9 @@ export function AddFoodModal({
     useState<MealItemInput | null>(null);
   const activeSearchTokenRef = useRef(0);
   const historyRequestTokenRef = useRef(0);
+  const searchStartedAtRef = useRef<number | undefined>(undefined);
+  const registrationContextRef = useRef<RegistrationContext>({});
+  const aliasCandidateRankRef = useRef<number | null>(null);
   const showSearchApiDebug =
     import.meta.env.VITE_FOOD_SEARCH_DEBUG_MODE === "true";
 
@@ -156,6 +184,9 @@ export function AddFoodModal({
     setSelectedHistoryItem(null);
     setHistoryTab("recent");
     activeSearchTokenRef.current = 0;
+    searchStartedAtRef.current = undefined;
+    registrationContextRef.current = {};
+    aliasCandidateRankRef.current = null;
   }, [open]);
 
   useEffect(() => {
@@ -253,6 +284,9 @@ export function AddFoodModal({
     if (!canSearch || isSearching) return;
     const token = Date.now();
     activeSearchTokenRef.current = token;
+    searchStartedAtRef.current = Date.now();
+    registrationContextRef.current = {};
+    aliasCandidateRankRef.current = null;
     setShowManualEdit(false);
     setManualKcal("");
     try {
@@ -286,6 +320,7 @@ export function AddFoodModal({
       });
       if (activeSearchTokenRef.current !== token) return;
       setProgress(next);
+      registrationContextRef.current.webSearchCountDelta = 1;
     } catch (error) {
       if (activeSearchTokenRef.current !== token) return;
       setProgress({
@@ -304,7 +339,19 @@ export function AddFoodModal({
   }
 
   function handleCandidateSelect(candidate: FoodConfirmationCandidate) {
+    const aliasCandidates = progress.aliasCandidates ?? [];
+    const webCandidates = progress.candidates ?? [];
+    registrationContextRef.current.candidateCount =
+      aliasCandidates.length > 0 ? aliasCandidates.length : webCandidates.length;
+
     if (candidate.webCandidate) {
+      const rank =
+        webCandidates.findIndex(
+          (item) =>
+            item.product_name === candidate.webCandidate?.product_name &&
+            item.kcal === candidate.webCandidate?.kcal,
+        ) + 1;
+      aliasCandidateRankRef.current = rank > 0 ? rank : null;
       const result = buildResultFromSelectedCandidate(
         inputValue.trim(),
         candidate.webCandidate,
@@ -319,10 +366,15 @@ export function AddFoodModal({
       return;
     }
 
-    const aliasCandidate = progress.aliasCandidates?.find(
+    const aliasCandidate = aliasCandidates.find(
       (item) => String(item.aliasId) === candidate.key,
     );
     if (!aliasCandidate) return;
+
+    const rank =
+      aliasCandidates.findIndex((item) => item.aliasId === aliasCandidate.aliasId) +
+      1;
+    aliasCandidateRankRef.current = rank > 0 ? rank : null;
 
     const result = buildResultFromSelectedAlias(inputValue.trim(), aliasCandidate);
     setProgress({
@@ -332,6 +384,59 @@ export function AddFoodModal({
       aliasCandidates: undefined,
       message: "候補が見つかりました",
     });
+  }
+
+  function buildRegistrationMetrics(
+    caloriesBeforeEdit: number | null,
+    selectedSource: string,
+  ): RegistrationMetrics {
+    return buildRegistrationMetricsFromSteps({
+      rawInput: inputValue.trim(),
+      selectedSource,
+      searchStartedAt: searchStartedAtRef.current,
+      steps: progress.steps,
+      candidateCount: registrationContextRef.current.candidateCount,
+      selectedCandidateRank: aliasCandidateRankRef.current,
+      caloriesBeforeEdit,
+      webSearchCountDelta: registrationContextRef.current.webSearchCountDelta ?? 0,
+    });
+  }
+
+  function buildMealItemFromResult(
+    result: FoodSearchResult,
+    calories: number,
+    caloriesEdited: boolean,
+    registrationMetrics: RegistrationMetrics,
+  ): MealItemInput {
+    const servingLabel =
+      result.amount != null && result.unit
+        ? `${result.amount}${result.unit}`
+        : null;
+    const servingWeightG =
+      result.unit?.toLowerCase() === "g" && result.amount != null
+        ? result.amount
+        : null;
+
+    return {
+      label: result.displayName,
+      kcal: `${calories}kcal`,
+      caloriesEdited,
+      calorieSource: toPersistedCalorieSource(result.source),
+      sourceUrl: result.sourceUrl ?? null,
+      confidence: result.confidence,
+      foodId: result.selectedFoodId ?? null,
+      rawInput: result.rawInput || inputValue.trim(),
+      amount: result.amount ?? null,
+      unit: result.unit ?? null,
+      servingLabel,
+      servingWeightG,
+      proteinG: result.protein ?? null,
+      fatG: result.fat ?? null,
+      carbsG: result.carbs ?? null,
+      fiberG: result.fiber ?? null,
+      sodiumMg: result.sodium ?? null,
+      registrationMetrics,
+    };
   }
 
   async function persistFoodAlias(
@@ -385,14 +490,17 @@ export function AddFoodModal({
     try {
       if (result) {
         const { calories, caloriesEdited } = resolveEditedCalories(result);
-        const item: MealItemInput = {
-          label: result.displayName,
-          kcal: `${calories}kcal`,
+        const selectedSource = result.source;
+        const registrationMetrics = buildRegistrationMetrics(
+          result.calories,
+          selectedSource,
+        );
+        const item = buildMealItemFromResult(
+          result,
+          calories,
           caloriesEdited,
-          calorieSource: toPersistedCalorieSource(result.source),
-          sourceUrl: result.sourceUrl ?? null,
-          confidence: result.confidence,
-        };
+          registrationMetrics,
+        );
         await onSave(item);
         let savedFoodId = result.selectedFoodId ?? null;
         if (isWebSearchSource(result.source) && !caloriesEdited) {
@@ -451,12 +559,21 @@ export function AddFoodModal({
 
       const parsedKcal = Number(manualKcal);
       if (!Number.isFinite(parsedKcal) || parsedKcal <= 0) return;
+      const registrationMetrics = buildRegistrationMetrics(
+        null,
+        "user_registered",
+      );
       const item: MealItemInput = {
         label,
         kcal: `${Math.round(parsedKcal)}kcal`,
         caloriesEdited: true,
         calorieSource: "user_registered",
         confidence: "low",
+        rawInput: label,
+        amount: 1,
+        unit: "食",
+        servingLabel: "1食",
+        registrationMetrics,
       };
       await onSave(item);
       setCompletedResult({
@@ -797,16 +914,7 @@ function toAliasConfirmationCandidates(
   }));
 }
 
-function toUniqueMealInputs(
-  history: Array<{
-    label: string;
-    calories: number;
-    caloriesEdited?: boolean;
-    calorieSource?: string | null;
-    sourceUrl?: string | null;
-    confidence?: string | null;
-  }>,
-): MealItemInput[] {
+function toUniqueMealInputs(history: MealHistoryEntry[]): MealItemInput[] {
   const seen = new Set<string>();
   const unique: MealItemInput[] = [];
 
@@ -823,6 +931,17 @@ function toUniqueMealInputs(
         (entry.calorieSource as FoodSource | null | undefined) ?? null,
       sourceUrl: entry.sourceUrl ?? null,
       confidence: entry.confidence ?? null,
+      foodId: entry.foodId ?? null,
+      rawInput: entry.rawInput ?? entry.label,
+      amount: entry.amount ?? null,
+      unit: entry.unit ?? null,
+      servingLabel: entry.servingLabel ?? null,
+      servingWeightG: entry.servingWeightG ?? null,
+      proteinG: entry.proteinG ?? null,
+      fatG: entry.fatG ?? null,
+      carbsG: entry.carbsG ?? null,
+      fiberG: entry.fiberG ?? null,
+      sodiumMg: entry.sodiumMg ?? null,
     });
     if (unique.length >= 12) break;
   }

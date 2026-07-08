@@ -41,6 +41,7 @@ TEXT;
     private UserProfileRepository $userProfileRepository;
     private WeightRepository $weightRepository;
     private MealEntryRepository $mealEntryRepository;
+    private DailyNutritionSummaryRepository $dailyNutritionSummaryRepository;
     private ActivityRepository $activityRepository;
     private ChatMessageRepository $chatMessageRepository;
 
@@ -48,12 +49,15 @@ TEXT;
         ?UserProfileRepository $userProfileRepository = null,
         ?WeightRepository $weightRepository = null,
         ?MealEntryRepository $mealEntryRepository = null,
+        ?DailyNutritionSummaryRepository $dailyNutritionSummaryRepository = null,
         ?ActivityRepository $activityRepository = null,
         ?ChatMessageRepository $chatMessageRepository = null,
     ) {
         $this->userProfileRepository = $userProfileRepository ?? new UserProfileRepository();
         $this->weightRepository = $weightRepository ?? new WeightRepository();
         $this->mealEntryRepository = $mealEntryRepository ?? new MealEntryRepository();
+        $this->dailyNutritionSummaryRepository = $dailyNutritionSummaryRepository
+            ?? new DailyNutritionSummaryRepository(0);
         $this->activityRepository = $activityRepository ?? new ActivityRepository();
         $this->chatMessageRepository = $chatMessageRepository ?? new ChatMessageRepository();
     }
@@ -177,6 +181,11 @@ TEXT;
         $calorieGoal = CalorieGoalCalculator::calculate($profile);
         $todayWeight = $this->weightRepository->getSummaryForDate($today);
         $todayMeals = $this->mealEntryRepository->getSectionsForDate($today);
+        $todayNutritionSummary = $this->dailyNutritionSummaryRepository->getForDate($today);
+        if ($todayNutritionSummary === null) {
+            $todayNutritionSummary = $this->dailyNutritionSummaryRepository->recalculateForDate($today);
+        }
+        $recentNutritionSummaries = $this->dailyNutritionSummaryRepository->getBetween($startDate, $today);
         $todaySteps = $this->activityRepository->getStepsForDate($today);
         $todayExercises = $this->activityRepository->getExercisesForDate($today);
         $weightPoints = $this->weightRepository->getPointsBetween($startDate, $today);
@@ -230,6 +239,7 @@ TEXT;
         $lines[] = '■ 今日の記録 (' . $today . ')';
         $lines[] = $this->formatTodayWeight($todayWeight);
         $lines[] = $this->formatTodayMeals($todayMeals);
+        $lines[] = $this->formatNutritionSummary($todayNutritionSummary, '今日の栄養サマリー');
         $lines[] = $this->formatTodaySteps($todaySteps);
         $lines[] = $this->formatTodayExercises($todayExercises);
         $lines[] = '';
@@ -237,6 +247,7 @@ TEXT;
         $lines[] = '■ 直近' . self::RECENT_DAYS . '日の推移';
         $lines[] = $this->formatRecentWeight($weightPoints);
         $lines[] = $this->formatRecentMetric('食事カロリー', $mealPoints, 'kcal');
+        $lines[] = $this->formatRecentNutritionSummaries($recentNutritionSummaries);
         $lines[] = $this->formatRecentMetric('運動消費カロリー', $exercisePoints, 'kcal');
         $lines[] = $this->formatRecentMetric('歩数', $stepPoints, '歩');
 
@@ -329,7 +340,7 @@ TEXT;
     }
 
     /**
-     * @param array<int, array{id: string, name: string, calories: int, items: array<int, array{label: string, calories: int}>}> $sections
+     * @param array<int, array{id: string, name: string, calories: int, items: array<int, array<string, mixed>>}> $sections
      */
     private function formatTodayMeals(array $sections): string
     {
@@ -347,7 +358,24 @@ TEXT;
             $sectionCalories = (int) ($section['calories'] ?? 0);
             $totalCalories += $sectionCalories;
             $itemLabels = array_map(
-                static fn (array $item): string => ($item['label'] ?? '') . ' ' . ($item['calories'] ?? 0) . 'kcal',
+                function (array $item): string {
+                    $label = ($item['label'] ?? '') . ' ' . ($item['calories'] ?? 0) . 'kcal';
+                    $parts = [];
+                    if (isset($item['amount'], $item['unit']) && $item['amount'] !== null && $item['unit'] !== null) {
+                        $parts[] = $item['amount'] . $item['unit'];
+                    }
+                    if (($item['proteinG'] ?? null) !== null) {
+                        $parts[] = 'P' . $item['proteinG'] . 'g';
+                    }
+                    if (($item['confidence'] ?? null) === 'low') {
+                        $parts[] = '低信頼度';
+                    }
+                    if (($item['caloriesEdited'] ?? false) === true) {
+                        $parts[] = '手修正';
+                    }
+
+                    return $parts === [] ? $label : $label . '（' . implode('、', $parts) . '）';
+                },
                 $items
             );
             $lines[] = '  - ' . ($section['name'] ?? $section['id']) . ': ' . $sectionCalories . 'kcal（'
@@ -359,6 +387,74 @@ TEXT;
         }
 
         $lines[] = '  - 合計: ' . $totalCalories . 'kcal';
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * @param array<string, mixed>|null $summary
+     */
+    private function formatNutritionSummary(?array $summary, string $title): string
+    {
+        if ($summary === null || (int) ($summary['mealEntryCount'] ?? 0) === 0) {
+            return '- ' . $title . ': 未記録';
+        }
+
+        $lines = ['- ' . $title . ':'];
+        $lines[] = '  - 合計: ' . ($summary['totalKcal'] ?? 0) . 'kcal（朝'
+            . ($summary['breakfastKcal'] ?? 0) . ' / 昼' . ($summary['lunchKcal'] ?? 0)
+            . ' / 夜' . ($summary['dinnerKcal'] ?? 0) . ' / 間食' . ($summary['snackKcal'] ?? 0) . '）';
+
+        $pfcParts = [];
+        if (($summary['totalProteinG'] ?? null) !== null) {
+            $pfcParts[] = 'P' . $summary['totalProteinG'] . 'g';
+        }
+        if (($summary['totalFatG'] ?? null) !== null) {
+            $pfcParts[] = 'F' . $summary['totalFatG'] . 'g';
+        }
+        if (($summary['totalCarbsG'] ?? null) !== null) {
+            $pfcParts[] = 'C' . $summary['totalCarbsG'] . 'g';
+        }
+        if ($pfcParts !== []) {
+            $known = (int) ($summary['pfcKnownEntryCount'] ?? 0);
+            $total = (int) ($summary['mealEntryCount'] ?? 0);
+            $lines[] = '  - PFC（' . $known . '/' . $total . '件にデータあり）: ' . implode(' / ', $pfcParts);
+        } else {
+            $lines[] = '  - PFC: データ不足（null は0扱いしない）';
+        }
+
+        if (($summary['summaryText'] ?? null) !== null && trim((string) $summary['summaryText']) !== '') {
+            $lines[] = '  - メモ: ' . trim((string) $summary['summaryText']);
+        }
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $summaries
+     */
+    private function formatRecentNutritionSummaries(array $summaries): string
+    {
+        if ($summaries === []) {
+            return '- 食事サマリー: データなし';
+        }
+
+        $lines = ['- 食事サマリー（日次）:'];
+        foreach ($summaries as $summary) {
+            $date = (string) ($summary['recordedOn'] ?? '');
+            $kcal = (int) ($summary['totalKcal'] ?? 0);
+            $snack = (int) ($summary['snackKcal'] ?? 0);
+            $pfcKnown = (int) ($summary['pfcKnownEntryCount'] ?? 0);
+            $entryCount = (int) ($summary['mealEntryCount'] ?? 0);
+            $line = '  - ' . $date . ': ' . $kcal . 'kcal';
+            if ($kcal > 0 && $snack > 0) {
+                $line .= '（間食' . $snack . 'kcal）';
+            }
+            if ($entryCount > 0) {
+                $line .= ' / PFCデータ' . $pfcKnown . '件';
+            }
+            $lines[] = $line;
+        }
 
         return implode("\n", $lines);
     }
