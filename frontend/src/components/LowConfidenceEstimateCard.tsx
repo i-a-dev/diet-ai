@@ -19,25 +19,45 @@ export function LowConfidenceEstimateCard({
   showSearchButton = true,
   warningMessage,
 }: LowConfidenceEstimateCardProps) {
+  const isWebFailure = !showSearchButton;
+
   return (
     <div style={cardStyle}>
-      <div style={titleStyle}>AI推定の精度が低い可能性があります</div>
-      <div style={subTitleStyle}>{result.displayName}</div>
-      <div style={calorieStyle}>{result.calories} kcal</div>
-      <div style={warnStyle}>
-        {warningMessage ?? "商品名や量が曖昧なため、実際のカロリーと異なる可能性があります"}
-      </div>
-      {showSearchButton && (
-        <button type="button" onClick={onSearchWeb} style={primaryButtonStyle}>
-          商品情報を検索する
-        </button>
+      {!isWebFailure ? (
+        <>
+          <div style={subTitleStyle}>{result.displayName}</div>
+          <div style={calorieStyle}>約{result.calories} kcal</div>
+          <div style={hintStyle}>
+            サイズや量が分かると
+            <br />
+            より正確に記録できます
+          </div>
+          <button type="button" onClick={onSearchWeb} style={primaryButtonStyle}>
+            サイズ・商品を確認する
+          </button>
+          <button type="button" onClick={onUseAiEstimate} style={secondaryButtonStyle}>
+            このまま記録
+          </button>
+          <button type="button" onClick={onEdit} style={linkButtonStyle}>
+            修正する
+          </button>
+        </>
+      ) : (
+        <>
+          <div style={titleStyle}>正確な商品情報を確認できませんでした</div>
+          <div style={subTitleStyle}>推定：約{result.calories} kcal</div>
+          <div style={warnStyle}>
+            {warningMessage ??
+              "サイズや量が分からないため、カロリーは目安として記録されます"}
+          </div>
+          <button type="button" onClick={onUseAiEstimate} style={primaryButtonStyle}>
+            このまま記録
+          </button>
+          <button type="button" onClick={onEdit} style={linkButtonStyle}>
+            修正する
+          </button>
+        </>
       )}
-      <button type="button" onClick={onUseAiEstimate} style={secondaryButtonStyle}>
-        AI推定で追加する
-      </button>
-      <button type="button" onClick={onEdit} style={linkButtonStyle}>
-        内容を編集する
-      </button>
     </div>
   );
 }
@@ -70,10 +90,18 @@ const calorieStyle: CSSProperties = {
   color: "#111827",
 };
 
+const hintStyle: CSSProperties = {
+  marginTop: 8,
+  fontSize: 12,
+  color: "#7F1D1D",
+  lineHeight: 1.5,
+};
+
 const warnStyle: CSSProperties = {
   marginTop: 6,
   fontSize: 12,
   color: "#7F1D1D",
+  lineHeight: 1.5,
 };
 
 const primaryButtonStyle: CSSProperties = {

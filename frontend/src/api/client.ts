@@ -292,9 +292,13 @@ export interface CalorieEstimateCandidate {
   base_product_name?: string;
   variant_label?: string;
   variant_confidence?: "high" | "medium" | "low";
+  variant_dimension?: string;
   serving_weight_g?: number | null;
   package_size?: string | null;
   alias_id?: number;
+  verification_confidence?: "high" | "medium" | "low";
+  evidence_text?: string | null;
+  source_type?: string;
 }
 
 export interface CalorieEstimateResponse {
@@ -308,11 +312,21 @@ export interface CalorieEstimateResponse {
   base_product_name?: string;
   variant_label?: string;
   variant_confidence?: "high" | "medium" | "low";
+  variant_dimension?: string;
   serving_weight_g?: number | null;
   package_size?: string | null;
   needs_confirmation?: boolean;
   reason?: "variant_ambiguous" | "identity_ambiguous";
   candidates?: CalorieEstimateCandidate[];
+  web_search_status?:
+    | "needs_variant_confirmation"
+    | "confirmed"
+    | "estimated_fallback"
+    | "no_web_search";
+  allow_manual_variant?: boolean;
+  allow_estimated_add?: boolean;
+  message_code?: string;
+  allow_retry?: boolean;
 }
 
 export type CalorieEstimateMode = "auto" | "no_web" | "web";

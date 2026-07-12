@@ -29,6 +29,7 @@ import type {
   SearchState,
 } from "../types/foodSearch.ts";
 import {
+  estimateCalories,
   fetchMealHistory,
   saveUserFood,
   selectFoodAlias,
@@ -336,6 +337,69 @@ export function AddFoodModal({
     }
   }
 
+  function handleConfirmSelectedWebCandidate() {
+    const selectedKey = progress.selectedCandidateKey;
+    if (!selectedKey) return;
+
+    const candidate = toWebConfirmationCandidates(progress.candidates ?? []).find(
+      (item) => item.key === selectedKey,
+    );
+    if (!candidate?.webCandidate) return;
+
+    const webCandidates = progress.candidates ?? [];
+    const rank =
+      webCandidates.findIndex(
+        (item) =>
+          item.product_name === candidate.webCandidate?.product_name &&
+          item.kcal === candidate.webCandidate?.kcal,
+      ) + 1;
+    aliasCandidateRankRef.current = rank > 0 ? rank : null;
+
+    const result = buildResultFromSelectedCandidate(
+      inputValue.trim(),
+      candidate.webCandidate,
+    );
+    setProgress({
+      ...progress,
+      state: "web_found",
+      result,
+      candidates: undefined,
+      selectedCandidateKey: null,
+      message: "商品情報が見つかりました",
+    });
+  }
+
+  async function handleCandidateUnknown() {
+    try {
+      const fallback = await estimateCalories(inputValue.trim(), "no_web");
+      const estimateResult: FoodSearchResult = {
+        id: `claude-${Date.now()}`,
+        name: inputValue.trim(),
+        displayName: fallback.product_name?.trim() || inputValue.trim(),
+        amount: 1,
+        unit: "食",
+        calories: fallback.kcal ?? 0,
+        protein: null,
+        fat: null,
+        carbs: null,
+        source: "claude_estimate",
+        confidence: fallback.confidence ?? "low",
+        isEstimated: true,
+        rawInput: inputValue.trim(),
+      };
+
+      setProgress({
+        state: "low_confidence_estimate",
+        steps: progress.steps,
+        result: estimateResult,
+        message:
+          "サイズが分からないため、カロリーは目安として記録されます",
+      });
+    } catch {
+      setShowManualEdit(true);
+    }
+  }
+
   function handleAiOnly() {
     if (!selectedResult) return;
     void saveItem(selectedResult);
@@ -353,6 +417,17 @@ export function AddFoodModal({
           : webCandidates.length;
 
     if (candidate.webCandidate) {
+      const isVariantAmbiguous =
+        progress.confirmationReason === "variant_ambiguous";
+
+      if (isVariantAmbiguous) {
+        setProgress({
+          ...progress,
+          selectedCandidateKey: candidate.key,
+        });
+        return;
+      }
+
       const rank =
         webCandidates.findIndex(
           (item) =>
@@ -369,7 +444,8 @@ export function AddFoodModal({
         state: "web_found",
         result,
         candidates: undefined,
-        message: "候補が見つかりました",
+        selectedCandidateKey: null,
+        message: "商品情報が見つかりました",
       });
       return;
     }
@@ -711,12 +787,13 @@ export function AddFoodModal({
         <FoodSearchStatus
           title={
             state === "web_searching"
-              ? "商品情報を検索しています"
+              ? "商品情報を確認しています"
               : "食品情報を探しています"
           }
           query={inputValue.trim()}
           mode={state === "web_searching" ? "web" : "food"}
           steps={progress.steps}
+          webPhase={progress.webSearchPhase}
           showApiDebug={showSearchApiDebug}
           onCancel={() => {
             activeSearchTokenRef.current = 0;
@@ -795,20 +872,28 @@ export function AddFoodModal({
         progress.candidates?.[0]?.base_product_name ??
         progress.candidates?.[0]?.product_name ??
         inputValue.trim();
+      const confirmationCandidates = toWebConfirmationCandidates(
+        progress.candidates ?? [],
+        isVariantAmbiguous,
+        progress.variantDimension,
+      );
 
       return (
         <ProductConfirmationCard
-          title={isVariantAmbiguous ? "サイズを選んでください" : "こちらの商品ですか？"}
-          description={
-            isVariantAmbiguous
-              ? `${baseName} のサイズ・容量が複数見つかりました。該当するものを選んでください。`
-              : "入力内容から複数の候補が見つかりました。該当する商品を選んでください。"
-          }
-          candidates={toWebConfirmationCandidates(progress.candidates ?? [])}
+          productName={baseName}
+          variantDimension={progress.variantDimension ?? "unknown"}
+          candidates={confirmationCandidates}
+          selectedKey={progress.selectedCandidateKey ?? null}
           onSelect={handleCandidateSelect}
           onManualInput={handleCandidateManualInput}
-          onSearchWeb={() => void handleWebSearch()}
-          searchWebDisabled={isSearching}
+          onUnknown={
+            progress.allowEstimatedAdd === false
+              ? undefined
+              : handleCandidateUnknown
+          }
+          onConfirmSelected={
+            isVariantAmbiguous ? handleConfirmSelectedWebCandidate : undefined
+          }
         />
       );
     }
@@ -824,6 +909,7 @@ export function AddFoodModal({
           candidates={toAliasConfirmationCandidates(progress.aliasCandidates ?? [])}
           onSelect={handleCandidateSelect}
           onManualInput={handleCandidateManualInput}
+          showWebSearchButton
           onSearchWeb={() => void handleWebSearch()}
           searchWebDisabled={isSearching}
         />
@@ -852,6 +938,7 @@ export function AddFoodModal({
           )}
           onSelect={handleCandidateSelect}
           onManualInput={handleCandidateManualInput}
+          showWebSearchButton
           onSearchWeb={() => void handleWebSearch()}
           searchWebDisabled={isSearching}
         />
@@ -955,22 +1042,34 @@ export function AddFoodModal({
 
 function toWebConfirmationCandidates(
   candidates: FoodSearchCandidate[],
+  _variantSelectionMode = false,
+  _variantDimension?: string,
 ): FoodConfirmationCandidate[] {
   return candidates.map((candidate) => {
     const baseName = candidate.base_product_name ?? candidate.product_name;
-    const variantLabel = candidate.variant_label ?? "通常サイズ";
+    const variantLabel = candidate.variant_label ?? candidate.package_size ?? "通常サイズ";
+    const productName = stripBrandFromProductName(baseName, candidate.brand);
     const label = candidate.brand
-      ? `${candidate.brand} ${baseName}`
-      : baseName;
+      ? `${candidate.brand} ${productName}`
+      : productName;
 
     return {
-      key: `${label}-${variantLabel}-${candidate.kcal}-${candidate.source_url ?? "no-url"}`,
+      key: `${productName}-${variantLabel}-${candidate.kcal}-${candidate.source_url ?? "no-url"}`,
       label,
       kcal: candidate.kcal,
-      badge: variantLabel,
+      badge: variantLabel !== "通常サイズ" ? variantLabel : null,
       webCandidate: candidate,
     };
   });
+}
+
+function stripBrandFromProductName(productName: string, brand?: string): string {
+  const trimmed = productName.trim();
+  if (!brand) return trimmed;
+  const brandPrefix = `${brand} `;
+  return trimmed.startsWith(brandPrefix)
+    ? trimmed.slice(brandPrefix.length).trim()
+    : trimmed;
 }
 
 function toLocalDbConfirmationCandidates(

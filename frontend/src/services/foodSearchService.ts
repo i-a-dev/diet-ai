@@ -277,9 +277,13 @@ function mapEstimateCandidate(
     base_product_name: candidate.base_product_name,
     variant_label: candidate.variant_label,
     variant_confidence: candidate.variant_confidence,
+    variant_dimension: candidate.variant_dimension,
     serving_weight_g: candidate.serving_weight_g ?? null,
     package_size: candidate.package_size ?? null,
     alias_id: candidate.alias_id,
+    verification_confidence: candidate.verification_confidence,
+    evidence_text: candidate.evidence_text ?? null,
+    source_type: candidate.source_type,
   };
 }
 
@@ -814,6 +818,7 @@ function buildProgress(
   aliasCandidates?: AliasSearchCandidate[],
   confirmationReason?: FoodSearchProgress["confirmationReason"],
   localDbCandidates?: LocalDbSearchCandidate[],
+  extras: Partial<FoodSearchProgress> = {},
 ): FoodSearchProgress {
   return {
     state,
@@ -824,6 +829,7 @@ function buildProgress(
     aliasCandidates,
     localDbCandidates,
     confirmationReason,
+    ...extras,
   };
 }
 
@@ -1022,11 +1028,51 @@ export async function runAiWebSearch(
 
   emitProgress(
     onProgress,
-    buildProgress("web_searching", steps, null, "商品情報を検索中..."),
+    buildProgress(
+      "web_searching",
+      steps,
+      null,
+      "商品情報を確認しています",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { webSearchPhase: "planning" },
+    ),
   );
 
   try {
+    emitProgress(
+      onProgress,
+      buildProgress(
+        "web_searching",
+        steps,
+        null,
+        "公式サイトを探しています",
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        { webSearchPhase: "searching_pages" },
+      ),
+    );
+
     const webEstimate = await estimateCalories(input, "web");
+
+    emitProgress(
+      onProgress,
+      buildProgress(
+        "web_searching",
+        steps,
+        null,
+        "サイズ・栄養情報を確認しています",
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        { webSearchPhase: "extracting_variants" },
+      ),
+    );
 
     if (webEstimate.needs_confirmation && (webEstimate.candidates?.length ?? 0) > 0) {
       const candidates = webEstimate.candidates!.map(mapEstimateCandidate);
@@ -1036,9 +1082,13 @@ export async function runAiWebSearch(
         result: null,
         candidates,
         confirmationReason: webEstimate.reason ?? "identity_ambiguous",
+        variantDimension: webEstimate.variant_dimension ?? "unknown",
+        allowManualVariant: webEstimate.allow_manual_variant ?? true,
+        allowEstimatedAdd: webEstimate.allow_estimated_add ?? true,
+        selectedCandidateKey: null,
         message:
           webEstimate.reason === "variant_ambiguous"
-            ? "サイズを選んでください"
+            ? "サイズ・容量を選んでください"
             : "候補商品の確認が必要です",
       });
     }
@@ -1050,7 +1100,7 @@ export async function runAiWebSearch(
         state: "web_found",
         steps: updateStep(steps, "ai_web_searching", "done"),
         result,
-        message: "候補が見つかりました",
+        message: "商品情報が見つかりました",
       });
     }
   } catch (error) {
@@ -1085,8 +1135,7 @@ export async function runAiWebSearch(
     state: "low_confidence_estimate",
     steps: updateStep(steps, "ai_web_searching", "done"),
     result: fallbackEstimate,
-    message:
-      "Web検索しましたが、うまくヒットしませんでした。AI推定カロリーを表示しています。",
+    message: "正確な商品情報を確認できませんでした",
   });
 }
 

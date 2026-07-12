@@ -112,6 +112,54 @@ final class NutritionPageExtractor
     }
 
     /**
+     * メーカー公式など、1商品詳細ページから商品名・内容量・kcal を抽出する。
+     *
+     * @return array{
+     *   productName: string,
+     *   kcal: int,
+     *   packageSize: string|null,
+     *   evidenceText: string|null
+     * }|null
+     */
+    public function extractSingleProductCandidate(string $html, string $query, string $url = ''): ?array
+    {
+        if (trim($html) === '') {
+            return null;
+        }
+
+        $probeQuery = $this->simplifyProbeQuery(trim($query));
+        $kcalResult = $this->extractBestLabeledKcalFromHtml($html, $probeQuery, $url);
+        if ($kcalResult === null) {
+            return null;
+        }
+
+        $heading = $this->extractPageHeadingText($html);
+        $productName = $this->extractSingleProductPageName($html, $probeQuery);
+        $packageSize = $this->extractPackageSizeFromPageText($html);
+        $evidenceText = trim($productName . ($packageSize !== null ? ' ' . $packageSize : '') . ' ' . $kcalResult['kcal'] . 'kcal');
+
+        return [
+            'productName' => $productName,
+            'kcal' => (int) $kcalResult['kcal'],
+            'packageSize' => $packageSize,
+            'evidenceText' => $evidenceText !== '' ? mb_substr($evidenceText, 0, 120) : null,
+        ];
+    }
+
+    /**
+     * 公開 URL から HTML を取得する（AI Web 検索の複数バリアント抽出用）。
+     */
+    public function fetchPageHtml(string $url): ?string
+    {
+        $url = trim($url);
+        if ($url === '' || $this->isBlockedSourceUrl($url) || !$this->isSafePublicUrl($url)) {
+            return null;
+        }
+
+        return $this->fetchPublicHtml($url);
+    }
+
+    /**
      * HTML 抽出用に、検索クエリを商品名+サイズ中心の短い文字列へ整える。
      */
     public function simplifyProbeQuery(string $query): string
@@ -526,9 +574,11 @@ final class NutritionPageExtractor
             ['priority' => 96, 'pattern' => '/熱量[\s\S]{0,80}?<td[^>]*>\s*(\d{1,4}(?:\.\d+)?)\s*kcal/isu'],
             ['priority' => 95, 'pattern' => '/エネルギー\s*(\d{1,4}(?:\.\d+)?)\s*\(\s*[Kk]cal\s*\)/u'],
             ['priority' => 92, 'pattern' => '/エネルギー[^0-9]{0,40}(\d{1,4}(?:\.\d+)?)\s*kcal/isu'],
+            ['priority' => 91, 'pattern' => '/<h3[^>]*>[\s\S]*?カロリー[\s\S]*?<\/h3>[\s\S]{0,160}?<p[^>]*>\s*(\d{1,4}(?:\.\d+)?)\s*kcal/isu'],
             ['priority' => 90, 'pattern' => '/>(\d{1,4}(?:\.\d+)?)\s*kcal\s*<\/td>/iu'],
             ['priority' => 89, 'pattern' => '/>(\d{1,4}(?:\.\d+)?)kcal\s*<\//iu'],
             ['priority' => 88, 'pattern' => '/>(\d{1,4}(?:\.\d+)?)\s*kcal\s*<\/div>/iu'],
+            ['priority' => 87, 'pattern' => '/>(\d{1,4}(?:\.\d+)?)\s*kcal\s*<\/p>/iu'],
             ['priority' => 85, 'pattern' => '/カロリー[^0-9]{0,40}(\d{1,4}(?:\.\d+)?)\s*kcal/isu'],
             ['priority' => 75, 'pattern' => '/"energy(?:_kcal)?"\s*:\s*"?(\d{1,4}(?:\.\d+)?)"?/iu'],
             ['priority' => 74, 'pattern' => '/"calories?"\s*:\s*(\d{1,4}(?:\.\d+)?)/i'],
@@ -681,6 +731,120 @@ final class NutritionPageExtractor
         return implode(' ', $parts);
     }
 
+    private function extractSingleProductPageName(string $html, string $fallback): string
+    {
+        foreach ([
+            '/<h1[^>]*>(.*?)<\/h1>/isu',
+            '/<meta[^>]+property=["\']og:title["\'][^>]+content=["\']([^"\']+)["\']/iu',
+            '/<title[^>]*>(.*?)<\/title>/isu',
+        ] as $pattern) {
+            if (preg_match($pattern, $html, $match) !== 1) {
+                continue;
+            }
+
+            $name = $this->normalizeSingleProductPageName(
+                html_entity_decode(strip_tags((string) $match[1]), ENT_QUOTES | ENT_HTML5, 'UTF-8'),
+                '',
+            );
+            if ($name !== '') {
+                return $name;
+            }
+        }
+
+        return $fallback;
+    }
+
+    private function normalizeSingleProductPageName(string $heading, string $fallback): string
+    {
+        $value = html_entity_decode(trim($heading), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $value = (string) preg_replace('/\s*[|｜]\s*.+$/u', '', $value);
+        $value = (string) preg_replace('/\s+/u', ' ', trim($value));
+
+        if ($value === '' || mb_strlen($value) < 2) {
+            return $fallback;
+        }
+
+        return $value;
+    }
+
+    private function extractPackageSizeFromPageText(string $html): ?string
+    {
+        $text = $this->normalizeWhitespace(strip_tags($html));
+        $patterns = [
+            '/(?:内容量|規格)[:：]?\s*(\d+(?:\.\d+)?)\s*(g|ml|m l|l|リットル)\b/iu',
+            '/[（(]\s*(\d+(?:\.\d+)?)\s*(g|ml)\s*[）)]/iu',
+            '#(\d+(?:\.\d+)?)\s*(g|ml)\s*[／/]\s*\d*\s*(?:袋|個|本|パック)#iu',
+            '/(\d+(?:\.\d+)?)\s*(g|ml)\s*(?:×|x|\*|入|袋|個|本|パック|あたり|当たり|入り)/iu',
+            '/(?:袋|個|本|パック|瓶|缶)\s*[（(]?\s*(\d+(?:\.\d+)?)\s*(g|ml)\s*[）)]?/iu',
+        ];
+
+        foreach ($patterns as $pattern) {
+            if (preg_match($pattern, $text, $match, PREG_OFFSET_CAPTURE) !== 1) {
+                continue;
+            }
+
+            $amount = (string) ($match[1][0] ?? '');
+            $unit = (string) ($match[2][0] ?? '');
+            $offset = (int) ($match[0][1] ?? 0);
+            if ($amount === '' || $unit === '') {
+                continue;
+            }
+
+            if ($this->isNutritionComponentContext($text, $offset)) {
+                continue;
+            }
+
+            $normalized = $this->normalizePackageSizeLabel($amount, $unit);
+            if ($this->isPlausiblePackageSize($normalized)) {
+                return $normalized;
+            }
+        }
+
+        return null;
+    }
+
+    private function isNutritionComponentContext(string $text, int $byteOffset): bool
+    {
+        $contextBefore = substr($text, max(0, $byteOffset - 40), min(40, $byteOffset));
+        $markers = ['脂質', 'たんぱく質', 'タンパク質', '炭水化物', '食物繊維', '糖質', 'ナトリウム', '塩分'];
+
+        foreach ($markers as $marker) {
+            if (mb_strpos($contextBefore, $marker) !== false) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function normalizePackageSizeLabel(string $amount, string $unit): string
+    {
+        $unit = mb_strtolower(str_replace(' ', '', $unit));
+        if ($unit === 'l' || $unit === 'リットル') {
+            return $amount . 'L';
+        }
+
+        return $amount . ($unit === 'ml' || $unit === 'm l' ? 'ml' : 'g');
+    }
+
+    private function isPlausiblePackageSize(string $amount): bool
+    {
+        if (preg_match('/^(\d+(?:\.\d+)?)g$/iu', $amount, $match) === 1) {
+            return (float) $match[1] >= 10;
+        }
+
+        if (preg_match('/^(\d+(?:\.\d+)?)ml$/iu', $amount, $match) === 1) {
+            return (float) $match[1] >= 30;
+        }
+
+        return false;
+    }
+
+    private function normalizeWhitespace(string $text): string
+    {
+        return trim((string) preg_replace('/\s+/u', ' ', $text));
+    }
+
     private function extractHtmlContext(string $html, int $offset, int $radius = 180): string
     {
         if ($html === '') {
@@ -807,6 +971,7 @@ final class NutritionPageExtractor
             'nongshim.co.jp',
             'muji.com',
             'mcdonalds.co.jp',
+            'nosh.jp',
         ];
 
         foreach ($officialDomains as $domain) {
@@ -986,6 +1151,8 @@ final class NutritionPageExtractor
             'グリコ',
             'ハウス',
             '永谷園',
+            'ナッシュ',
+            'nosh',
         ]);
     }
 
@@ -1243,6 +1410,8 @@ final class NutritionPageExtractor
         return false;
     }
 
+    private const MAX_HTML_BYTES = 3145728;
+
     private function fetchPublicHtml(string $url): ?string
     {
         if (!function_exists('curl_init') || !$this->isSafePublicUrl($url)) {
@@ -1260,9 +1429,10 @@ final class NutritionPageExtractor
 
             curl_setopt_array($ch, [
                 CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_TIMEOUT => 15,
-                CURLOPT_CONNECTTIMEOUT => 8,
+                CURLOPT_TIMEOUT => 8,
+                CURLOPT_CONNECTTIMEOUT => 3,
                 CURLOPT_FOLLOWLOCATION => true,
+                CURLOPT_MAXREDIRS => 3,
                 CURLOPT_ENCODING => '',
                 CURLOPT_HTTPHEADER => [
                     'User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -1274,9 +1444,17 @@ final class NutritionPageExtractor
 
             $body = curl_exec($ch);
             $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            $contentType = (string) curl_getinfo($ch, CURLINFO_CONTENT_TYPE);
             curl_close($ch);
 
-            if ($body !== false && $httpCode < 400 && is_string($body) && $body !== '') {
+            if (
+                $body !== false
+                && $httpCode < 400
+                && is_string($body)
+                && $body !== ''
+                && str_contains(mb_strtolower($contentType), 'html')
+                && strlen($body) <= self::MAX_HTML_BYTES
+            ) {
                 return $body;
             }
 

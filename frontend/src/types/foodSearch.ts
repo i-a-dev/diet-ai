@@ -37,10 +37,26 @@ export interface FoodSearchCandidate {
   base_product_name?: string;
   variant_label?: string;
   variant_confidence?: SearchConfidence;
+  variant_dimension?: string;
   serving_weight_g?: number | null;
   package_size?: string | null;
   alias_id?: number;
+  verification_confidence?: SearchConfidence;
+  evidence_text?: string | null;
+  source_type?: string;
 }
+
+export type VariantDimension =
+  | "named_size"
+  | "serving_size"
+  | "weight"
+  | "volume"
+  | "count"
+  | "portion"
+  | "container"
+  | "multiple"
+  | "none"
+  | "unknown";
 
 export interface AliasSearchCandidate {
   aliasId: number;
@@ -148,5 +164,10 @@ export interface FoodSearchProgress {
   aliasCandidates?: AliasSearchCandidate[];
   localDbCandidates?: LocalDbSearchCandidate[];
   confirmationReason?: "variant_ambiguous" | "identity_ambiguous" | null;
+  variantDimension?: VariantDimension | string;
+  allowManualVariant?: boolean;
+  allowEstimatedAdd?: boolean;
+  webSearchPhase?: "planning" | "searching_pages" | "extracting_variants";
+  selectedCandidateKey?: string | null;
   message?: string;
 }

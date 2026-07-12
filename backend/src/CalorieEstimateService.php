@@ -4,11 +4,11 @@ declare(strict_types=1);
 
 /**
  * Claude Haiku 4.5 で食品名からカロリー（kcal）を推定するサービス。
- * mode=web のとき:
- * 1. Brave Search + HTML 抽出（入力そのまま）
- * 2. 商品同一性が曖昧なら Claude Haiku no_web で商品名候補を生成
- * 3. 候補ごとに Brave 再検索 + HTML 抽出
- * 4. それでも見つからなければ Claude Web Search をフォールバック
+ * mode=web のとき（変更後）:
+ * 1. Claude Haiku で検索計画（1回）
+ * 2. 固定テンプレートで Brave 検索（通常1〜2回、最大4回）
+ * 3. 上位URL HTML から複数バリアント抽出（最大3URL）
+ * 4. 候補0件のみ Claude Web Search フォールバック（最大1回）
  */
 final class CalorieEstimateService
 {
@@ -27,6 +27,7 @@ final class CalorieEstimateService
         private readonly ?NutritionPageExtractor $nutritionPageExtractor = null,
         private readonly ?FoodVariantAnalyzer $variantAnalyzer = null,
         private readonly ?FoodSearchAliasRepository $foodSearchAliasRepository = null,
+        private readonly ?AiWebSearchService $aiWebSearchService = null,
     ) {
     }
 
@@ -144,63 +145,60 @@ final class CalorieEstimateService
      *   candidates?: list<array<string, mixed>>
      * }
      */
+    private function resolveAiWebSearchService(): AiWebSearchService
+    {
+        if ($this->aiWebSearchService !== null) {
+            return $this->aiWebSearchService;
+        }
+
+        return new AiWebSearchService(
+            claudeWebSearchFallback: function (string $trimmed, string $apiKey): ?array {
+                $inputAnalysis = $this->resolveVariantAnalyzer()->analyzeInput($trimmed);
+
+                return $this->estimateWithClaudeWebSearchFallback($trimmed, $apiKey, $inputAnalysis);
+            },
+        );
+    }
+
     private function estimateWithWebSearchFlow(string $trimmed, string $apiKey): array
     {
         if ($this->looksLikeHomeCookedMeal($trimmed)) {
             throw new RuntimeException('商品検索ではなく通常のAI推定をご利用ください。');
         }
 
-        $variantAnalyzer = $this->resolveVariantAnalyzer();
-        $inputAnalysis = $variantAnalyzer->analyzeInput($trimmed);
-        $brave = $this->resolveBraveNutritionSearch();
-        $candidates = $brave->collectCandidates($trimmed, $trimmed, [$trimmed], $inputAnalysis);
+        $result = $this->resolveAiWebSearchService()->search($trimmed, $apiKey);
 
-        $aiCandidates = $this->requestClaudeProductCandidates($trimmed, $apiKey);
-        if ($aiCandidates === 'not_food' && $candidates === []) {
-            throw new RuntimeException('カロリーを推定できませんでした。');
+        if (($result['web_search_status'] ?? '') === 'no_web_search') {
+            throw new RuntimeException('商品検索ではなく通常のAI推定をご利用ください。');
         }
 
-        if (is_array($aiCandidates) && !$this->hasStrongVariantCoverage($candidates)) {
-            foreach ($aiCandidates as $aiCandidate) {
-                $searchName = $this->buildCandidateSearchName($aiCandidate);
-                $found = $brave->searchWithIdentity(
-                    $searchName,
-                    $trimmed,
-                    [$trimmed, $searchName, $aiCandidate['brand'] ?? ''],
-                    'calorie',
-                    $aiCandidate['brand'] ?? null,
-                );
-
-                if ($found === null) {
-                    continue;
-                }
-
-                if (($aiCandidate['product_name'] ?? '') !== '') {
-                    $found['product_name'] = $aiCandidate['product_name'];
-                }
-
-                if (($aiCandidate['brand'] ?? '') !== '') {
-                    $found['brand'] = $aiCandidate['brand'];
-                }
-
-                $variant = $variantAnalyzer->analyzeProduct($found['product_name']);
-                $found['base_product_name'] = $variant['base_product_name'];
-                $found['variant_label'] = $variant['variant_label'];
-                $found['variant_confidence'] = $variant['variant_confidence'];
-                $found['serving_weight_g'] = $variant['serving_weight_g'];
-                $found['package_size'] = $variant['package_size'];
-                $candidates[] = $found;
-            }
+        if (($result['web_search_status'] ?? '') === 'estimated_fallback') {
+            throw new RuntimeException('正確な商品情報を確認できませんでした。');
         }
 
-        $candidates = array_merge($candidates, $this->aliasCandidatesAsWebResults($trimmed));
-        $candidates = $this->dedupeWebCandidates($candidates);
+        $aliasCandidates = $this->aliasCandidatesAsWebResults($trimmed);
+        if ($aliasCandidates !== [] && ($result['needs_confirmation'] ?? false) === true) {
+            $merged = $this->dedupeWebCandidates(array_merge(
+                $result['candidates'] ?? [],
+                $aliasCandidates,
+            ));
+            $inputAnalysis = $this->resolveVariantAnalyzer()->analyzeInput($trimmed);
+            $reason = $this->resolveVariantAnalyzer()->hasDistinctVariants($merged)
+                ? 'variant_ambiguous'
+                : 'identity_ambiguous';
 
-        if ($candidates !== []) {
-            return $this->resolveWebSearchOutcome($trimmed, $candidates, $inputAnalysis);
+            return $this->formatConfirmationResponse(
+                $this->filterVariantConfirmationCandidates($merged, $reason),
+                $reason,
+                $result['variant_dimension'] ?? 'unknown',
+            );
         }
 
-        return $this->estimateWithClaudeWebSearchFallback($trimmed, $apiKey, $inputAnalysis);
+        if (($result['needs_confirmation'] ?? false) === true) {
+            return $result;
+        }
+
+        return $result;
     }
 
     /**
@@ -414,6 +412,7 @@ final class CalorieEstimateService
         ];
 
         foreach ([
+            'brand',
             'base_product_name',
             'variant_label',
             'variant_confidence',
@@ -430,10 +429,13 @@ final class CalorieEstimateService
 
     /**
      * @param list<array<string, mixed>> $candidates
-     * @return array{needs_confirmation: bool, reason: string, candidates: list<array<string, mixed>>}
+     * @return array{needs_confirmation: bool, reason: string, candidates: list<array<string, mixed>>, variant_dimension?: string, web_search_status?: string, allow_manual_variant?: bool, allow_estimated_add?: bool}
      */
-    private function formatConfirmationResponse(array $candidates, string $reason = 'identity_ambiguous'): array
-    {
+    private function formatConfirmationResponse(
+        array $candidates,
+        string $reason = 'identity_ambiguous',
+        string $variantDimension = 'unknown',
+    ): array {
         $formatted = [];
 
         foreach ($candidates as $candidate) {
@@ -447,12 +449,17 @@ final class CalorieEstimateService
             foreach ([
                 'brand',
                 'source_url',
+                'source_title',
                 'base_product_name',
                 'variant_label',
                 'variant_confidence',
+                'variant_dimension',
                 'serving_weight_g',
                 'package_size',
                 'alias_id',
+                'evidence_text',
+                'verification_confidence',
+                'source_type',
             ] as $field) {
                 if (($candidate[$field] ?? null) !== null && ($candidate[$field] ?? '') !== '') {
                     $item[$field] = $candidate[$field];
@@ -465,6 +472,10 @@ final class CalorieEstimateService
         return [
             'needs_confirmation' => true,
             'reason' => $reason,
+            'web_search_status' => 'needs_variant_confirmation',
+            'variant_dimension' => $variantDimension,
+            'allow_manual_variant' => true,
+            'allow_estimated_add' => true,
             'candidates' => $formatted,
         ];
     }
@@ -602,6 +613,7 @@ final class CalorieEstimateService
         }
 
         $productName = $claudeResult['product_name'];
+        $brand = $claudeResult['brand'] ?? null;
         $htmlResult = $this->probeClaudeSourceUrls(
             $claudeResult['source_urls'],
             $productName,
@@ -609,7 +621,7 @@ final class CalorieEstimateService
         );
 
         $extractor = $this->resolveNutritionPageExtractor();
-        $identityConfidence = $extractor->assessProductIdentity($trimmed, $productName);
+        $identityConfidence = $extractor->assessProductIdentity($trimmed, $productName, $brand);
 
         $variant = $variantAnalyzer->analyzeProduct($productName);
 
@@ -619,6 +631,7 @@ final class CalorieEstimateService
                 'kcal' => $htmlResult['kcal'],
                 'confidence' => $confidence,
                 'product_name' => $productName,
+                'brand' => $brand,
                 'source_url' => $htmlResult['url'],
                 'source' => 'claude_web_search',
                 'identity_confidence' => $identityConfidence,
@@ -641,6 +654,7 @@ final class CalorieEstimateService
             'kcal' => $claudeResult['kcal'],
             'confidence' => $fallbackConfidence,
             'product_name' => $productName,
+            'brand' => $brand,
             'source' => 'claude_web_search',
             'identity_confidence' => $identityConfidence,
             'base_product_name' => $variant['base_product_name'],
@@ -822,7 +836,7 @@ PROMPT;
     /**
      * Claude Web 検索で商品名と参照 URL を特定する（mode=web のフォールバック用）。
      *
-     * @return array{product_name: string, source_urls: list<string>, kcal: int, confidence: string}|'not_food'|null
+     * @return array{product_name: string, brand?: string, source_urls: list<string>, kcal: int, confidence: string}|'not_food'|null
      */
     private function requestClaudeWebIdentification(string $foodName, string $apiKey): array|string|null
     {
@@ -888,7 +902,8 @@ PROMPT;
 最終回答は JSON のみ。前置きや説明は不要。
 
 食品の場合:
-{"product_name": "正式な商品名", "source_urls": ["URL1", "URL2"], "kcal": 整数, "confidence": "high"|"medium"|"low"}
+{"product_name": "正式な商品名", "brand": "ブランド名またはnull", "source_urls": ["URL1", "URL2"], "kcal": 整数, "confidence": "high"|"medium"|"low"}
+- brand はメーカー・店舗・サービス名。入力やページに明示がある場合のみ。推測で埋めない。不明なら null
 非食品の場合: {"error":"not_food"}
 PROMPT;
     }
@@ -1083,7 +1098,7 @@ PROMPT;
     }
 
     /**
-     * @return array{product_name: string, source_urls: list<string>, kcal: int, confidence: string}|'not_food'|null
+     * @return array{product_name: string, brand?: string|null, source_urls: list<string>, kcal: int, confidence: string}|'not_food'|null
      */
     private function parseClaudeWebIdentificationResponse(string $text, string $foodName): array|string|null
     {
@@ -1121,8 +1136,14 @@ PROMPT;
                 $productName = $foodName;
             }
 
+            $brand = trim((string) ($json['brand'] ?? ''));
+            if ($brand === '' || strtolower($brand) === 'null') {
+                $brand = null;
+            }
+
             return [
                 'product_name' => $productName,
+                'brand' => $brand,
                 'source_urls' => $this->normalizeSourceUrls($json['source_urls'] ?? []),
                 'kcal' => $kcal,
                 'confidence' => $confidence,

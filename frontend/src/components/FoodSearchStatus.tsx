@@ -8,6 +8,7 @@ interface FoodSearchStatusProps {
   steps: FoodSearchStep[];
   onCancel: () => void;
   showApiDebug?: boolean;
+  webPhase?: "planning" | "searching_pages" | "extracting_variants";
 }
 
 export function FoodSearchStatus({
@@ -17,10 +18,12 @@ export function FoodSearchStatus({
   steps,
   onCancel,
   showApiDebug = false,
+  webPhase,
 }: FoodSearchStatusProps) {
   const visibleSteps = steps.filter((step) => step.key !== "waiting_user_choice");
   const progressRatio = calcProgressRatio(visibleSteps);
   const activeApiLabel = detectActiveApiLabel(steps, mode);
+  const webSubText = resolveWebSubText(webPhase);
 
   return (
     <div style={cardStyle}>
@@ -30,7 +33,9 @@ export function FoodSearchStatus({
       <div style={headlineStyle}>{title}</div>
       <div style={queryStyle}>{query}</div>
       <div style={subTextStyle}>
-        {mode === "web" ? "公式サイトや栄養成分を確認しています" : "数秒かかる場合があります"}
+        {mode === "web"
+          ? webSubText
+          : "数秒かかる場合があります"}
       </div>
       <div style={progressTrackStyle}>
         <div style={{ ...progressFillStyle, width: `${Math.max(progressRatio * 100, 12)}%` }} />
@@ -88,6 +93,21 @@ function calcProgressRatio(steps: FoodSearchStep[]): number {
   const doneCount = steps.filter((step) => step.status === "done").length;
   const activeCount = steps.filter((step) => step.status === "active").length;
   return (doneCount + activeCount * 0.45) / steps.length;
+}
+
+function resolveWebSubText(
+  phase?: "planning" | "searching_pages" | "extracting_variants",
+): string {
+  switch (phase) {
+    case "planning":
+      return "商品名を確認しています";
+    case "searching_pages":
+      return "公式サイトや栄養成分を探しています";
+    case "extracting_variants":
+      return "サイズ・栄養情報を確認しています";
+    default:
+      return "公式サイトや栄養成分を探しています。少し時間がかかる場合があります";
+  }
 }
 
 function detectActiveApiLabel(steps: FoodSearchStep[], mode: "food" | "web"): string {
