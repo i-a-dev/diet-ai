@@ -174,11 +174,13 @@ final class BraveNutritionSearchService
                         $collected[$existingIndex],
                         $result,
                     );
-                    continue;
+                } else {
+                    $seenKeys[$dedupeKey] = count($collected);
+                    $collected[] = $result;
                 }
 
-                $seenKeys[$dedupeKey] = count($collected);
-                $collected[] = $result;
+                // この searchQuery（例: Lサイズ）で1件取れたら残り URL は試さない
+                break;
             }
         }
 
