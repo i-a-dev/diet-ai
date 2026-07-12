@@ -30,6 +30,7 @@ final class AiWebSearchService
         private readonly NutritionPageVariantExtractor $variantExtractor = new NutritionPageVariantExtractor(),
         private readonly FoodVariantAnalyzer $variantAnalyzer = new FoodVariantAnalyzer(),
         private readonly WebSearchResultCache $cache = new WebSearchResultCache(),
+        private readonly OfficialSiteBrandResolver $officialSiteBrandResolver = new OfficialSiteBrandResolver(),
         private $claudeWebSearchFallback = null,
     ) {
     }
@@ -303,19 +304,27 @@ final class AiWebSearchService
         string $userInput,
         FoodWebSearchPlan $plan,
     ): array {
+        $brandName = $plan->brandName;
+        if ($brandName === null || trim($brandName) === '') {
+            $brandName = $this->officialSiteBrandResolver->resolveFromUrl(
+                $entry['url'],
+                $entry['title'] !== '' ? $entry['title'] : null,
+            );
+        }
+
         $productName = $plan->normalizedProductName;
         if (
-            $plan->brandName !== null
-            && $plan->brandName !== ''
-            && !str_contains($productName, $plan->brandName)
+            $brandName !== null
+            && $brandName !== ''
+            && !str_contains($productName, $brandName)
         ) {
-            $productName = $plan->brandName . ' ' . $productName;
+            $productName = $brandName . ' ' . $productName;
         }
 
         $identityConfidence = $this->pageExtractor->assessProductIdentity(
             $userInput,
             $productName,
-            $plan->brandName,
+            $brandName,
         );
 
         $sourceType = (string) ($item['sourceType'] ?? 'html_text');
@@ -323,7 +332,7 @@ final class AiWebSearchService
 
         return [
             'product_name' => $productName,
-            'brand' => $plan->brandName,
+            'brand' => $brandName,
             'kcal' => (int) ($item['kcal'] ?? 0),
             'source_url' => $entry['url'],
             'source_title' => $entry['title'] !== '' ? $entry['title'] : null,

@@ -12,6 +12,7 @@ import { FoodSearchStatus } from "./FoodSearchStatus.tsx";
 import { FoodResultPreview } from "./FoodResultPreview.tsx";
 import { LowConfidenceEstimateCard } from "./LowConfidenceEstimateCard.tsx";
 import { ProductConfirmationCard } from "./ProductConfirmationCard.tsx";
+import { WebSearchCandidateConfirmation } from "./WebSearchCandidateConfirmation.tsx";
 import {
   buildResultFromSelectedAlias,
   buildResultFromSelectedCandidate,
@@ -19,10 +20,10 @@ import {
   runAiWebSearch,
   searchFoodByText,
 } from "../services/foodSearchService.ts";
+import { toWebConfirmationCandidates } from "../utils/webSearchConfirmationCandidates.ts";
 import type {
   AliasSearchCandidate,
   FoodConfirmationCandidate,
-  FoodSearchCandidate,
   FoodSearchProgress,
   FoodSearchResult,
   LocalDbSearchCandidate,
@@ -155,6 +156,8 @@ export function AddFoodModal({
   const [progress, setProgress] =
     useState<FoodSearchProgress>(makeInitialProgress);
   const [showManualEdit, setShowManualEdit] = useState(false);
+  const [isManualEditingFromConfirmation, setIsManualEditingFromConfirmation] =
+    useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [completedResult, setCompletedResult] =
     useState<FoodSearchResult | null>(null);
@@ -223,7 +226,7 @@ export function AddFoodModal({
     progress.state === "estimated" ||
     progress.state === "from_history" ||
     progress.state === "low_confidence_estimate" ||
-    progress.state === "needs_confirmation" ||
+    (progress.state === "needs_confirmation" && !isManualEditingFromConfirmation) ||
     progress.state === "needs_alias_confirmation" ||
     progress.state === "needs_local_db_confirmation" ||
     progress.state === "web_searching" ||
@@ -293,6 +296,7 @@ export function AddFoodModal({
     aliasCandidateRankRef.current = null;
     setShowManualEdit(false);
     setManualKcal("");
+    setIsManualEditingFromConfirmation(false);
     try {
       // 変更: Regex → FatSecret → Open Food Facts → Claude 推定の順で検索。
       const next = await searchFoodByText(inputValue, (nextProgress) => {
@@ -316,6 +320,8 @@ export function AddFoodModal({
     if (isSearching) return;
     const token = Date.now();
     activeSearchTokenRef.current = token;
+    setIsManualEditingFromConfirmation(false);
+    setShowManualEdit(false);
     try {
       // 変更: 低信頼度時のみ、ユーザー操作で AI Web検索を実行する。
       const next = await runAiWebSearch(inputValue, (nextProgress) => {
@@ -335,6 +341,30 @@ export function AddFoodModal({
       });
       setShowManualEdit(true);
     }
+  }
+
+  function handleConfirmSingleWebCandidate(candidate: FoodConfirmationCandidate) {
+    if (!candidate.webCandidate) return;
+
+    registrationContextRef.current.candidateCount = 1;
+    aliasCandidateRankRef.current = 1;
+
+    const result = buildResultFromSelectedCandidate(
+      inputValue.trim(),
+      candidate.webCandidate,
+    );
+    void saveItem(result);
+  }
+
+  function handleEditSingleWebCandidate(candidate: FoodConfirmationCandidate) {
+    setShowManualEdit(true);
+    setManualKcal(
+      Number.isFinite(candidate.kcal) && candidate.kcal > 0
+        ? String(candidate.kcal)
+        : "",
+    );
+    setInputValue(candidate.label.trim() || inputValue.trim());
+    setIsManualEditingFromConfirmation(true);
   }
 
   function handleConfirmSelectedWebCandidate() {
@@ -577,13 +607,11 @@ export function AddFoodModal({
 
   function handleCandidateManualInput() {
     setShowManualEdit(true);
-      setProgress({
-        ...progress,
-        state: "error",
-        message: "候補に該当がない場合は、手入力で記録してください。",
-        candidates: undefined,
-        aliasCandidates: undefined,
-      });
+    setIsManualEditingFromConfirmation(true);
+    setProgress({
+      ...progress,
+      message: "候補に該当がない場合は、手入力で記録してください。",
+    });
   }
 
   async function saveItem(result: FoodSearchResult | null) {
@@ -866,34 +894,36 @@ export function AddFoodModal({
     }
 
     if (state === "needs_confirmation" && (progress.candidates?.length ?? 0) > 0) {
-      const isVariantAmbiguous =
-        progress.confirmationReason === "variant_ambiguous";
-      const baseName =
-        progress.candidates?.[0]?.base_product_name ??
-        progress.candidates?.[0]?.product_name ??
-        inputValue.trim();
+      if (showManualEdit && isManualEditingFromConfirmation) {
+        return null;
+      }
+
       const confirmationCandidates = toWebConfirmationCandidates(
         progress.candidates ?? [],
-        isVariantAmbiguous,
-        progress.variantDimension,
       );
 
+      if (confirmationCandidates.length === 0) {
+        return null;
+      }
+
       return (
-        <ProductConfirmationCard
-          productName={baseName}
+        <WebSearchCandidateConfirmation
           variantDimension={progress.variantDimension ?? "unknown"}
           candidates={confirmationCandidates}
+          confirmationReason={progress.confirmationReason}
+          allowEstimatedAdd={progress.allowEstimatedAdd}
           selectedKey={progress.selectedCandidateKey ?? null}
           onSelect={handleCandidateSelect}
+          onConfirmSingle={handleConfirmSingleWebCandidate}
+          onEditSingle={handleEditSingleWebCandidate}
+          onConfirmSelected={handleConfirmSelectedWebCandidate}
           onManualInput={handleCandidateManualInput}
           onUnknown={
             progress.allowEstimatedAdd === false
               ? undefined
               : handleCandidateUnknown
           }
-          onConfirmSelected={
-            isVariantAmbiguous ? handleConfirmSelectedWebCandidate : undefined
-          }
+          isSubmitting={isSubmitting}
         />
       );
     }
@@ -1032,44 +1062,12 @@ export function AddFoodModal({
               opacity: inputValue.trim() && manualKcal.trim() ? 1 : 0.45,
             }}
           >
-            手入力で追加する
+            {isManualEditingFromConfirmation ? "手入力で追加する" : "手入力で追加する"}
           </button>
         </>
       )}
     </BottomSheet>
   );
-}
-
-function toWebConfirmationCandidates(
-  candidates: FoodSearchCandidate[],
-  _variantSelectionMode = false,
-  _variantDimension?: string,
-): FoodConfirmationCandidate[] {
-  return candidates.map((candidate) => {
-    const baseName = candidate.base_product_name ?? candidate.product_name;
-    const variantLabel = candidate.variant_label ?? candidate.package_size ?? "通常サイズ";
-    const productName = stripBrandFromProductName(baseName, candidate.brand);
-    const label = candidate.brand
-      ? `${candidate.brand} ${productName}`
-      : productName;
-
-    return {
-      key: `${productName}-${variantLabel}-${candidate.kcal}-${candidate.source_url ?? "no-url"}`,
-      label,
-      kcal: candidate.kcal,
-      badge: variantLabel !== "通常サイズ" ? variantLabel : null,
-      webCandidate: candidate,
-    };
-  });
-}
-
-function stripBrandFromProductName(productName: string, brand?: string): string {
-  const trimmed = productName.trim();
-  if (!brand) return trimmed;
-  const brandPrefix = `${brand} `;
-  return trimmed.startsWith(brandPrefix)
-    ? trimmed.slice(brandPrefix.length).trim()
-    : trimmed;
 }
 
 function toLocalDbConfirmationCandidates(

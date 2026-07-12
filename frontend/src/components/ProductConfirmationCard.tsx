@@ -1,15 +1,12 @@
 import type { CSSProperties } from "react";
 import { ORANGE } from "../constants.ts";
-import type {
-  FoodConfirmationCandidate,
-  VariantDimension,
-} from "../types/foodSearch.ts";
+import type { FoodConfirmationCandidate } from "../types/foodSearch.ts";
+import { getCandidateConfirmationHeading } from "../utils/candidateConfirmationHeading.ts";
 
 interface ProductConfirmationCardProps {
   title?: string;
   description?: string;
   productName?: string;
-  variantDimension?: VariantDimension | string;
   candidates: FoodConfirmationCandidate[];
   selectedKey?: string | null;
   onSelect: (candidate: FoodConfirmationCandidate) => void;
@@ -25,7 +22,6 @@ export function ProductConfirmationCard({
   title,
   description,
   productName,
-  variantDimension = "unknown",
   candidates,
   selectedKey = null,
   onSelect,
@@ -37,9 +33,8 @@ export function ProductConfirmationCard({
   searchWebDisabled = false,
 }: ProductConfirmationCardProps) {
   const resolvedTitle =
-    title ?? buildVariantTitle(variantDimension, productName, candidates.length);
-  const resolvedDescription =
-    description ?? buildVariantDescription(variantDimension);
+    title ?? getCandidateConfirmationHeading("unknown", candidates.length);
+  const resolvedDescription = description ?? "";
 
   return (
     <div style={cardStyle}>
@@ -102,42 +97,6 @@ export function ProductConfirmationCard({
       )}
     </div>
   );
-}
-
-function buildVariantTitle(
-  dimension: VariantDimension | string,
-  productName?: string,
-  candidateCount = 0,
-): string {
-  switch (dimension) {
-    case "named_size":
-      return "どのサイズを食べましたか？";
-    case "serving_size":
-      return "どの盛りサイズを食べましたか？";
-    case "weight":
-      return "どの内容量の商品ですか？";
-    case "volume":
-      return "どの容量の商品ですか？";
-    case "multiple":
-    case "unknown":
-      if (candidateCount === 1) {
-        return "商品情報の候補がみつかりました";
-      }
-
-      return productName
-        ? "商品情報が複数見つかりました"
-        : "食べたものを選んでください";
-    default:
-      return "食べたものを選んでください";
-  }
-}
-
-function buildVariantDescription(dimension: VariantDimension | string): string {
-  if (dimension === "multiple" || dimension === "unknown") {
-    return "該当するものを選んでください";
-  }
-
-  return "";
 }
 
 const cardStyle: CSSProperties = {

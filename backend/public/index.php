@@ -30,6 +30,7 @@ require_once __DIR__ . '/../src/NutritionSearchQueryBuilder.php';
 require_once __DIR__ . '/../src/WebSearchUrlRanker.php';
 require_once __DIR__ . '/../src/NutritionPageVariantExtractor.php';
 require_once __DIR__ . '/../src/WebSearchResultCache.php';
+require_once __DIR__ . '/../src/OfficialSiteBrandResolver.php';
 require_once __DIR__ . '/../src/FoodWebSearchPlanService.php';
 require_once __DIR__ . '/../src/AiWebSearchService.php';
 require_once __DIR__ . '/../src/ExerciseMetEstimateService.php';

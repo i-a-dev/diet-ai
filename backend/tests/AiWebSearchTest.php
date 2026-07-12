@@ -291,5 +291,16 @@ assertSame(321, $nosh[0]['kcal'] ?? null, 'nosh kcal');
 assertSame('和風おろしハンバーグ', $nosh[0]['productName'] ?? null, 'nosh product name');
 echo "OK nosh menu page extraction\n";
 
+require_once __DIR__ . '/../src/OfficialSiteBrandResolver.php';
+$officialBrandResolver = new OfficialSiteBrandResolver();
+assertSame('ナッシュ', $officialBrandResolver->resolveFromUrl('https://nosh.jp/menu/detail/469'), 'nosh.jp resolves to ナッシュ');
+assertSame(
+    'ナッシュ',
+    $officialBrandResolver->resolveFromUrl('https://example.com/item', '和風おろしハンバーグ｜【nosh-ナッシュ】'),
+    'nosh title marker resolves to ナッシュ',
+);
+assertSame(null, $officialBrandResolver->resolveFromUrl('https://example.com/item'), 'unknown host has no brand');
+echo "OK official site brand resolver\n";
+
 echo str_repeat('=', 48) . "\n";
 echo "All tests passed\n";
