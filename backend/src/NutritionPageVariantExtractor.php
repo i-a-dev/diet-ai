@@ -128,7 +128,7 @@ final class NutritionPageVariantExtractor
         return [
             $this->makeCandidate(
                 (string) $candidate['productName'],
-                $this->variantAnalyzer->extractBaseProductName((string) $candidate['productName']),
+                (string) $candidate['productName'],
                 $variantLabel,
                 $variantDimension,
                 (int) $candidate['kcal'],
@@ -136,6 +136,9 @@ final class NutritionPageVariantExtractor
                 $candidate['evidenceText'] ?? null,
                 'high',
                 $packageSize,
+                isset($candidate['brandName']) && is_string($candidate['brandName'])
+                    ? $candidate['brandName']
+                    : null,
             ),
         ];
     }
@@ -620,6 +623,7 @@ final class NutritionPageVariantExtractor
         ?string $evidenceText,
         string $verificationConfidence,
         ?string $packageSize = null,
+        ?string $brandName = null,
     ): array {
         $variant = $this->variantAnalyzer->analyzeProduct(
             trim($productName . ' ' . ($variantLabel ?? '')),
@@ -628,6 +632,7 @@ final class NutritionPageVariantExtractor
         return [
             'productName' => $productName,
             'baseProductName' => $baseProductName !== '' ? $baseProductName : $variant['base_product_name'],
+            'brandName' => $brandName,
             'variantLabel' => $variantLabel ?? $variant['variant_label'],
             'variantDimension' => $variantDimension,
             'kcal' => $kcal,
@@ -653,7 +658,7 @@ final class NutritionPageVariantExtractor
                 'product_name' => $candidate['productName'],
                 'base_product_name' => $candidate['baseProductName'],
                 'variant_label' => $candidate['variantLabel'],
-                'brand' => $brandName,
+                'brand' => $candidate['brandName'] ?? $brandName,
                 'kcal' => $candidate['kcal'],
             ];
             $key = $productKey . '|' . $this->variantAnalyzer->buildCandidateDedupeKey($mapped) . '|' . $candidate['kcal'];

@@ -289,7 +289,21 @@ $nosh = $extractor->extractFromHtml(
 assertTrue(count($nosh) === 1, 'nosh menu page extracts one candidate');
 assertSame(321, $nosh[0]['kcal'] ?? null, 'nosh kcal');
 assertSame('和風おろしハンバーグ', $nosh[0]['productName'] ?? null, 'nosh product name');
+assertSame('ナッシュ', $nosh[0]['brandName'] ?? null, 'nosh brand from html title');
 echo "OK nosh menu page extraction\n";
+
+$pageExtractor = new NutritionPageExtractor();
+assertSame('ナッシュ', $pageExtractor->extractBrandFromPageHtml($noshPageHtml), 'html title brand extraction');
+$single = $pageExtractor->extractSingleProductCandidate(
+    $noshPageHtml,
+    'おろしハンバーグ',
+    'https://nosh.jp/menu/detail/469',
+);
+assertTrue(is_array($single), 'single product candidate extracted');
+assertSame('和風おろしハンバーグ', $single['productName'] ?? null, 'single product html name');
+assertSame('ナッシュ', $single['brandName'] ?? null, 'single product html brand');
+assertSame(321, $single['kcal'] ?? null, 'single product html kcal');
+echo "OK html title brand and product extraction\n";
 
 require_once __DIR__ . '/../src/OfficialSiteBrandResolver.php';
 $officialBrandResolver = new OfficialSiteBrandResolver();

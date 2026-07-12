@@ -1,6 +1,7 @@
 import type { CSSProperties } from "react";
 import { ORANGE } from "../constants.ts";
 import type { FoodConfirmationCandidate } from "../types/foodSearch.ts";
+import { CalorieSourceInfo } from "./CalorieSourceInfo.tsx";
 
 interface SingleCandidateConfirmationCardProps {
   heading: string;
@@ -17,24 +18,29 @@ export function SingleCandidateConfirmationCard({
   onEdit,
   isSubmitting = false,
 }: SingleCandidateConfirmationCardProps) {
-  const summaryParts = [
-    candidate.label,
-    candidate.badge,
-    `${candidate.kcal} kcal`,
-  ].filter(Boolean);
+  const webCandidate = candidate.webCandidate;
+  const sourceUrl = webCandidate?.source_url?.trim() || null;
+  const sourceTitle = webCandidate?.source_title?.trim() || null;
 
   return (
     <div style={cardStyle} aria-labelledby="single-candidate-heading">
       <h3 id="single-candidate-heading" style={titleStyle}>
         {heading}
       </h3>
-      <div style={summaryStyle} aria-label={summaryParts.join(" ")}>
-        <div style={productNameStyle}>{candidate.label}</div>
-        {candidate.badge && (
-          <div style={variantLabelStyle}>{candidate.badge}</div>
-        )}
-        <div style={kcalStyle}>{candidate.kcal} kcal</div>
-      </div>
+      <div style={productNameStyle}>{candidate.label}</div>
+      {candidate.badge && (
+        <div style={variantLabelStyle}>{candidate.badge}</div>
+      )}
+      <div style={kcalStyle}>{candidate.kcal} kcal</div>
+      <CalorieSourceInfo
+        source={webCandidate?.source ?? "brave_html"}
+        sourceUrl={sourceUrl}
+      />
+      {sourceTitle && (
+        <div style={sourceTitleStyle} title={sourceTitle}>
+          参照元: {sourceTitle}
+        </div>
+      )}
       <button
         type="button"
         onClick={onConfirm}
@@ -60,28 +66,21 @@ export function SingleCandidateConfirmationCard({
 
 const cardStyle: CSSProperties = {
   borderRadius: 12,
-  border: "1px solid #BFDBFE",
-  background: "#EFF6FF",
+  border: "1px solid #E5E7EB",
+  background: "#FFFFFF",
   padding: "12px 14px",
   marginTop: 10,
 };
 
 const titleStyle: CSSProperties = {
-  color: "#1D4ED8",
+  color: "#111827",
   fontSize: 14,
   fontWeight: 700,
   margin: 0,
 };
 
-const summaryStyle: CSSProperties = {
-  marginTop: 12,
-  padding: "12px 14px",
-  borderRadius: 10,
-  border: "1px solid #DBEAFE",
-  background: "#fff",
-};
-
 const productNameStyle: CSSProperties = {
+  marginTop: 10,
   fontSize: 15,
   fontWeight: 700,
   color: "#111827",
@@ -92,14 +91,22 @@ const variantLabelStyle: CSSProperties = {
   marginTop: 6,
   fontSize: 14,
   fontWeight: 600,
-  color: "#1D4ED8",
+  color: "#4B5563",
 };
 
 const kcalStyle: CSSProperties = {
   marginTop: 8,
-  fontSize: 16,
+  fontSize: 24,
   fontWeight: 800,
   color: "#111827",
+};
+
+const sourceTitleStyle: CSSProperties = {
+  marginTop: 6,
+  fontSize: 12,
+  color: "#6B7280",
+  lineHeight: 1.5,
+  wordBreak: "break-word",
 };
 
 const primaryButtonStyle: CSSProperties = {

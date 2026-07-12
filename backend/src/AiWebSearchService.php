@@ -304,7 +304,15 @@ final class AiWebSearchService
         string $userInput,
         FoodWebSearchPlan $plan,
     ): array {
+        $sourceType = (string) ($item['sourceType'] ?? 'html_text');
+        $fromSingleProductPage = $sourceType === 'html_single_product';
+        $htmlProductName = trim((string) ($item['productName'] ?? ''));
+        $htmlBrand = trim((string) ($item['brandName'] ?? ''));
+
         $brandName = $plan->brandName;
+        if (($brandName === null || trim($brandName) === '') && $htmlBrand !== '') {
+            $brandName = $htmlBrand;
+        }
         if ($brandName === null || trim($brandName) === '') {
             $brandName = $this->officialSiteBrandResolver->resolveFromUrl(
                 $entry['url'],
@@ -312,26 +320,20 @@ final class AiWebSearchService
             );
         }
 
-        $productName = $plan->normalizedProductName;
-        if (
-            $brandName !== null
-            && $brandName !== ''
-            && !str_contains($productName, $brandName)
-        ) {
-            $productName = $brandName . ' ' . $productName;
-        }
+        $displayProductName = ($fromSingleProductPage && $htmlProductName !== '')
+            ? $htmlProductName
+            : $plan->normalizedProductName;
 
         $identityConfidence = $this->pageExtractor->assessProductIdentity(
             $userInput,
-            $productName,
+            $displayProductName,
             $brandName,
         );
 
-        $sourceType = (string) ($item['sourceType'] ?? 'html_text');
         $source = $sourceType === 'claude_web_search' ? 'claude_web_search' : 'brave_html';
 
         return [
-            'product_name' => $productName,
+            'product_name' => $displayProductName,
             'brand' => $brandName,
             'kcal' => (int) ($item['kcal'] ?? 0),
             'source_url' => $entry['url'],
@@ -340,7 +342,7 @@ final class AiWebSearchService
             'source_type' => $sourceType,
             'identity_confidence' => $identityConfidence,
             'is_official_url' => $this->pageExtractor->isOfficialUrl($entry['url']),
-            'base_product_name' => $plan->normalizedProductName,
+            'base_product_name' => $displayProductName,
             'variant_label' => $item['variantLabel'] ?? '通常サイズ',
             'variant_confidence' => 'high',
             'variant_dimension' => (string) ($item['variantDimension'] ?? $plan->variantDimension),

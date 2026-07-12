@@ -118,7 +118,8 @@ final class NutritionPageExtractor
      *   productName: string,
      *   kcal: int,
      *   packageSize: string|null,
-     *   evidenceText: string|null
+     *   evidenceText: string|null,
+     *   brandName: string|null
      * }|null
      */
     public function extractSingleProductCandidate(string $html, string $query, string $url = ''): ?array
@@ -133,8 +134,8 @@ final class NutritionPageExtractor
             return null;
         }
 
-        $heading = $this->extractPageHeadingText($html);
         $productName = $this->extractSingleProductPageName($html, $probeQuery);
+        $brandName = $this->extractBrandFromPageHtml($html);
         $packageSize = $this->extractPackageSizeFromPageText($html);
         $evidenceText = trim($productName . ($packageSize !== null ? ' ' . $packageSize : '') . ' ' . $kcalResult['kcal'] . 'kcal');
 
@@ -143,7 +144,103 @@ final class NutritionPageExtractor
             'kcal' => (int) $kcalResult['kcal'],
             'packageSize' => $packageSize,
             'evidenceText' => $evidenceText !== '' ? mb_substr($evidenceText, 0, 120) : null,
+            'brandName' => $brandName,
         ];
+    }
+
+    /**
+     * HTML の title / og:title からブランド名を抽出する。
+     * 例: 和風おろしハンバーグ｜【nosh-ナッシュ】 → ナッシュ
+     */
+    public function extractBrandFromPageHtml(string $html): ?string
+    {
+        foreach ($this->extractRawPageTitles($html) as $rawTitle) {
+            $brand = $this->extractBrandFromRawPageTitle($rawTitle);
+            if ($brand !== null) {
+                return $brand;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function extractRawPageTitles(string $html): array
+    {
+        $titles = [];
+
+        if (preg_match('/<title[^>]*>(.*?)<\/title>/isu', $html, $match) === 1) {
+            $titles[] = html_entity_decode(strip_tags($match[1]), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        }
+
+        if (preg_match('/<meta[^>]+property=["\']og:title["\'][^>]+content=["\']([^"\']+)["\']/iu', $html, $match) === 1) {
+            $titles[] = html_entity_decode($match[1], ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        }
+
+        return array_values(array_unique(array_filter(array_map('trim', $titles))));
+    }
+
+    private function extractBrandFromRawPageTitle(string $rawTitle): ?string
+    {
+        $title = trim($rawTitle);
+        if ($title === '') {
+            return null;
+        }
+
+        if (preg_match('/[|｜]\s*([^|｜]+)$/u', $title, $match) === 1) {
+            $brand = $this->parseBrandFromTitleMarker(trim($match[1]));
+            if ($brand !== null) {
+                return $brand;
+            }
+        }
+
+        if (preg_match_all('/【([^】]+)】/u', $title, $matches) >= 1) {
+            foreach ($matches[1] as $marker) {
+                $brand = $this->parseBrandFromTitleMarker(trim((string) $marker));
+                if ($brand !== null) {
+                    return $brand;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private function parseBrandFromTitleMarker(string $marker): ?string
+    {
+        $marker = trim($marker);
+        $marker = (string) preg_replace('/^[【\[]+|[】\]]+$/u', '', $marker);
+        $marker = trim($marker);
+        if ($marker === '') {
+            return null;
+        }
+
+        if (preg_match('/(?:^|[-‐‑‒–—])ナッシュ$/iu', $marker) === 1 || preg_match('/^nosh$/iu', $marker) === 1) {
+            return 'ナッシュ';
+        }
+
+        if (preg_match('/^nosh[-‐‑‒–—](.+)$/iu', $marker, $match) === 1) {
+            $suffix = trim($match[1]);
+            if ($suffix !== '') {
+                return $suffix;
+            }
+        }
+
+        if (preg_match('/^(.+)[-‐‑‒–—]([\p{Han}\p{Hiragana}\p{Katakana}・]+)$/u', $marker, $match) === 1) {
+            $suffix = trim($match[2]);
+            if ($suffix !== '') {
+                return $suffix;
+            }
+        }
+
+        $clean = trim($marker, " \t");
+        if ($clean !== '' && preg_match('/\p{Han}|\p{Hiragana}|\p{Katakana}/u', $clean)) {
+            return $clean;
+        }
+
+        return null;
     }
 
     /**

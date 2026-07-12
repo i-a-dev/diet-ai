@@ -9,6 +9,9 @@ final class WebSearchResultCache
 {
     private const DEFAULT_TTL_SECONDS = 86400;
 
+    /** 候補スキーマ変更時に上げて古いキャッシュを無効化する */
+    private const CACHE_SCHEMA_VERSION = 'v2';
+
     public function __construct(
         private readonly string $cacheDir = '',
         private readonly int $ttlSeconds = self::DEFAULT_TTL_SECONDS,
@@ -69,6 +72,7 @@ final class WebSearchResultCache
     private function buildKey(string $userInput, ?string $brandName, ?string $variantHint): string
     {
         $parts = [
+            self::CACHE_SCHEMA_VERSION,
             mb_strtolower(trim($userInput)),
             mb_strtolower(trim((string) $brandName)),
             mb_strtolower(trim((string) $variantHint)),

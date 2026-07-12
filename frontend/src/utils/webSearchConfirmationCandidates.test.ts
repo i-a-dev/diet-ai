@@ -61,4 +61,21 @@ describe("toWebConfirmationCandidates", () => {
     expect(visible[0]?.badge).toBe("Mサイズ");
     expect(visible[0]?.kcal).toBe(410);
   });
+
+  it("ブランド名とHTML商品名をラベルに含める", () => {
+    const visible = toWebConfirmationCandidates([
+      makeCandidate({
+        brand: "ナッシュ",
+        base_product_name: "和風おろしハンバーグ",
+        product_name: "和風おろしハンバーグ",
+        kcal: 321,
+        source_url: "https://nosh.jp/menu/detail/469",
+      }),
+    ]);
+
+    expect(visible[0]?.label).toBe("ナッシュ 和風おろしハンバーグ");
+    expect(visible[0]?.webCandidate?.source_url).toBe(
+      "https://nosh.jp/menu/detail/469",
+    );
+  });
 });
