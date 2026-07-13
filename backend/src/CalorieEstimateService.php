@@ -26,7 +26,6 @@ final class CalorieEstimateService
         private readonly ?BraveNutritionSearchService $braveNutritionSearch = null,
         private readonly ?NutritionPageExtractor $nutritionPageExtractor = null,
         private readonly ?FoodVariantAnalyzer $variantAnalyzer = null,
-        private readonly ?FoodSearchAliasRepository $foodSearchAliasRepository = null,
         private readonly ?AiWebSearchService $aiWebSearchService = null,
     ) {
     }
@@ -122,29 +121,6 @@ final class CalorieEstimateService
         return $this->variantAnalyzer ?? new FoodVariantAnalyzer();
     }
 
-    private function resolveFoodSearchAliasRepository(): FoodSearchAliasRepository
-    {
-        return $this->foodSearchAliasRepository ?? new FoodSearchAliasRepository();
-    }
-
-    /**
-     * @return array{
-     *   kcal?: int,
-     *   confidence?: string,
-     *   product_name?: string,
-     *   source_url?: string,
-     *   source?: string,
-     *   identity_confidence?: string,
-     *   base_product_name?: string,
-     *   variant_label?: string,
-     *   variant_confidence?: string,
-     *   serving_weight_g?: int|null,
-     *   package_size?: string|null,
-     *   needs_confirmation?: bool,
-     *   reason?: string,
-     *   candidates?: list<array<string, mixed>>
-     * }
-     */
     private function resolveAiWebSearchService(): AiWebSearchService
     {
         if ($this->aiWebSearchService !== null) {
@@ -174,24 +150,6 @@ final class CalorieEstimateService
 
         if (($result['web_search_status'] ?? '') === 'estimated_fallback') {
             throw new RuntimeException('正確な商品情報を確認できませんでした。');
-        }
-
-        $aliasCandidates = $this->aliasCandidatesAsWebResults($trimmed);
-        if ($aliasCandidates !== [] && ($result['needs_confirmation'] ?? false) === true) {
-            $merged = $this->dedupeWebCandidates(array_merge(
-                $result['candidates'] ?? [],
-                $aliasCandidates,
-            ));
-            $inputAnalysis = $this->resolveVariantAnalyzer()->analyzeInput($trimmed);
-            $reason = $this->resolveVariantAnalyzer()->hasDistinctVariants($merged)
-                ? 'variant_ambiguous'
-                : 'identity_ambiguous';
-
-            return $this->formatConfirmationResponse(
-                $this->filterVariantConfirmationCandidates($merged, $reason),
-                $reason,
-                $result['variant_dimension'] ?? 'unknown',
-            );
         }
 
         if (($result['needs_confirmation'] ?? false) === true) {
@@ -320,66 +278,6 @@ final class CalorieEstimateService
     }
 
     /**
-     * @return list<array<string, mixed>>
-     */
-    private function aliasCandidatesAsWebResults(string $rawQuery): array
-    {
-        $aliasCandidates = $this->resolveFoodSearchAliasRepository()->searchByQuery($rawQuery, null, 10);
-        if ($aliasCandidates === []) {
-            return [];
-        }
-
-        $variantAnalyzer = $this->resolveVariantAnalyzer();
-        $pageExtractor = $this->resolveNutritionPageExtractor();
-        $results = [];
-
-        foreach ($aliasCandidates as $aliasCandidate) {
-            $food = $aliasCandidate['food'];
-            $productName = (string) ($food['displayName'] ?? $food['name'] ?? '');
-            if ($productName === '') {
-                continue;
-            }
-
-            $variant = $variantAnalyzer->analyzeProduct($productName, (float) ($food['amount'] ?? 1));
-            $identityConfidence = $pageExtractor->assessProductIdentity(
-                $rawQuery,
-                $productName,
-            );
-
-            $calories = (int) $food['calories'];
-            $sourceUrl = $food['sourceUrl'] ?? null;
-            if (is_string($sourceUrl) && trim($sourceUrl) !== '') {
-                $probed = $pageExtractor->probeSingleUrl(trim($sourceUrl), $productName);
-                if ($probed !== null && ($probed['kcal'] ?? 0) > 0) {
-                    $calories = (int) $probed['kcal'];
-                } elseif ($variant['variant_label'] !== '通常サイズ') {
-                    // 保存済み alias の URL / kcal がサイズと一致しない場合は候補から外す。
-                    continue;
-                }
-            }
-
-            $results[] = [
-                'kcal' => $calories,
-                'confidence' => 'high',
-                'product_name' => $productName,
-                'source_url' => $sourceUrl,
-                'source' => 'alias_db',
-                'identity_confidence' => $identityConfidence,
-                'is_official_url' => false,
-                'base_product_name' => $variant['base_product_name'],
-                'variant_label' => $variant['variant_label'],
-                'variant_confidence' => $variant['variant_confidence'],
-                'serving_weight_g' => $variant['serving_weight_g'],
-                'package_size' => $variant['package_size'],
-                'alias_id' => $aliasCandidate['aliasId'],
-                'selection_count' => $aliasCandidate['selectionCount'],
-            ];
-        }
-
-        return $results;
-    }
-
-    /**
      * @param array{
      *   kcal: int,
      *   confidence: string,
@@ -478,28 +376,6 @@ final class CalorieEstimateService
             'allow_estimated_add' => true,
             'candidates' => $formatted,
         ];
-    }
-
-    /**
-     * @param list<array<string, mixed>> $candidates
-     * @return list<array<string, mixed>>
-     */
-    private function dedupeWebCandidates(array $candidates): array
-    {
-        $variantAnalyzer = $this->resolveVariantAnalyzer();
-        $byKey = [];
-
-        foreach ($candidates as $candidate) {
-            $key = $variantAnalyzer->buildCandidateDedupeKey($candidate);
-            if (!isset($byKey[$key])) {
-                $byKey[$key] = $candidate;
-                continue;
-            }
-
-            $byKey[$key] = $this->preferWebCandidate($byKey[$key], $candidate);
-        }
-
-        return array_values($byKey);
     }
 
     /**

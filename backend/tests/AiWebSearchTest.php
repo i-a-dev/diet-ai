@@ -292,6 +292,54 @@ assertSame('和風おろしハンバーグ', $nosh[0]['productName'] ?? null, 'n
 assertSame('ナッシュ', $nosh[0]['brandName'] ?? null, 'nosh brand from html title');
 echo "OK nosh menu page extraction\n";
 
+$noshAbbrevPageHtml = <<<'HTML'
+<html>
+<head><title>きのことチーズのトマトハンバーグ｜【nosh-ナッシュ】</title></head>
+<body>
+<h1>きのことチーズのトマトハンバーグ</h1>
+<div>
+<h3 class="pg-menu-detail-table__title">カロリー</h3>
+<p class="pg-menu-detail-table__text">366kcal</p>
+</div>
+</body>
+</html>
+HTML;
+$noshAbbrev = $extractor->extractFromHtml(
+    $noshAbbrevPageHtml,
+    'ナッシュ トマトチーズハンバーグ',
+    null,
+    'none',
+    [],
+    'https://nosh.jp/menu/detail/856',
+);
+assertTrue(count($noshAbbrev) === 1, 'nosh abbreviated product query extracts one candidate');
+assertSame(366, $noshAbbrev[0]['kcal'] ?? null, 'nosh abbreviated query kcal');
+assertSame('きのことチーズのトマトハンバーグ', $noshAbbrev[0]['productName'] ?? null, 'nosh abbreviated query product name');
+echo "OK nosh abbreviated product extraction\n";
+
+$noshWrongProductHtml = <<<'HTML'
+<html>
+<head><title>トマトデミハンバーグ｜【nosh-ナッシュ】</title></head>
+<body>
+<h1>トマトデミハンバーグ</h1>
+<div>
+<h3 class="pg-menu-detail-table__title">カロリー</h3>
+<p class="pg-menu-detail-table__text">355kcal</p>
+</div>
+</body>
+</html>
+HTML;
+$noshWrongProduct = $extractor->extractFromHtml(
+    $noshWrongProductHtml,
+    'ナッシュ トマトチーズハンバーグ',
+    null,
+    'none',
+    [],
+    'https://nosh.jp/menu/detail/592',
+);
+assertTrue($noshWrongProduct === [], 'nosh wrong hamburger variant is not accepted');
+echo "OK nosh abbreviated product avoids wrong match\n";
+
 $pageExtractor = new NutritionPageExtractor();
 assertSame('ナッシュ', $pageExtractor->extractBrandFromPageHtml($noshPageHtml), 'html title brand extraction');
 $single = $pageExtractor->extractSingleProductCandidate(

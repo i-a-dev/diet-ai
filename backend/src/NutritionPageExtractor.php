@@ -788,7 +788,14 @@ final class NutritionPageExtractor
         $count = 0;
 
         foreach ($keywords as $keyword) {
-            if (mb_strpos($lowerHaystack, mb_strtolower($keyword)) !== false) {
+            $normalizedKeyword = mb_strtolower($keyword);
+            if (mb_strpos($lowerHaystack, $normalizedKeyword) !== false) {
+                $count++;
+                continue;
+            }
+
+            $partialTokens = $this->extractProductPartialTokens($normalizedKeyword);
+            if ($partialTokens !== [] && $this->allTokensMatch($lowerHaystack, $partialTokens)) {
                 $count++;
             }
         }
@@ -807,6 +814,65 @@ final class NutritionPageExtractor
         $normalized = (string) preg_replace('/\s+/u', ' ', $normalized);
 
         return $normalized;
+    }
+
+    /**
+     * 略称の複合語（例: トマトチーズハンバーグ）を、公式ページ上の商品名と照合しやすい単位に分ける。
+     *
+     * @return list<string>
+     */
+    private function extractProductPartialTokens(string $keyword): array
+    {
+        $normalized = $this->normalizeProductMatchText($keyword);
+        if ($normalized === '') {
+            return [];
+        }
+
+        $tokens = [];
+        foreach ([
+            'ハンバーグ',
+            'チーズ',
+            'トマト',
+            'きのこ',
+            'デミ',
+            'チリ',
+            'おろし',
+            '和風',
+            'カレー',
+            'チキン',
+            'ビーフ',
+            'ポーク',
+            'ソース',
+            'ステーキ',
+            '唐揚げ',
+            'からあげ',
+            'ポテト',
+            'ラーメン',
+            'うどん',
+            'パスタ',
+            'バーガー',
+        ] as $token) {
+            $token = mb_strtolower($token);
+            if (mb_strpos($normalized, $token) !== false && !in_array($token, $tokens, true)) {
+                $tokens[] = $token;
+            }
+        }
+
+        return count($tokens) >= 2 ? $tokens : [];
+    }
+
+    /**
+     * @param list<string> $tokens
+     */
+    private function allTokensMatch(string $haystack, array $tokens): bool
+    {
+        foreach ($tokens as $token) {
+            if (mb_strpos($haystack, mb_strtolower($token)) === false) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private function extractPageHeadingText(string $html): string

@@ -600,6 +600,17 @@ final class NutritionPageVariantExtractor
             return true;
         }
 
+        $partialTokens = $this->extractProductPartialTokens($core);
+        if ($partialTokens !== []) {
+            foreach ($partialTokens as $token) {
+                if (mb_strpos($normalizedText, $token) === false) {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
         $productMarkers = ['ポテト', '牛丼', 'カレー', 'ハンバーグ', 'ラーメン', 'うどん', 'コーラ', 'お茶', 'ビーフ', 'わさ'];
         foreach ($productMarkers as $marker) {
             if (mb_strpos($core, $marker) !== false && mb_strpos($normalizedText, $marker) !== false) {
@@ -608,6 +619,44 @@ final class NutritionPageVariantExtractor
         }
 
         return count($tokens) <= 1;
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function extractProductPartialTokens(string $productName): array
+    {
+        $tokens = [];
+        foreach ([
+            'ハンバーグ',
+            'チーズ',
+            'トマト',
+            'きのこ',
+            'デミ',
+            'チリ',
+            'おろし',
+            '和風',
+            'カレー',
+            'チキン',
+            'ビーフ',
+            'ポーク',
+            'ソース',
+            'ステーキ',
+            '唐揚げ',
+            'からあげ',
+            'ポテト',
+            'ラーメン',
+            'うどん',
+            'パスタ',
+            'バーガー',
+        ] as $token) {
+            $token = mb_strtolower($token);
+            if (mb_strpos($productName, $token) !== false && !in_array($token, $tokens, true)) {
+                $tokens[] = $token;
+            }
+        }
+
+        return count($tokens) >= 2 ? $tokens : [];
     }
 
     /**
