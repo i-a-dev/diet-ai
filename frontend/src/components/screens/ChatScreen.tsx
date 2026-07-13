@@ -209,17 +209,11 @@ export function ChatScreen() {
               <CoachAvatar />
               <div
                 style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 4,
                   flex: 1,
                   minWidth: 0,
                   maxWidth: "calc(100% - 50px)",
                 }}
               >
-                <span style={{ fontSize: 11, color: ORANGE, fontWeight: 600 }}>
-                  AIコーチ {formatTime(message.createdAtDate)}
-                </span>
                 <BubbleCoach>
                   <ChatMarkdown content={message.content} />
                 </BubbleCoach>
@@ -252,17 +246,11 @@ export function ChatScreen() {
             <CoachAvatar />
             <div
               style={{
-                display: "flex",
-                flexDirection: "column",
-                gap: 4,
                 flex: 1,
                 minWidth: 0,
                 maxWidth: "calc(100% - 50px)",
               }}
             >
-              <span style={{ fontSize: 11, color: ORANGE, fontWeight: 600 }}>
-                AIコーチ
-              </span>
               <BubbleCoach>考え中...</BubbleCoach>
             </div>
           </AssistantMessageEnter>
