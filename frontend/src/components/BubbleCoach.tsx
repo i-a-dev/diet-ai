@@ -8,8 +8,8 @@ export function BubbleCoach({ children }: BubbleCoachProps) {
   return (
     <div
       style={{
-        background: '#FFF7EE',
-        border: '1px solid #F0DEC8',
+        background: '#fff',
+        border: '1px solid #E8E8E8',
         borderRadius: 18,
         borderTopLeftRadius: 4,
         padding: '10px 14px',

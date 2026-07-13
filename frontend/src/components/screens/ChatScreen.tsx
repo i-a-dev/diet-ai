@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { AssistantMessageEnter } from "../AssistantMessageEnter.tsx";
 import { BubbleCoach } from "../BubbleCoach.tsx";
 import { BubbleUser } from "../BubbleUser.tsx";
 import { ChatMarkdown } from "../ChatMarkdown.tsx";
@@ -56,6 +57,22 @@ export function ChatScreen() {
   const [isBootstrapping, setIsBootstrapping] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const initialMessageIdsRef = useRef<Set<number> | null>(null);
+
+  const scrollToBottom = useCallback(() => {
+    const container = scrollRef.current;
+    if (!container) {
+      return;
+    }
+    container.scrollTop = container.scrollHeight;
+  }, []);
+
+  const shouldAnimateAssistantMessage = useCallback((messageId: number) => {
+    if (initialMessageIdsRef.current === null) {
+      return false;
+    }
+    return !initialMessageIdsRef.current.has(messageId);
+  }, []);
 
   const createWelcomeMessage = useCallback(
     (targetWeightKg: number | null): DisplayMessage => ({
@@ -109,12 +126,14 @@ export function ChatScreen() {
   }, [createWelcomeMessage]);
 
   useEffect(() => {
-    const container = scrollRef.current;
-    if (!container) {
-      return;
+    if (!isBootstrapping && initialMessageIdsRef.current === null) {
+      initialMessageIdsRef.current = new Set(messages.map((message) => message.id));
     }
-    container.scrollTop = container.scrollHeight;
-  }, [messages, isLoading]);
+  }, [isBootstrapping, messages]);
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages, isLoading, scrollToBottom]);
 
   const handleSend = async () => {
     const trimmed = input.trim();
@@ -182,9 +201,10 @@ export function ChatScreen() {
       >
         {messages.map((message) =>
           message.role === "assistant" ? (
-            <div
+            <AssistantMessageEnter
               key={message.id}
-              style={{ display: "flex", gap: 10, alignItems: "flex-start" }}
+              animate={shouldAnimateAssistantMessage(message.id)}
+              onTick={scrollToBottom}
             >
               <CoachAvatar />
               <div
@@ -204,7 +224,7 @@ export function ChatScreen() {
                   <ChatMarkdown content={message.content} />
                 </BubbleCoach>
               </div>
-            </div>
+            </AssistantMessageEnter>
           ) : (
             <div
               key={message.id}
@@ -224,7 +244,11 @@ export function ChatScreen() {
         )}
 
         {isLoading ? (
-          <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+          <AssistantMessageEnter
+            key="assistant-loading"
+            animate
+            onTick={scrollToBottom}
+          >
             <CoachAvatar />
             <div
               style={{
@@ -241,7 +265,7 @@ export function ChatScreen() {
               </span>
               <BubbleCoach>考え中...</BubbleCoach>
             </div>
-          </div>
+          </AssistantMessageEnter>
         ) : null}
 
         {error ? (
