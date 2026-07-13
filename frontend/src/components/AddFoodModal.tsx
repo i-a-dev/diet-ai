@@ -18,6 +18,7 @@ import {
   buildResultFromSelectedCandidate,
   buildResultFromSelectedLocalDb,
   runAiWebSearch,
+  runClaudeEstimate,
   searchFoodByText,
 } from "../services/foodSearchService.ts";
 import { toWebConfirmationCandidates } from "../utils/webSearchConfirmationCandidates.ts";
@@ -53,6 +54,7 @@ import {
   parseCaloriesEdited,
   toPersistedCalorieSource,
 } from "../utils/calorieSource.ts";
+import { isExternalApiFoodSource } from "../utils/foodResultDisplay.ts";
 
 export interface MealItemInput {
   id?: number;
@@ -311,6 +313,31 @@ export function AddFoodModal({
         ...makeInitialProgress(),
         state: "error",
         message: error instanceof Error ? error.message : "検索に失敗しました",
+      });
+      setShowManualEdit(true);
+    }
+  }
+
+  async function handleReestimateWithAi() {
+    if (isSearching) return;
+    const token = Date.now();
+    activeSearchTokenRef.current = token;
+    setIsManualEditingFromConfirmation(false);
+    setShowManualEdit(false);
+    try {
+      const next = await runClaudeEstimate(inputValue, (nextProgress) => {
+        if (activeSearchTokenRef.current !== token) return;
+        setProgress(nextProgress);
+      });
+      if (activeSearchTokenRef.current !== token) return;
+      setProgress(next);
+    } catch (error) {
+      if (activeSearchTokenRef.current !== token) return;
+      setProgress({
+        ...progress,
+        state: "error",
+        message:
+          error instanceof Error ? error.message : "AI推定に失敗しました",
       });
       setShowManualEdit(true);
     }
@@ -832,11 +859,19 @@ export function AddFoodModal({
     }
 
     if ((state === "found" || state === "web_found") && selectedResult) {
+      const showReestimateWithAi =
+        state === "found" && isExternalApiFoodSource(selectedResult.source);
+
       return (
         <FoodResultPreview
           result={selectedResult}
           mode="register"
           onAdd={() => void saveItem(selectedResult)}
+          onReestimateWithAi={
+            showReestimateWithAi
+              ? () => void handleReestimateWithAi()
+              : undefined
+          }
         />
       );
     }

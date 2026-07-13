@@ -6,12 +6,14 @@ import { CalorieSourceInfo } from "./CalorieSourceInfo.tsx";
 interface FoodSearchResultCardProps {
   result: FoodSearchResult;
   onAdd?: () => void;
+  onReestimateWithAi?: () => void;
   mode?: "register" | "detail";
 }
 
 export function FoodSearchResultCard({
   result,
   onAdd,
+  onReestimateWithAi,
   mode = "register",
 }: FoodSearchResultCardProps) {
   const isDetail = mode === "detail";
@@ -42,6 +44,15 @@ export function FoodSearchResultCard({
       {!isDetail && onAdd && (
         <button type="button" onClick={onAdd} style={primaryButtonStyle}>
           この内容で追加する
+        </button>
+      )}
+      {!isDetail && onReestimateWithAi && (
+        <button
+          type="button"
+          onClick={onReestimateWithAi}
+          style={reestimateButtonStyle}
+        >
+          AI推定で検索し直す
         </button>
       )}
     </div>
@@ -94,4 +105,18 @@ const primaryButtonStyle: CSSProperties = {
   fontSize: 14,
   padding: "11px 12px",
   cursor: "pointer",
+};
+
+const reestimateButtonStyle: CSSProperties = {
+  display: "block",
+  width: "100%",
+  marginTop: 8,
+  border: "none",
+  background: "transparent",
+  color: "#6B7280",
+  fontWeight: 500,
+  fontSize: 12,
+  padding: "4px 0 0",
+  cursor: "pointer",
+  textAlign: "center",
 };

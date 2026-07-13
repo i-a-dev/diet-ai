@@ -1011,6 +1011,53 @@ export async function searchFoodByText(
   );
 }
 
+export async function runClaudeEstimate(
+  rawInput: string,
+  onProgress?: ProgressListener,
+): Promise<FoodSearchProgress> {
+  const input = rawInput.trim();
+  let steps = createSteps();
+  steps = updateStep(steps, "regex_extracting", "done");
+  steps = updateStep(steps, "alias_db_searching", "skipped");
+  steps = updateStep(steps, "local_db_searching", "skipped");
+  steps = updateStep(steps, "fatsecret_searching", "skipped");
+  steps = updateStep(steps, "open_food_facts_searching", "skipped");
+
+  steps = updateStep(steps, "claude_estimating", "active");
+  emitProgress(
+    onProgress,
+    buildProgress("searching", steps, null, "AIでカロリーを推定中..."),
+  );
+
+  const parsed = parseFoodInputByRegex(input);
+  const claudeResult = await estimateWithClaude(input, parsed);
+  steps = updateStep(steps, "claude_estimating", "done");
+  storeResult(claudeResult);
+
+  if (claudeResult.confidence === "low") {
+    steps = updateStep(steps, "waiting_user_choice", "active");
+    return emitProgress(
+      onProgress,
+      buildProgress(
+        "low_confidence_estimate",
+        steps,
+        claudeResult,
+        "AI推定の精度が低い可能性があります",
+      ),
+    );
+  }
+
+  return emitProgress(
+    onProgress,
+    buildProgress(
+      "estimated",
+      steps,
+      claudeResult,
+      "AIがカロリーを推定しました",
+    ),
+  );
+}
+
 export async function runAiWebSearch(
   rawInput: string,
   onProgress?: ProgressListener,

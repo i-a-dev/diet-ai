@@ -1,6 +1,10 @@
-import type { FoodSearchResult } from "../types/foodSearch.ts";
+import type { FoodSearchResult, FoodSource } from "../types/foodSearch.ts";
 
 export type FoodResultDisplayMode = "register" | "detail" | "history";
+
+export function isExternalApiFoodSource(source: FoodSource | string): boolean {
+  return source === "fatsecret" || source === "open_food_facts";
+}
 
 export function shouldUseEstimateCard(
   result: FoodSearchResult,

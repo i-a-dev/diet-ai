@@ -15,6 +15,7 @@ interface FoodResultPreviewProps {
   onEdit?: () => void;
   onAdd?: () => void;
   onSearchWeb?: () => void;
+  onReestimateWithAi?: () => void;
 }
 
 export function FoodResultPreview({
@@ -24,6 +25,7 @@ export function FoodResultPreview({
   onEdit,
   onAdd,
   onSearchWeb,
+  onReestimateWithAi,
 }: FoodResultPreviewProps) {
   if (shouldUseEstimateCard(result, mode)) {
     return (
@@ -45,6 +47,9 @@ export function FoodResultPreview({
       result={result}
       mode={mode === "register" ? "register" : "detail"}
       onAdd={mode === "register" ? onAdd : undefined}
+      onReestimateWithAi={
+        mode === "register" ? onReestimateWithAi : undefined
+      }
     />
   );
 }
