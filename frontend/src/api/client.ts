@@ -287,6 +287,7 @@ export interface CalorieEstimateCandidate {
   brand?: string;
   kcal: number;
   source_url?: string;
+  source_title?: string | null;
   source: "brave_html" | "claude_web_search" | "alias_db";
   identity_confidence: "high" | "medium" | "low";
   base_product_name?: string;

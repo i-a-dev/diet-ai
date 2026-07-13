@@ -32,6 +32,7 @@ export interface FoodSearchCandidate {
   brand?: string;
   kcal: number;
   source_url?: string | null;
+  source_title?: string | null;
   source: "brave_html" | "claude_web_search" | "ai_web_search" | "alias_db";
   identity_confidence: SearchConfidence;
   base_product_name?: string;

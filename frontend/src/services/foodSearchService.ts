@@ -272,6 +272,7 @@ function mapEstimateCandidate(
     brand: candidate.brand,
     kcal: candidate.kcal,
     source_url: candidate.source_url ?? null,
+    source_title: candidate.source_title ?? null,
     source: resolveWebSearchSource(candidate.source),
     identity_confidence: candidate.identity_confidence,
     base_product_name: candidate.base_product_name,
