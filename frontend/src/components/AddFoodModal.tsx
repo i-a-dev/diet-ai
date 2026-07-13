@@ -1062,7 +1062,7 @@ export function AddFoodModal({
               opacity: inputValue.trim() && manualKcal.trim() ? 1 : 0.45,
             }}
           >
-            {isManualEditingFromConfirmation ? "手入力で追加する" : "手入力で追加する"}
+            手入力する
           </button>
         </>
       )}

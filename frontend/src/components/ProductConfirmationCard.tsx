@@ -70,7 +70,7 @@ export function ProductConfirmationCard({
         })}
       </div>
       <button type="button" onClick={onManualInput} style={secondaryButtonStyle}>
-        その他のサイズ・量
+        手入力する
       </button>
       {onUnknown && (
         <button type="button" onClick={onUnknown} style={secondaryButtonStyle}>

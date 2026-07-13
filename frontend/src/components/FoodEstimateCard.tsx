@@ -67,7 +67,7 @@ export function FoodEstimateCard({
         <>
           <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
             <button type="button" onClick={onEdit} style={secondaryButtonStyle}>
-              内容を編集する
+              手入力する
             </button>
             <button type="button" onClick={onAdd} style={primaryButtonStyle}>
               {isHistory ? "登録する" : "この内容で追加する"}

@@ -58,7 +58,7 @@ export function SingleCandidateConfirmationCard({
         disabled={isSubmitting}
         style={secondaryButtonStyle}
       >
-        修正する
+        手入力する
       </button>
     </div>
   );

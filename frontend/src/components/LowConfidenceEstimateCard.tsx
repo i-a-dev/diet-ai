@@ -39,7 +39,7 @@ export function LowConfidenceEstimateCard({
             このまま記録
           </button>
           <button type="button" onClick={onEdit} style={linkButtonStyle}>
-            修正する
+            手入力する
           </button>
         </>
       ) : (
@@ -54,7 +54,7 @@ export function LowConfidenceEstimateCard({
             このまま記録
           </button>
           <button type="button" onClick={onEdit} style={linkButtonStyle}>
-            修正する
+            手入力する
           </button>
         </>
       )}
