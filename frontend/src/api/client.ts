@@ -422,7 +422,9 @@ export interface AliasSearchResponse {
 
 export function searchFoodAliases(query: string) {
   const params = new URLSearchParams({ q: query });
-  return request<AliasSearchResponse>(`/foods/aliases/search?${params.toString()}`);
+  return request<AliasSearchResponse>(
+    `/foods/aliases/search?${params.toString()}`,
+  );
 }
 
 export function upsertFoodAlias(input: {

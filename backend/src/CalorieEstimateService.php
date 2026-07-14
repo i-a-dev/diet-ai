@@ -303,7 +303,6 @@ final class CalorieEstimateService
             'kcal' => $result['kcal'],
             'confidence' => $result['confidence'],
             'product_name' => $result['product_name'],
-            'source_url' => $result['source_url'] ?? null,
             'source' => $result['source'],
             'identity_confidence' => $result['identity_confidence'],
             'needs_confirmation' => false,
@@ -311,6 +310,8 @@ final class CalorieEstimateService
 
         foreach ([
             'brand',
+            'source_url',
+            'source_title',
             'base_product_name',
             'variant_label',
             'variant_confidence',
@@ -501,6 +502,8 @@ final class CalorieEstimateService
 
         $variant = $variantAnalyzer->analyzeProduct($productName);
 
+        $fallbackSourceUrl = $claudeResult['source_urls'][0] ?? null;
+
         if ($htmlResult !== null) {
             $confidence = $identityConfidence === 'high' ? 'high' : 'medium';
             $result = [
@@ -539,6 +542,11 @@ final class CalorieEstimateService
             'serving_weight_g' => $variant['serving_weight_g'],
             'package_size' => $variant['package_size'],
         ];
+
+        // HTMLからkcalを取れなくても、Claudeが返した参照URLは残す。
+        if (is_string($fallbackSourceUrl) && $fallbackSourceUrl !== '') {
+            $result['source_url'] = $fallbackSourceUrl;
+        }
 
         return $this->resolveWebSearchOutcome($trimmed, [$result], $inputAnalysis);
     }

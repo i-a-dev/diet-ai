@@ -251,7 +251,9 @@ function buildEstimateDisplayName(
 }
 
 function resolveWebSearchSource(
-  source?: CalorieEstimateResponse["source"] | CalorieEstimateCandidate["source"],
+  source?:
+    | CalorieEstimateResponse["source"]
+    | CalorieEstimateCandidate["source"],
 ): FoodSearchCandidate["source"] {
   if (
     source === "brave_html" ||
@@ -313,7 +315,8 @@ function resultFromWebEstimate(
     rawInput: input,
     selectedProductName: displayBaseName,
     sourceUrl: estimate.source_url?.trim() || null,
-    identityConfidence: estimate.identity_confidence ?? estimate.confidence ?? "medium",
+    identityConfidence:
+      estimate.identity_confidence ?? estimate.confidence ?? "medium",
   };
 }
 
@@ -344,8 +347,7 @@ function resultFromWebCandidate(
     fat: null,
     carbs: null,
     source: candidate.source === "alias_db" ? "alias_db" : candidate.source,
-    confidence:
-      candidate.identity_confidence === "high" ? "high" : "medium",
+    confidence: candidate.identity_confidence === "high" ? "high" : "medium",
     isEstimated: false,
     rawInput: input,
     selectedProductName: displayName,
@@ -741,7 +743,9 @@ async function searchLocalDb(
 
   for (const searchQuery of searches) {
     const response = await searchUserFoods(searchQuery);
-    const localDbCandidates = (response.candidates ?? []).map(mapLocalDbCandidate);
+    const localDbCandidates = (response.candidates ?? []).map(
+      mapLocalDbCandidate,
+    );
 
     if (response.needsConfirmation && localDbCandidates.length > 0) {
       return {
@@ -874,7 +878,10 @@ export async function searchFoodByText(
         ),
       );
     }
-    if (aliasResult.needsConfirmation && aliasResult.aliasCandidates.length > 0) {
+    if (
+      aliasResult.needsConfirmation &&
+      aliasResult.aliasCandidates.length > 0
+    ) {
       steps = updateStep(steps, "waiting_user_choice", "active");
       return emitProgress(
         onProgress,
@@ -926,7 +933,9 @@ export async function searchFoodByText(
           "needs_local_db_confirmation",
           steps,
           null,
-          isVariantAmbiguous ? "サイズを選んでください" : "こちらの商品ですか？",
+          isVariantAmbiguous
+            ? "サイズを選んでください"
+            : "こちらの商品ですか？",
           undefined,
           undefined,
           localDbResult.confirmationReason,
@@ -1122,7 +1131,10 @@ export async function runAiWebSearch(
       ),
     );
 
-    if (webEstimate.needs_confirmation && (webEstimate.candidates?.length ?? 0) > 0) {
+    if (
+      webEstimate.needs_confirmation &&
+      (webEstimate.candidates?.length ?? 0) > 0
+    ) {
       const candidates = webEstimate.candidates!.map(mapEstimateCandidate);
       return emitProgress(onProgress, {
         state: "needs_confirmation",
@@ -1164,8 +1176,7 @@ export async function runAiWebSearch(
         state: "low_confidence_estimate",
         steps: updateStep(steps, "ai_web_searching", "done"),
         result: fallbackEstimate,
-        message:
-          "商品検索ではなく、通常のAI推定結果を表示しています。",
+        message: "商品検索ではなく、通常のAI推定結果を表示しています。",
       });
     }
 

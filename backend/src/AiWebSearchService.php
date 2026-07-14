@@ -474,11 +474,10 @@ final class AiWebSearchService
      */
     private function formatSingleResult(array $candidate): array
     {
-        return [
+        $result = [
             'kcal' => (int) $candidate['kcal'],
             'confidence' => ($candidate['identity_confidence'] ?? 'medium') === 'high' ? 'high' : 'medium',
             'product_name' => (string) $candidate['product_name'],
-            'source_url' => $candidate['source_url'] ?? null,
             'source' => (string) ($candidate['source'] ?? 'brave_html'),
             'identity_confidence' => (string) ($candidate['identity_confidence'] ?? 'medium'),
             'needs_confirmation' => false,
@@ -488,6 +487,15 @@ final class AiWebSearchService
             'serving_weight_g' => $candidate['serving_weight_g'] ?? null,
             'package_size' => $candidate['package_size'] ?? null,
         ];
+
+        // Brave / Claude web検索の自動確定でも、候補確認時と同じく参照元を必ず返す。
+        foreach (['brand', 'source_url', 'source_title'] as $field) {
+            if (($candidate[$field] ?? null) !== null && ($candidate[$field] ?? '') !== '') {
+                $result[$field] = $candidate[$field];
+            }
+        }
+
+        return $result;
     }
 
     /**

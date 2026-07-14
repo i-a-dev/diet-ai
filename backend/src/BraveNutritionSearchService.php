@@ -375,6 +375,11 @@ final class BraveNutritionSearchService
             'package_size' => $variant['package_size'],
         ];
 
+        $sourceTitle = trim((string) ($mergedResults[$sourceUrl]['title'] ?? ''));
+        if ($sourceTitle !== '') {
+            $result['source_title'] = $sourceTitle;
+        }
+
         if ($brandName !== null) {
             $result['brand'] = $brandName;
         }

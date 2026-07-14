@@ -58,7 +58,11 @@ export function shouldShowConfidence(params: {
   }
 
   const source = params.source ?? null;
-  return source === "ai_web_search" || source === "claude_estimate" || isWebSearchSource(source);
+  return (
+    source === "ai_web_search" ||
+    source === "claude_estimate" ||
+    isWebSearchSource(source)
+  );
 }
 
 export function getCalorieSourceLabel(params: {
