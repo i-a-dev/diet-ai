@@ -44,6 +44,8 @@ const WEIGHT_AXIS_STEP_THRESHOLD_KG = 15;
 const DATE_LABEL_HALF_WIDTH = 14;
 const LATEST_POINT_REFERENCE_VISIBLE_DAYS = 7;
 const PERIOD_DAY_WINDOWS = [7, 30, 90, 180, 365, 1095] as const;
+/** 3ヶ月（90日）以上の期間では体重の丸マーカーを非表示にする */
+const WEIGHT_MARKER_MAX_VISIBLE_DAYS = 90;
 const WEIGHT_SCROLL_FLOOR_YMD = "2026-01-01";
 
 type WeightTimelineBundle = {
@@ -1102,19 +1104,22 @@ function WeightGraphCard({
       plotMin,
       plotMax,
     );
-    const plotMarkers = timelinePoints.flatMap((point, index) => {
-      if (point.value === null) {
-        return [];
-      }
+    const plotMarkers =
+      visibleWindowDays >= WEIGHT_MARKER_MAX_VISIBLE_DAYS
+        ? []
+        : timelinePoints.flatMap((point, index) => {
+            if (point.value === null) {
+              return [];
+            }
 
-      return [
-        {
-          x: xs[index],
-          y: weightToY(point.value, plotMin, plotMax),
-          color: ORANGE,
-        },
-      ];
-    });
+            return [
+              {
+                x: xs[index],
+                y: weightToY(point.value, plotMin, plotMax),
+                color: ORANGE,
+              },
+            ];
+          });
 
     return {
       axis,
@@ -1127,7 +1132,14 @@ function WeightGraphCard({
           : weightToY(timelineBounds.targetWeightKg, plotMin, plotMax),
       chartWidth: chartSlotCount * slotWidth,
     };
-  }, [chartSlotCount, leadingPadSlots, slotWidth, timelineBounds, timelinePoints]);
+  }, [
+    chartSlotCount,
+    leadingPadSlots,
+    slotWidth,
+    timelineBounds,
+    timelinePoints,
+    visibleWindowDays,
+  ]);
 
   useLayoutEffect(() => {
     const element = scrollRef.current;
