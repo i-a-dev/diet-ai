@@ -221,29 +221,41 @@ function getTimelineRightLabelOffset(
   return Math.min(60, dateLabelStep - 1);
 }
 
-function shouldShowTimelineDateLabel(
+function alignsWithDateLabelPhase(
   index: number,
-  viewport: { startIndex: number; endIndex: number },
   dateLabelPhase: number,
   dateLabelStep: number,
 ) {
-  if (index < viewport.startIndex || index > viewport.endIndex) {
-    return false;
-  }
-  return (index - dateLabelPhase) % dateLabelStep === 0;
+  const step = Math.max(1, dateLabelStep);
+  return ((index - dateLabelPhase) % step + step) % step === 0;
 }
 
+function shouldShowTimelineDateLabel(
+  index: number,
+  dateLabelPhase: number,
+  dateLabelStep: number,
+) {
+  return alignsWithDateLabelPhase(index, dateLabelPhase, dateLabelStep);
+}
+
+/**
+ * 縦グリッドはスクロール位置（viewport）に依存させない。
+ * 記録がない leading pad や chart 末尾の余白も含め、全スロットに一定間隔で引く。
+ */
 function buildTimelineVerticalLines(
-  pointCount: number,
-  shouldShowDateLabel: (index: number) => boolean,
+  chartSlotCount: number,
   leadingPadSlots: number,
+  dateLabelPhase: number,
+  dateLabelStep: number,
   slotWidth: number,
 ) {
-  return Array.from({ length: pointCount }, (_, index) => index).flatMap(
-    (index) =>
-      shouldShowDateLabel(index)
-        ? [leadingPadSlots * slotWidth + index * slotWidth + slotWidth / 2]
-        : [],
+  return Array.from({ length: chartSlotCount }, (_, slot) => slot).flatMap(
+    (slot) => {
+      const dataIndex = slot - leadingPadSlots;
+      return alignsWithDateLabelPhase(dataIndex, dateLabelPhase, dateLabelStep)
+        ? [slot * slotWidth + slotWidth / 2]
+        : [];
+    },
   );
 }
 
@@ -686,7 +698,6 @@ function BarGraphCard({
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const dateScrollRef = useRef<HTMLDivElement | null>(null);
-  const [viewport, setViewport] = useState({ startIndex: 0, endIndex: 0 });
   const [dateLabelPhase, setDateLabelPhase] = useState(0);
   const [viewportWidth, setViewportWidth] = useState(CHART_PLOT_WIDTH);
   const scrollFloorIndex = 0;
@@ -736,14 +747,6 @@ function BarGraphCard({
     const preferredRightLabelIndex = Math.max(0, endIndex - rightLabelOffset);
     const nextDateLabelPhase = preferredRightLabelIndex % dateLabelStep;
     const nextScrollLeft = alignment.targetScrollLeft;
-    const startIndex = Math.min(
-      maxStart,
-      Math.max(
-        scrollFloorIndex,
-        Math.round(nextScrollLeft / alignment.slotWidth) -
-          alignment.leadingPadSlots,
-      ),
-    );
 
     setViewportWidth(nextViewportWidth);
     setDateLabelPhase(nextDateLabelPhase);
@@ -751,10 +754,6 @@ function BarGraphCard({
     if (dateScrollRef.current) {
       dateScrollRef.current.scrollLeft = nextScrollLeft;
     }
-    setViewport({
-      startIndex,
-      endIndex: Math.min(points.length - 1, startIndex + visibleCount - 1),
-    });
   }, [
     dateLabelStep,
     effectiveVisibleDays,
@@ -772,14 +771,12 @@ function BarGraphCard({
     const updateViewport = () => {
       const nextViewportWidth = Math.max(1, element.clientWidth);
       setViewportWidth(nextViewportWidth);
-      const visibleCount = Math.max(1, effectiveVisibleDays);
       const alignment = getTimelineLatestAlignment(
         nextViewportWidth,
-        visibleCount,
+        Math.max(1, effectiveVisibleDays),
         points.length,
         scrollFloorIndex,
       );
-      const maxStart = Math.max(0, points.length - visibleCount);
       const clampedScrollLeft = clampTimelineScrollLeft(
         element.scrollLeft,
         alignment,
@@ -787,18 +784,6 @@ function BarGraphCard({
       if (clampedScrollLeft !== element.scrollLeft) {
         element.scrollLeft = clampedScrollLeft;
       }
-      const rawStart =
-        Math.round(clampedScrollLeft / alignment.slotWidth) -
-        alignment.leadingPadSlots;
-      const startIndex = Math.min(
-        maxStart,
-        Math.max(scrollFloorIndex, rawStart),
-      );
-      const endIndex = Math.min(
-        points.length - 1,
-        startIndex + visibleCount - 1,
-      );
-      setViewport({ startIndex, endIndex });
       if (dateScrollRef.current) {
         dateScrollRef.current.scrollLeft = element.scrollLeft;
       }
@@ -840,16 +825,12 @@ function BarGraphCard({
   }, [effectiveVisibleDays, points]);
 
   const shouldShowDateLabel = (index: number) =>
-    shouldShowTimelineDateLabel(
-      index,
-      viewport,
-      dateLabelPhase,
-      dateLabelStep,
-    );
+    shouldShowTimelineDateLabel(index, dateLabelPhase, dateLabelStep);
   const verticalLines = buildTimelineVerticalLines(
-    points.length,
-    shouldShowDateLabel,
+    chartSlotCount,
     leadingPadSlots,
+    dateLabelPhase,
+    dateLabelStep,
     slotWidth,
   );
 
@@ -1362,16 +1343,12 @@ function WeightGraphCard({
   }
 
   const shouldShowDateLabel = (index: number) =>
-    shouldShowTimelineDateLabel(
-      index,
-      viewport,
-      dateLabelPhase,
-      dateLabelStep,
-    );
+    shouldShowTimelineDateLabel(index, dateLabelPhase, dateLabelStep);
   const verticalLines = buildTimelineVerticalLines(
-    timelinePoints.length,
-    shouldShowDateLabel,
+    chartSlotCount,
     leadingPadSlots,
+    dateLabelPhase,
+    dateLabelStep,
     slotWidth,
   );
 
