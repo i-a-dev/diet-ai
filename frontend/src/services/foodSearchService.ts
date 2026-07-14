@@ -244,10 +244,10 @@ function buildEstimateDisplayName(
 
   const hasWeight = assumedWeightG != null && assumedWeightG > 0;
   if (hasWeight) {
-    return `${displayBaseName} ${assumedWeightG}g（推定）`;
+    return `${displayBaseName} ${assumedWeightG}g`;
   }
 
-  return `${displayBaseName}（推定）`;
+  return displayBaseName;
 }
 
 function resolveWebSearchSource(
@@ -795,7 +795,7 @@ async function estimateWithClaude(
     return {
       id: `claude-fallback-${Date.now()}`,
       name: parsed.name,
-      displayName: `${parsed.name} ${parsed.amount}${parsed.unit}（推定）`,
+      displayName: `${parsed.name} ${parsed.amount}${parsed.unit}`,
       amount: parsed.amount,
       unit: parsed.unit,
       calories: fallbackCalories,

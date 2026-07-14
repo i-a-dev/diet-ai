@@ -85,6 +85,7 @@ export function MealSection({ icon, title, totalKcal, items, isLast = false, onA
                 key={item.id ?? `${item.label}-${index}`}
                 label={item.label}
                 kcal={item.kcal}
+                calorieSource={item.calorieSource}
                 onClick={onItemClick ? () => onItemClick(item, index) : undefined}
               />
             ))}
