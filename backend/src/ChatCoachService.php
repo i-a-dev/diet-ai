@@ -36,6 +36,12 @@ final class ChatCoachService
 - 極端な食事制限や医療行為の代替は勧めない
 - 日々の記録（今日の食事・運動など）が不足しているときだけ、記録の追加を優しく促す
 - 改行を使って読みやすくする
+
+【PFC（タンパク質・脂質・炭水化物）の扱い】
+- 栄養サマリーで「PFCデータあり件数 < 食事件数」のときは、表示されている P/F/C は一部の食事だけの部分合計であり、その日の総摂取量ではない
+- その場合、「今日のタンパク質は〜gしか取れていません」「総タンパク量が不足」などと断定しない
+- PFCが不完全なときは、不足している旨を短く伝え、カロリー（kcal）を中心にアドバイスする
+- PFCが全日の食事件数分そろっているときだけ、PFCの合計を総摂取として扱ってよい
 TEXT;
 
     private UserProfileRepository $userProfileRepository;
@@ -418,9 +424,16 @@ TEXT;
         if ($pfcParts !== []) {
             $known = (int) ($summary['pfcKnownEntryCount'] ?? 0);
             $total = (int) ($summary['mealEntryCount'] ?? 0);
-            $lines[] = '  - PFC（' . $known . '/' . $total . '件にデータあり）: ' . implode(' / ', $pfcParts);
+            if ($known < $total) {
+                $lines[] = '  - PFC（部分合計のみ・総摂取ではない・' . $known . '/' . $total
+                    . '件にデータあり）: ' . implode(' / ', $pfcParts);
+                $lines[] = '  - 注意: PFC不完全のため総タンパク量などと断定禁止。不足を伝えkcal中心で話すこと';
+            } else {
+                $lines[] = '  - PFC（' . $known . '/' . $total . '件にデータあり・全日分）: '
+                    . implode(' / ', $pfcParts);
+            }
         } else {
-            $lines[] = '  - PFC: データ不足（null は0扱いしない）';
+            $lines[] = '  - PFC: データ不足（null は0扱いしない）。総摂取と断定せずkcal中心で話すこと';
         }
 
         if (($summary['summaryText'] ?? null) !== null && trim((string) $summary['summaryText']) !== '') {
