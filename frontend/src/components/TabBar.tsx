@@ -19,8 +19,8 @@ export function TabBar({ active, onChange }: TabBarProps) {
         display: "flex",
         borderTop: "1px solid #F0F0F0",
         background: "#fff",
-        paddingBottom: 10,
-        paddingTop: 5,
+        paddingBottom: 15,
+        paddingTop: 10,
       }}
     >
       {tabs.map((tab, index) => (
