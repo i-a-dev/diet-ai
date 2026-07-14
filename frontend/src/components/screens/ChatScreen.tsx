@@ -266,7 +266,7 @@ export function ChatScreen() {
       <div
         style={{
           display: "flex",
-          alignItems: "flex-end",
+          alignItems: "center",
           gap: 8,
           padding: "5px 16px 4px",
           background: "#fff",
@@ -285,7 +285,7 @@ export function ChatScreen() {
             borderRadius: 14,
             border: "none",
             padding: "8px 12px",
-            fontSize: 12,
+            fontSize: 16,
             color: "#222",
             lineHeight: 1.4,
             resize: "none",
