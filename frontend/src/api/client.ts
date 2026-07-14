@@ -609,6 +609,142 @@ export function sendChatMessage(content: string) {
   });
 }
 
+export interface ChatStreamHandlers {
+  onUserMessage?: (message: ChatMessage) => void;
+  onDelta?: (text: string) => void;
+  onAssistantMessage?: (message: ChatMessage) => void;
+  onError?: (message: string) => void;
+}
+
+/**
+ * AIコーチ返信を SSE（Server-Sent Events）で受信する。
+ * delta イベントの text は LLM から届いたトークンそのもの。
+ */
+export async function sendChatMessageStream(
+  content: string,
+  handlers: ChatStreamHandlers,
+): Promise<void> {
+  const token = getAuthToken();
+  const response = await fetch(`${API_BASE}/chat/stream`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "text/event-stream",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify({ content }),
+  });
+
+  if (!response.ok) {
+    if (response.status === 401 && token) {
+      clearAuthToken();
+    }
+    const error = (await response.json().catch(() => null)) as {
+      message?: string;
+    } | null;
+    throw new Error(error?.message ?? "メッセージの送信に失敗しました");
+  }
+
+  if (!response.body) {
+    throw new Error("ストリーミング応答を取得できませんでした");
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let sawError = false;
+
+  const dispatchEvent = (eventName: string, data: string) => {
+    if (!data) {
+      return;
+    }
+
+    let payload: Record<string, unknown>;
+    try {
+      payload = JSON.parse(data) as Record<string, unknown>;
+    } catch {
+      return;
+    }
+
+    switch (eventName) {
+      case "user_message":
+        handlers.onUserMessage?.(payload as unknown as ChatMessage);
+        break;
+      case "delta": {
+        const text = typeof payload.text === "string" ? payload.text : "";
+        if (text !== "") {
+          handlers.onDelta?.(text);
+        }
+        break;
+      }
+      case "assistant_message":
+        handlers.onAssistantMessage?.(payload as unknown as ChatMessage);
+        break;
+      case "error": {
+        sawError = true;
+        const message =
+          typeof payload.message === "string"
+            ? payload.message
+            : "メッセージの送信に失敗しました";
+        handlers.onError?.(message);
+        break;
+      }
+      default:
+        break;
+    }
+  };
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+
+    buffer += decoder.decode(value, { stream: true });
+
+    // SSE は空行でイベント区切り
+    while (true) {
+      const separatorIndex = buffer.indexOf("\n\n");
+      if (separatorIndex === -1) {
+        break;
+      }
+
+      const rawEvent = buffer.slice(0, separatorIndex);
+      buffer = buffer.slice(separatorIndex + 2);
+
+      let eventName = "message";
+      const dataLines: string[] = [];
+
+      for (const line of rawEvent.split("\n")) {
+        if (line.startsWith("event:")) {
+          eventName = line.slice(6).trim();
+        } else if (line.startsWith("data:")) {
+          dataLines.push(line.slice(5).trimStart());
+        }
+      }
+
+      dispatchEvent(eventName, dataLines.join("\n"));
+    }
+  }
+
+  if (buffer.trim() !== "") {
+    let eventName = "message";
+    const dataLines: string[] = [];
+    for (const line of buffer.split("\n")) {
+      if (line.startsWith("event:")) {
+        eventName = line.slice(6).trim();
+      } else if (line.startsWith("data:")) {
+        dataLines.push(line.slice(5).trimStart());
+      }
+    }
+    dispatchEvent(eventName, dataLines.join("\n"));
+  }
+
+  if (sawError) {
+    return;
+  }
+}
+
 export interface AuthUser {
   id: number;
   email: string;

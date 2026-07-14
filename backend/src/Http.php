@@ -21,3 +21,40 @@ function json_response(array $payload, int $statusCode = 200): never
     echo json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     exit;
 }
+
+/**
+ * Server-Sent Events (SSE) 用のレスポンスヘッダーを送出する。
+ * プロキシ／PHP のバッファリングを止め、トークン単位で即時フラッシュできるようにする。
+ */
+function sse_headers(): void
+{
+    http_response_code(200);
+    header('Content-Type: text/event-stream; charset=utf-8');
+    header('Cache-Control: no-cache, no-transform');
+    header('Connection: keep-alive');
+    header('X-Accel-Buffering: no');
+    header('Access-Control-Allow-Origin: *');
+    header('Access-Control-Allow-Headers: Content-Type, Authorization');
+    header('Access-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS');
+
+    // 既存の出力バッファをすべて開放し、以降は即時フラッシュする
+    while (ob_get_level() > 0) {
+        ob_end_flush();
+    }
+}
+
+/**
+ * SSE イベントを1件送出し、クライアントへ即座に届ける。
+ *
+ * @param array<string, mixed> $data
+ */
+function sse_event(string $event, array $data): void
+{
+    echo 'event: ' . $event . "\n";
+    echo 'data: ' . json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n\n";
+
+    if (function_exists('ob_flush')) {
+        @ob_flush();
+    }
+    flush();
+}

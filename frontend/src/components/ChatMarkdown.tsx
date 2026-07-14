@@ -1,158 +1,98 @@
-import { Component, type CSSProperties, type ErrorInfo, type ReactNode } from 'react'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
+import { Component, memo, type ErrorInfo, type ReactNode } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkBreaks from "remark-breaks";
+import remarkGfm from "remark-gfm";
 
 interface ChatMarkdownProps {
-  content: string
+  content: string;
 }
 
 interface ErrorBoundaryProps {
-  content: string
-  children: ReactNode
+  content: string;
+  children: ReactNode;
 }
 
 interface ErrorBoundaryState {
-  hasError: boolean
+  hasError: boolean;
 }
 
-class ChatMarkdownErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  state: ErrorBoundaryState = { hasError: false }
+class ChatMarkdownErrorBoundary extends Component<
+  ErrorBoundaryProps,
+  ErrorBoundaryState
+> {
+  state: ErrorBoundaryState = { hasError: false };
 
   static getDerivedStateFromError(): ErrorBoundaryState {
-    return { hasError: true }
+    return { hasError: true };
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
-    console.error('ChatMarkdown render failed', error, info)
+    console.error("ChatMarkdown render failed", error, info);
   }
 
   render() {
     if (this.state.hasError) {
-      return <PlainTextContent content={this.props.content} />
+      return (
+        <div className="chat-markdown streaming-plain-text">
+          {this.props.content}
+        </div>
+      );
     }
 
-    return this.props.children
+    return this.props.children;
   }
 }
 
-function PlainTextContent({ content }: { content: string }) {
-  return (
-    <div style={markdownRootStyle}>
-      {content.split('\n').map((line, index, lines) => (
-        <span key={`${index}-${line}`}>
-          {line}
-          {index < lines.length - 1 ? <br /> : null}
-        </span>
-      ))}
-    </div>
-  )
-}
-
 const markdownComponents = {
-  h1: ({ children }: { children?: ReactNode }) => <div style={headingStyle}>{children}</div>,
-  h2: ({ children }: { children?: ReactNode }) => <div style={headingStyle}>{children}</div>,
-  h3: ({ children }: { children?: ReactNode }) => <div style={subheadingStyle}>{children}</div>,
-  h4: ({ children }: { children?: ReactNode }) => <div style={subheadingStyle}>{children}</div>,
-  p: ({ children }: { children?: ReactNode }) => <div style={paragraphStyle}>{children}</div>,
-  ul: ({ children }: { children?: ReactNode }) => <ul style={listStyle}>{children}</ul>,
-  ol: ({ children }: { children?: ReactNode }) => <ol style={listStyle}>{children}</ol>,
-  li: ({ children }: { children?: ReactNode }) => <li style={listItemStyle}>{children}</li>,
-  strong: ({ children }: { children?: ReactNode }) => <strong style={strongStyle}>{children}</strong>,
-  hr: () => <hr style={hrStyle} />,
+  h1: ({ children }: { children?: ReactNode }) => <h1>{children}</h1>,
+  h2: ({ children }: { children?: ReactNode }) => <h2>{children}</h2>,
+  h3: ({ children }: { children?: ReactNode }) => <h3>{children}</h3>,
+  h4: ({ children }: { children?: ReactNode }) => <h4>{children}</h4>,
+  p: ({ children }: { children?: ReactNode }) => <p>{children}</p>,
+  ul: ({ children }: { children?: ReactNode }) => <ul>{children}</ul>,
+  ol: ({ children }: { children?: ReactNode }) => <ol>{children}</ol>,
+  li: ({ children }: { children?: ReactNode }) => <li>{children}</li>,
+  strong: ({ children }: { children?: ReactNode }) => <strong>{children}</strong>,
+  code: ({
+    children,
+    className,
+  }: {
+    children?: ReactNode;
+    className?: string;
+  }) => {
+    const isBlock = Boolean(className);
+    if (isBlock) {
+      return <code className={className}>{children}</code>;
+    }
+    return <code className="chat-inline-code">{children}</code>;
+  },
+  pre: ({ children }: { children?: ReactNode }) => <pre>{children}</pre>,
+  blockquote: ({ children }: { children?: ReactNode }) => (
+    <blockquote>{children}</blockquote>
+  ),
+  hr: () => <hr />,
   table: ({ children }: { children?: ReactNode }) => (
-    <div style={tableScrollStyle}>
-      <table style={tableStyle}>{children}</table>
+    <div className="chat-table-scroll">
+      <table>{children}</table>
     </div>
   ),
-  thead: ({ children }: { children?: ReactNode }) => <thead>{children}</thead>,
-  tbody: ({ children }: { children?: ReactNode }) => <tbody>{children}</tbody>,
-  tr: ({ children }: { children?: ReactNode }) => <tr>{children}</tr>,
-  th: ({ children }: { children?: ReactNode }) => <th style={thStyle}>{children}</th>,
-  td: ({ children }: { children?: ReactNode }) => <td style={tdStyle}>{children}</td>,
-}
+};
 
-export function ChatMarkdown({ content }: ChatMarkdownProps) {
-  const safeContent = content ?? ''
+export const ChatMarkdown = memo(function ChatMarkdown({
+  content,
+}: ChatMarkdownProps) {
+  const safeContent = content ?? "";
 
   return (
     <ChatMarkdownErrorBoundary content={safeContent}>
-      <div style={markdownRootStyle}>
-        <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+      <div className="chat-markdown">
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm, remarkBreaks]}
+          components={markdownComponents}
+        >
           {safeContent}
         </ReactMarkdown>
       </div>
     </ChatMarkdownErrorBoundary>
-  )
-}
-
-const markdownRootStyle: CSSProperties = {
-  wordBreak: 'break-word',
-}
-
-const headingStyle: CSSProperties = {
-  margin: '0 0 8px',
-  fontSize: 14,
-  fontWeight: 700,
-  lineHeight: 1.5,
-  color: '#222',
-}
-
-const subheadingStyle: CSSProperties = {
-  margin: '12px 0 6px',
-  fontSize: 13,
-  fontWeight: 700,
-  lineHeight: 1.5,
-  color: '#333',
-}
-
-const paragraphStyle: CSSProperties = {
-  margin: '0 0 8px',
-}
-
-const listStyle: CSSProperties = {
-  margin: '0 0 8px',
-  paddingLeft: 18,
-}
-
-const listItemStyle: CSSProperties = {
-  marginBottom: 4,
-}
-
-const strongStyle: CSSProperties = {
-  fontWeight: 700,
-}
-
-const hrStyle: CSSProperties = {
-  border: 'none',
-  borderTop: '1px solid #F0DEC8',
-  margin: '10px 0',
-}
-
-const tableScrollStyle: CSSProperties = {
-  overflowX: 'auto',
-  margin: '8px 0',
-  WebkitOverflowScrolling: 'touch',
-}
-
-const tableStyle: CSSProperties = {
-  width: '100%',
-  minWidth: 280,
-  borderCollapse: 'collapse',
-  fontSize: 11,
-  lineHeight: 1.45,
-}
-
-const thStyle: CSSProperties = {
-  padding: '6px 8px',
-  border: '1px solid #F0DEC8',
-  background: '#FFF0E0',
-  fontWeight: 700,
-  textAlign: 'left',
-  whiteSpace: 'nowrap',
-}
-
-const tdStyle: CSSProperties = {
-  padding: '6px 8px',
-  border: '1px solid #F0DEC8',
-  verticalAlign: 'top',
-}
+  );
+});

@@ -90,10 +90,63 @@ TEXT;
     }
 
     /**
+     * ユーザーメッセージを保存し、AI 応答をトークン単位でストリーミングする。
+     *
+     * $onEvent には (eventName, payload) が渡される。
+     * eventName: user_message | delta | assistant_message | error | done
+     *
+     * @param callable(string, array<string, mixed>): void $onEvent
+     */
+    public function sendUserMessageStream(string $content, callable $onEvent): void
+    {
+        $userMessage = $this->chatMessageRepository->add('user', $content);
+        $onEvent('user_message', $userMessage);
+
+        $history = $this->chatMessageRepository->listForApiContext();
+
+        try {
+            $assistantText = $this->chatStream(
+                $history,
+                static function (string $delta) use ($onEvent): void {
+                    if ($delta === '') {
+                        return;
+                    }
+                    $onEvent('delta', ['text' => $delta]);
+                }
+            );
+        } catch (Throwable $exception) {
+            $onEvent('error', ['message' => $exception->getMessage()]);
+            $onEvent('done', []);
+            return;
+        }
+
+        $assistantMessage = $this->chatMessageRepository->add('assistant', $assistantText);
+        $onEvent('assistant_message', $assistantMessage);
+        $onEvent('done', []);
+    }
+
+    /**
      * @param array<int, array{role: string, content: string}> $messages
      * @return array{role: string, content: string}
      */
     public function chat(array $messages): array
+    {
+        $text = $this->chatStream($messages, null);
+
+        return [
+            'role' => 'assistant',
+            'content' => $text,
+        ];
+    }
+
+    /**
+     * Anthropic へストリーミングリクエストを送り、テキストを組み立てる。
+     * $onDelta が渡されていれば、受信トークンごとにコールバックする。
+     *
+     * @param array<int, array{role: string, content: string}> $messages
+     * @param callable(string): void|null $onDelta
+     */
+    public function chatStream(array $messages, ?callable $onDelta): string
     {
         if ($messages === []) {
             throw new InvalidArgumentException('messages is required');
@@ -123,19 +176,16 @@ TEXT;
             'max_tokens' => 1024,
             'system' => $system,
             'messages' => $normalized,
+            'stream' => true,
         ];
 
-        $response = $this->postToAnthropic($payload, $apiKey);
-        $text = $this->extractText($response);
+        $text = $this->streamFromAnthropic($payload, $apiKey, $onDelta);
 
         if ($text === '') {
             throw new RuntimeException('AIコーチからの応答を取得できませんでした。');
         }
 
-        return [
-            'role' => 'assistant',
-            'content' => $text,
-        ];
+        return $text;
     }
 
     /**
@@ -597,10 +647,12 @@ TEXT;
     }
 
     /**
+     * Anthropic Messages API へストリームリクエストを送り、テキストデルタを処理する。
+     *
      * @param array<string, mixed> $payload
-     * @return array<string, mixed>
+     * @param callable(string): void|null $onDelta
      */
-    private function postToAnthropic(array $payload, string $apiKey): array
+    private function streamFromAnthropic(array $payload, string $apiKey, ?callable $onDelta): string
     {
         if (!function_exists('curl_init')) {
             throw new RuntimeException('curl 拡張が有効になっていません。');
@@ -611,24 +663,102 @@ TEXT;
             throw new RuntimeException('AIコーチサービスへの接続を開始できませんでした。');
         }
 
+        $lineBuffer = '';
+        $fullText = '';
+        $rawFallback = '';
+        $streamError = null;
+
         curl_setopt_array($ch, [
             CURLOPT_POST => true,
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_TIMEOUT => 60,
+            CURLOPT_RETURNTRANSFER => false,
+            CURLOPT_TIMEOUT => 120,
             CURLOPT_HTTPHEADER => [
                 'Content-Type: application/json',
+                'Accept: text/event-stream',
                 'x-api-key: ' . $apiKey,
                 'anthropic-version: 2023-06-01',
             ],
             CURLOPT_POSTFIELDS => json_encode($payload, JSON_UNESCAPED_UNICODE),
+            CURLOPT_WRITEFUNCTION => static function (
+                $curl,
+                string $chunk
+            ) use (
+                &$lineBuffer,
+                &$fullText,
+                &$rawFallback,
+                &$streamError,
+                $onDelta
+            ): int {
+                if ($streamError !== null) {
+                    return strlen($chunk);
+                }
+
+                $lineBuffer .= $chunk;
+                $rawFallback .= $chunk;
+
+                while (($newlinePos = strpos($lineBuffer, "\n")) !== false) {
+                    $line = substr($lineBuffer, 0, $newlinePos);
+                    $lineBuffer = substr($lineBuffer, $newlinePos + 1);
+                    $line = rtrim($line, "\r");
+
+                    if ($line === '' || str_starts_with($line, ':') || str_starts_with($line, 'event:')) {
+                        continue;
+                    }
+
+                    if (!str_starts_with($line, 'data:')) {
+                        continue;
+                    }
+
+                    $json = trim(substr($line, 5));
+                    if ($json === '' || $json === '[DONE]') {
+                        continue;
+                    }
+
+                    $decoded = json_decode($json, true);
+                    if (!is_array($decoded)) {
+                        continue;
+                    }
+
+                    $type = (string) ($decoded['type'] ?? '');
+
+                    if ($type === 'error') {
+                        $message = is_array($decoded['error'] ?? null)
+                            ? (string) ($decoded['error']['message'] ?? 'AIコーチとの会話に失敗しました。')
+                            : 'AIコーチとの会話に失敗しました。';
+                        $streamError = $message;
+                        break;
+                    }
+
+                    if ($type !== 'content_block_delta') {
+                        continue;
+                    }
+
+                    $delta = $decoded['delta'] ?? null;
+                    if (!is_array($delta) || ($delta['type'] ?? '') !== 'text_delta') {
+                        continue;
+                    }
+
+                    $text = (string) ($delta['text'] ?? '');
+                    if ($text === '') {
+                        continue;
+                    }
+
+                    $fullText .= $text;
+                    if ($onDelta !== null) {
+                        $onDelta($text);
+                    }
+                }
+
+                return strlen($chunk);
+            },
         ]);
 
-        $body = curl_exec($ch);
+        $executed = curl_exec($ch);
         $curlError = curl_error($ch);
         $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
 
-        if ($body === false) {
+        if ($executed === false) {
             throw new RuntimeException(
                 $curlError !== ''
                     ? 'AIコーチサービスへの接続に失敗しました: ' . $curlError
@@ -636,42 +766,18 @@ TEXT;
             );
         }
 
-        $decoded = json_decode($body, true);
-        if (!is_array($decoded)) {
-            throw new RuntimeException('AIコーチサービスの応答を解析できませんでした。');
+        if ($streamError !== null) {
+            throw new RuntimeException($streamError);
         }
 
         if ($httpCode >= 400) {
-            $message = is_array($decoded['error'] ?? null)
+            $decoded = json_decode($rawFallback, true);
+            $message = is_array($decoded) && is_array($decoded['error'] ?? null)
                 ? (string) ($decoded['error']['message'] ?? 'AIコーチとの会話に失敗しました。')
                 : 'AIコーチとの会話に失敗しました。';
             throw new RuntimeException($message);
         }
 
-        return $decoded;
-    }
-
-    /**
-     * @param array<string, mixed> $response
-     */
-    private function extractText(array $response): string
-    {
-        $content = $response['content'] ?? [];
-        if (!is_array($content)) {
-            return '';
-        }
-
-        $parts = [];
-        foreach ($content as $block) {
-            if (!is_array($block)) {
-                continue;
-            }
-
-            if (($block['type'] ?? '') === 'text' && isset($block['text'])) {
-                $parts[] = (string) $block['text'];
-            }
-        }
-
-        return trim(implode("\n", $parts));
+        return trim($fullText);
     }
 }

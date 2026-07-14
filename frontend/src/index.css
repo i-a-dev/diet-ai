@@ -20,3 +20,143 @@ body {
   margin: 0;
   min-width: 320px;
 }
+
+/* ストリーミング本文と Markdown でタイポを共有し、切替ジャンプを防ぐ */
+.chat-stream-body,
+.chat-markdown,
+.streaming-plain-text {
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.65;
+  letter-spacing: normal;
+  color: #222;
+  word-break: break-word;
+}
+
+.streaming-plain-text {
+  display: inline;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.chat-markdown {
+  word-break: break-word;
+}
+
+.chat-markdown > :first-child {
+  margin-top: 0;
+}
+
+.chat-markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.chat-markdown p {
+  margin: 0;
+}
+
+.chat-markdown p + p {
+  margin-top: 0.75em;
+}
+
+.chat-markdown h1,
+.chat-markdown h2,
+.chat-markdown h3,
+.chat-markdown h4 {
+  margin: 0.75em 0 0.35em;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.65;
+  color: #222;
+}
+
+.chat-markdown h1:first-child,
+.chat-markdown h2:first-child,
+.chat-markdown h3:first-child,
+.chat-markdown h4:first-child {
+  margin-top: 0;
+}
+
+.chat-markdown ul,
+.chat-markdown ol {
+  margin: 0.5em 0 0;
+  padding-left: 1.25em;
+}
+
+.chat-markdown li {
+  margin: 0.2em 0;
+}
+
+.chat-markdown li > p {
+  margin: 0;
+}
+
+.chat-markdown pre {
+  margin: 0.75em 0 0;
+  padding: 8px 10px;
+  overflow-x: auto;
+  background: #f7f7f7;
+  border-radius: 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre;
+}
+
+.chat-markdown pre:first-child {
+  margin-top: 0;
+}
+
+.chat-markdown .chat-inline-code,
+.chat-markdown code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.92em;
+}
+
+.chat-markdown .chat-inline-code {
+  padding: 0.1em 0.35em;
+  background: #f4f4f4;
+  border-radius: 4px;
+}
+
+.chat-markdown blockquote {
+  margin: 0.5em 0 0;
+  padding-left: 0.75em;
+  border-left: 3px solid #e8e8e8;
+  color: #555;
+}
+
+.chat-markdown hr {
+  border: none;
+  border-top: 1px solid #f0dec8;
+  margin: 0.75em 0;
+}
+
+.chat-table-scroll {
+  overflow-x: auto;
+  margin: 0.5em 0 0;
+  -webkit-overflow-scrolling: touch;
+}
+
+.chat-markdown table {
+  width: 100%;
+  min-width: 280px;
+  border-collapse: collapse;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.chat-markdown th,
+.chat-markdown td {
+  padding: 6px 8px;
+  border: 1px solid #f0dec8;
+  vertical-align: top;
+}
+
+.chat-markdown th {
+  background: #fff0e0;
+  font-weight: 700;
+  text-align: left;
+  white-space: nowrap;
+}

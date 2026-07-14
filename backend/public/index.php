@@ -386,6 +386,45 @@ if ($requestMethod === 'POST' && $requestPath === '/api/chat') {
     json_response($result);
 }
 
+// POST /api/chat/stream — AIコーチとの会話（SSE ストリーミング）
+if ($requestMethod === 'POST' && $requestPath === '/api/chat/stream') {
+    $body = json_decode(file_get_contents('php://input') ?: '{}', true);
+    $content = trim((string) ($body['content'] ?? ''));
+
+    if ($content === '') {
+        json_response(['message' => 'content is required'], 422);
+    }
+
+    // 長時間ストリーム中にタイムアウトで切れないよう延長
+    if (function_exists('set_time_limit')) {
+        @set_time_limit(0);
+    }
+    ignore_user_abort(true);
+
+    sse_headers();
+
+    try {
+        $chatCoachService->sendUserMessageStream(
+            $content,
+            static function (string $event, array $payload): void {
+                sse_event($event, $payload);
+            }
+        );
+    } catch (InvalidArgumentException $exception) {
+        sse_event('error', ['message' => $exception->getMessage()]);
+        sse_event('done', []);
+    } catch (Throwable $exception) {
+        sse_event('error', [
+            'message' => $exception->getMessage() !== ''
+                ? $exception->getMessage()
+                : 'AIコーチとの会話に失敗しました。',
+        ]);
+        sse_event('done', []);
+    }
+
+    exit;
+}
+
 // GET /api/records/daily — 記録画面用の日次データ
 if ($requestMethod === 'GET' && $requestPath === '/api/records/daily') {
     $date = trim((string) ($_GET['date'] ?? WeightRepository::todayDate()));

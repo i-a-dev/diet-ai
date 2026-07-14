@@ -6,19 +6,19 @@ import {
 } from "react";
 import { springAnimate } from "../utils/springAnimate.ts";
 
-interface AssistantMessageEnterProps {
+interface UserMessageEnterProps {
   children: ReactNode;
   animate: boolean;
   onTick?: () => void;
   style?: CSSProperties;
 }
 
-export function AssistantMessageEnter({
+export function UserMessageEnter({
   children,
   animate,
   onTick,
   style,
-}: AssistantMessageEnterProps) {
+}: UserMessageEnterProps) {
   const ref = useRef<HTMLDivElement>(null);
   const onTickRef = useRef(onTick);
   const hasAnimatedRef = useRef(false);
@@ -45,6 +45,7 @@ export function AssistantMessageEnter({
     const cancel = springAnimate({
       from: { opacity: 0, translateY: 20 },
       to: { opacity: 1, translateY: 0 },
+      durationLimit: 400,
       onUpdate: ({ opacity, translateY }) => {
         element.style.opacity = String(opacity);
         element.style.transform = `translate3d(0, ${translateY}px, 0)`;
@@ -59,7 +60,6 @@ export function AssistantMessageEnter({
     });
 
     return cancel;
-    // 初回マウント時のみ Spring。onTick の参照変化では再実行しない
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [animate]);
 
@@ -68,8 +68,9 @@ export function AssistantMessageEnter({
       ref={ref}
       style={{
         display: "flex",
-        gap: 10,
-        alignItems: "flex-start",
+        flexDirection: "column",
+        alignItems: "flex-end",
+        gap: 3,
         ...style,
       }}
     >
