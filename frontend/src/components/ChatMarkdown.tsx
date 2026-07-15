@@ -33,9 +33,7 @@ class ChatMarkdownErrorBoundary extends Component<
   render() {
     if (this.state.hasError) {
       return (
-        <div className="chat-markdown streaming-plain-text">
-          {this.props.content}
-        </div>
+        <div className="streaming-text">{this.props.content}</div>
       );
     }
 
