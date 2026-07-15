@@ -235,10 +235,17 @@ export function saveExercise(
   amount: number,
   unit: "min" | "rep",
   date?: string,
+  burnedCalories?: number,
 ) {
   return request<SaveExerciseResponse>("/records/exercises", {
     method: "POST",
-    body: JSON.stringify({ exerciseName, amount, unit, date }),
+    body: JSON.stringify({
+      exerciseName,
+      amount,
+      unit,
+      date,
+      ...(burnedCalories != null ? { burnedCalories } : {}),
+    }),
   });
 }
 

@@ -483,6 +483,7 @@ if ($requestMethod === 'POST' && $requestPath === '/api/records/exercises') {
     $exerciseName = trim((string) ($body['exerciseName'] ?? ''));
     $amount = $body['amount'] ?? null;
     $unit = trim((string) ($body['unit'] ?? ''));
+    $manualBurnedCalories = $body['burnedCalories'] ?? null;
 
     if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
         json_response(['message' => 'date must be YYYY-MM-DD'], 422);
@@ -490,6 +491,10 @@ if ($requestMethod === 'POST' && $requestPath === '/api/records/exercises') {
 
     if (!is_numeric($amount)) {
         json_response(['message' => 'amount is required'], 422);
+    }
+
+    if ($manualBurnedCalories !== null && !is_numeric($manualBurnedCalories)) {
+        json_response(['message' => 'burnedCalories must be a number'], 422);
     }
 
     try {
@@ -509,6 +514,17 @@ if ($requestMethod === 'POST' && $requestPath === '/api/records/exercises') {
             $estimated['exercise'],
             $estimated['note']
         );
+
+        // 変更: 手入力カロリーがある場合は推定値より優先して保存する。
+        $burnedCalories = $estimated['calories'];
+        if ($manualBurnedCalories !== null) {
+            $burnedCalories = (int) round((float) $manualBurnedCalories);
+            $manualNote = sprintf('手入力で修正: %d kcal', $burnedCalories);
+            $estimateNote = $estimateNote !== ''
+                ? $estimateNote . '。' . $manualNote
+                : $manualNote;
+        }
+
         $entry = $activityRepository->addExercise(
             $date,
             // 変更: 表示・履歴の運動名はユーザー入力を優先して保存する。
@@ -517,7 +533,7 @@ if ($requestMethod === 'POST' && $requestPath === '/api/records/exercises') {
             $unit,
             $estimated['minutes'],
             $estimated['mets'],
-            $estimated['calories'],
+            $burnedCalories,
             $estimated['source'],
             $estimated['confidence'],
             $estimated['isEstimated'],

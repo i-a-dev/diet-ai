@@ -1,4 +1,5 @@
 import { isWebSearchSource } from '../utils/calorieSource.ts'
+import { AiEstimateIcon } from './AiEstimateIcon.tsx'
 
 interface FoodChipProps {
   label: string
@@ -10,7 +11,6 @@ interface FoodChipProps {
 const CHIP_BG = '#FFF5EB'
 const CHIP_BORDER = '#F5E1D2'
 const CHIP_TEXT = '#8B5E3C'
-const ESTIMATE_ICON = '#F5A623'
 const WEB_SEARCH_ICON = '#4A90D9'
 
 type ChipSourceKind = 'estimate' | 'web_search' | null
@@ -30,50 +30,6 @@ function resolveChipSourceKind(
 /** 既存データに残る「（推定）」をチップ表示から外す */
 function stripEstimateSuffix(label: string): string {
   return label.replace(/[ 　]*（推定）$/u, '').trim()
-}
-
-function FourPointStar({
-  cx,
-  cy,
-  outer,
-  inner,
-}: {
-  cx: number
-  cy: number
-  outer: number
-  inner: number
-}) {
-  const points = [
-    [cx, cy - outer],
-    [cx + inner, cy - inner],
-    [cx + outer, cy],
-    [cx + inner, cy + inner],
-    [cx, cy + outer],
-    [cx - inner, cy + inner],
-    [cx - outer, cy],
-    [cx - inner, cy - inner],
-  ]
-    .map(([x, y]) => `${x},${y}`)
-    .join(' ')
-
-  return <polygon points={points} />
-}
-
-/** 添付画像の塗りつぶしキラキラ */
-function AiEstimateIcon({ size = 12 }: { size?: number }) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 16 16"
-      fill={ESTIMATE_ICON}
-      aria-hidden
-    >
-      <FourPointStar cx={6.2} cy={8} outer={5.2} inner={2} />
-      <FourPointStar cx={12.2} cy={4.2} outer={2.6} inner={1} />
-      <FourPointStar cx={12.4} cy={11.2} outer={2.2} inner={0.85} />
-    </svg>
-  )
 }
 
 /** 添付画像のグローブ（緯度・経線） */

@@ -17,6 +17,8 @@ export interface ExerciseInput {
   name: string;
   amount: number;
   unit: ExerciseUnit;
+  /** 手入力で上書きした消費カロリー。未指定時はサーバー側で再計算 */
+  burnedCalories?: number;
 }
 
 interface ExerciseRegisterSheetProps {
@@ -47,6 +49,8 @@ export function ExerciseRegisterSheet({
   const [isPreviewLoading, setIsPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [preview, setPreview] = useState<ExercisePreviewResponse | null>(null);
+  const [isManualEdit, setIsManualEdit] = useState(false);
+  const [manualKcal, setManualKcal] = useState("");
 
   const clearPreview = () => {
     previewRequestTokenRef.current = Date.now();
@@ -54,6 +58,8 @@ export function ExerciseRegisterSheet({
     setPreviewError(null);
     setIsPreviewLoading(false);
     setSelectedHistoryEntry(null);
+    setIsManualEdit(false);
+    setManualKcal("");
   };
 
   useEffect(() => {
@@ -98,7 +104,15 @@ export function ExerciseRegisterSheet({
     : historyReady
       ? historyToPreviewViewModel(selectedHistoryEntry)
       : null;
+  const parsedManualKcal = Number(manualKcal);
+  const isManualKcalValid =
+    manualKcal.trim() !== "" &&
+    Number.isFinite(parsedManualKcal) &&
+    parsedManualKcal >= 1 &&
+    parsedManualKcal <= 5000;
   const canSave = activePreview !== null;
+  const canSubmit =
+    canSave && (!isManualEdit || isManualKcalValid);
 
   const requestPreview = (
     exerciseName: string,
@@ -153,16 +167,35 @@ export function ExerciseRegisterSheet({
     setPreview(null);
     setPreviewError(null);
     setIsPreviewLoading(false);
+    setIsManualEdit(false);
+    setManualKcal("");
     setName(item.name);
     setAmount(item.amount);
     setUnit(item.unit);
     setSelectedHistoryEntry(item);
   };
 
+  const handleStartManualEdit = () => {
+    if (!activePreview || isSaving) return;
+    setIsManualEdit(true);
+    setManualKcal(String(activePreview.caloriesBurned));
+  };
+
+  const handleCancelManualEdit = () => {
+    setIsManualEdit(false);
+    setManualKcal("");
+  };
+
   const handleSave = () => {
-    if (!canSave || amount === null || isSaving) return;
-    // 変更: 登録名はユーザー入力を使い、計算の根拠は note/source で示す。
-    void onSave({ name: trimmedName, amount, unit });
+    if (!canSubmit || amount === null || isSaving) return;
+    void onSave({
+      name: trimmedName,
+      amount,
+      unit,
+      ...(isManualEdit && isManualKcalValid
+        ? { burnedCalories: Math.round(parsedManualKcal) }
+        : {}),
+    });
   };
 
   return (
@@ -242,22 +275,49 @@ export function ExerciseRegisterSheet({
             </div>
           </div>
 
-          <div style={previewAreaStyle}>
-            {trimmedName.length === 0 ? (
-              <div style={previewHintStyle}>
-                運動名を入力すると消費カロリーを表示します
+          {!isManualEdit && (
+            <div style={previewAreaStyle}>
+              {trimmedName.length === 0 ? (
+                <div style={previewHintStyle}>
+                  運動名を入力すると消費カロリーを表示します
+                </div>
+              ) : isPreviewLoading ? (
+                <div style={previewHintStyle}>カロリーを計算しています...</div>
+              ) : previewError ? (
+                <div style={previewErrorStyle}>{previewError}</div>
+              ) : activePreview ? (
+                <ExercisePreviewCard
+                  model={activePreview}
+                  isFromHistory={historyReady}
+                />
+              ) : null}
+            </div>
+          )}
+
+          {canSave && isManualEdit && (
+            <div style={{ marginTop: 10, marginBottom: 14 }}>
+              <label style={labelStyle}>カロリー（手入力）</label>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <input
+                  type="number"
+                  min={1}
+                  max={5000}
+                  placeholder="例：150"
+                  value={manualKcal}
+                  onChange={(event) => setManualKcal(event.target.value)}
+                  style={{
+                    ...inputStyle,
+                    marginBottom: 0,
+                    textAlign: "center",
+                    fontWeight: 700,
+                  }}
+                />
+                <span style={{ fontSize: 13, color: "#888", flexShrink: 0 }}>
+                  kcal
+                </span>
               </div>
-            ) : isPreviewLoading ? (
-              <div style={previewHintStyle}>カロリーを計算しています...</div>
-            ) : previewError ? (
-              <div style={previewErrorStyle}>{previewError}</div>
-            ) : activePreview ? (
-              <ExercisePreviewCard
-                model={activePreview}
-                isFromHistory={historyReady}
-              />
-            ) : null}
-          </div>
+            </div>
+          )}
 
           {!canSave && (
             <>
@@ -288,19 +348,48 @@ export function ExerciseRegisterSheet({
 
         <div style={footerStyle}>
           {canSave ? (
-            <button
-              type="button"
-              disabled={isSaving}
-              onClick={handleSave}
-              style={{
-                ...submitButtonStyle,
-                background: "#2EAA72",
-                opacity: isSaving ? 0.5 : 1,
-                cursor: isSaving ? "not-allowed" : "pointer",
-              }}
-            >
-              {isSaving ? "保存中..." : "登録する"}
-            </button>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {isManualEdit ? (
+                <button
+                  type="button"
+                  disabled={isSaving}
+                  onClick={handleCancelManualEdit}
+                  style={{
+                    ...secondaryButtonStyle,
+                    opacity: isSaving ? 0.5 : 1,
+                    cursor: isSaving ? "not-allowed" : "pointer",
+                  }}
+                >
+                  計算結果に戻す
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  disabled={isSaving}
+                  onClick={handleStartManualEdit}
+                  style={{
+                    ...secondaryButtonStyle,
+                    opacity: isSaving ? 0.5 : 1,
+                    cursor: isSaving ? "not-allowed" : "pointer",
+                  }}
+                >
+                  手入力で修正する
+                </button>
+              )}
+              <button
+                type="button"
+                disabled={!canSubmit || isSaving}
+                onClick={handleSave}
+                style={{
+                  ...submitButtonStyle,
+                  background: "#2EAA72",
+                  opacity: !canSubmit || isSaving ? 0.5 : 1,
+                  cursor: !canSubmit || isSaving ? "not-allowed" : "pointer",
+                }}
+              >
+                {isSaving ? "保存中..." : "登録する"}
+              </button>
+            </div>
           ) : (
             <button
               type="button"
@@ -505,6 +594,17 @@ const submitButtonStyle: CSSProperties = {
   borderRadius: 10,
   background: "#2EAA72",
   color: "#fff",
+  fontSize: 14,
+  fontWeight: 700,
+  padding: "12px 0",
+};
+
+const secondaryButtonStyle: CSSProperties = {
+  width: "100%",
+  border: "1px solid #E8E8E8",
+  borderRadius: 10,
+  background: "#fff",
+  color: "#666",
   fontSize: 14,
   fontWeight: 700,
   padding: "12px 0",

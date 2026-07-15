@@ -436,6 +436,7 @@ export function RecordScreen() {
         input.amount,
         input.unit,
         recordedOn ?? selectedDate,
+        input.burnedCalories,
       );
       setExercises(data.exercises.entries);
       if (data.meta?.usedDefaultWeight && data.meta.weightHint) {
@@ -895,9 +896,8 @@ export function RecordScreen() {
               {exercises.map((item) => (
                 <ExerciseChip
                   key={item.id}
-                  text={`${item.name}　${item.amount}${item.unit === "min" ? "分" : "回"}　${item.burnedCalories}kcal${
-                    item.source === "llm_estimate" ? "　AI推定 ⓘ" : ""
-                  }`}
+                  text={`${item.name}　${item.amount}${item.unit === "min" ? "分" : "回"}　${item.burnedCalories}kcal`}
+                  isAiEstimate={item.source === "llm_estimate"}
                   onClick={
                     item.source === "llm_estimate" && item.note
                       ? () => setActiveExerciseNote(item)
