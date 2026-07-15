@@ -4,22 +4,37 @@ declare(strict_types=1);
 
 /**
  * ユーザーの記録データを踏まえて AI コーチと会話するサービス。
+ *
+ * 流れ:
+ * ユーザー質問 → 対象期間を start/end へ解決 → DB 正式記録を構造化
+ * → 会話履歴から記録事実を除外 → authoritative context を質問直前に注入 → 回答
  */
 final class ChatCoachService
 {
     private const API_URL = 'https://api.anthropic.com/v1/messages';
     private const MODEL = 'claude-haiku-4-5-20251001';
-    private const RECENT_DAYS = 7;
+    private const TIMEZONE = 'Asia/Tokyo';
 
     private const SYSTEM_PROMPT = <<<'TEXT'
 あなたはダイエット記録アプリの専属AIコーチです。
 ユーザーが記録した体重・食事・運動・歩数のデータを踏まえ、温かく具体的にアドバイスしてください。
 
+【記録データの優先順位】
+- 食事名、量、カロリー、栄養値、体重、日付などの記録事実は、authoritative_record_context に含まれるDB由来データのみを正とする
+- 今回解決された対象期間のDB記録を最優先する（「今日だけ特別」ではなく、解決された start_date〜end_date が常に正）
+- 会話履歴は会話の流れ、希望、好み、制約を理解するためだけに使用する
+- 会話履歴に登場する食品名、カロリー、体重を現在の記録として使用しない
+- 対象期間外の食品を、対象期間内の食事として扱わない
+- DB記録に存在しない食品名を推測、補完、置換しない
+- 過去のassistant回答を正式な記録事実として扱わない
+- 記録がない場合（record_status=no_record / 未記録）は「未記録」と回答し、食べていないと断定しない
+- 【会話文脈のみ・記録事実なし】と刻まれた履歴は意図把握だけに使い、数値や食品名は無視する
+
 【プロフィールの扱い（最重要）】
-- 【ユーザーの記録データ】内の「■ プロフィール（ユーザー登録・正）」は、ユーザーがアプリに登録した正式な情報です
+- authoritative_record_context および system 内のプロフィールは、ユーザーがアプリに登録した正式な情報です
 - プロフィールに値がある項目は、すべて事実として扱い、返信の前提にしてください
 - 会話履歴で以前に未設定と言っていた項目でも、プロフィールに登録済みなら必ずその登録内容を正として使ってください
-- 会話履歴の内容より、毎回付与される【ユーザーの記録データ】と【今回の返信で必ず参照するプロフィール要点】を常に優先してください
+- 会話履歴の内容より、毎回付与される authoritative_record_context とプロフィール要点を常に優先してください
 - プロフィールに記載済みの項目について「〜ですか？」「確認したいこと」「情報がありません」として再度聞かないでください
 - プロフィールの数値や設定を疑ったり、変更の有無を確認したりしないでください
 - 「未設定」と明記されているプロフィール項目だけ、必要なら設定を促してください
@@ -30,16 +45,16 @@ final class ChatCoachService
 
 【回答のルール】
 - 日本語で、チャットらしい短めの文体で返答する
-- 記録データに触れるときは具体的な数値や日付を引用する
+- 記録データに触れるときは authoritative_record_context の食品名・数値・日付をそのまま引用する
 - プロフィールの目標体重・目標ペース・目標摂取カロリー・やりたいダイエット方法は、登録値をそのまま使う
 - 失敗を責めず、次の一歩を一緒に考える
 - 極端な食事制限や医療行為の代替は勧めない
-- 日々の記録（今日の食事・運動など）が不足しているときだけ、記録の追加を優しく促す
+- 対象期間の記録が不足しているときだけ、記録の追加を優しく促す
 - 改行を使って読みやすくする
 
 【PFC（タンパク質・脂質・炭水化物）の扱い】
 - 栄養サマリーで「PFCデータあり件数 < 食事件数」のときは、表示されている P/F/C は一部の食事だけの部分合計であり、その日の総摂取量ではない
-- その場合、「今日のタンパク質は〜gしか取れていません」「総タンパク量が不足」などと断定しない
+- その場合、「タンパク質は〜gしか取れていません」「総タンパク量が不足」などと断定しない
 - PFCが不完全なときは、不足している旨を短く伝え、カロリー（kcal）を中心にアドバイスする
 - PFCが全日の食事件数分そろっているときだけ、PFCの合計を総摂取として扱ってよい
 TEXT;
@@ -50,6 +65,10 @@ TEXT;
     private DailyNutritionSummaryRepository $dailyNutritionSummaryRepository;
     private ActivityRepository $activityRepository;
     private ChatMessageRepository $chatMessageRepository;
+    private RecordQueryScopeResolver $scopeResolver;
+    private ChatHistorySanitizer $historySanitizer;
+    private AuthoritativeRecordContextBuilder $recordContextBuilder;
+    private ChatLlmMessageComposer $messageComposer;
 
     public function __construct(
         ?UserProfileRepository $userProfileRepository = null,
@@ -58,6 +77,10 @@ TEXT;
         ?DailyNutritionSummaryRepository $dailyNutritionSummaryRepository = null,
         ?ActivityRepository $activityRepository = null,
         ?ChatMessageRepository $chatMessageRepository = null,
+        ?RecordQueryScopeResolver $scopeResolver = null,
+        ?ChatHistorySanitizer $historySanitizer = null,
+        ?AuthoritativeRecordContextBuilder $recordContextBuilder = null,
+        ?ChatLlmMessageComposer $messageComposer = null,
     ) {
         $this->userProfileRepository = $userProfileRepository ?? new UserProfileRepository();
         $this->weightRepository = $weightRepository ?? new WeightRepository();
@@ -66,6 +89,10 @@ TEXT;
             ?? new DailyNutritionSummaryRepository(0);
         $this->activityRepository = $activityRepository ?? new ActivityRepository();
         $this->chatMessageRepository = $chatMessageRepository ?? new ChatMessageRepository();
+        $this->scopeResolver = $scopeResolver ?? new RecordQueryScopeResolver();
+        $this->historySanitizer = $historySanitizer ?? new ChatHistorySanitizer();
+        $this->recordContextBuilder = $recordContextBuilder ?? new AuthoritativeRecordContextBuilder();
+        $this->messageComposer = $messageComposer ?? new ChatLlmMessageComposer();
     }
 
     /**
@@ -91,9 +118,6 @@ TEXT;
 
     /**
      * ユーザーメッセージを保存し、AI 応答をトークン単位でストリーミングする。
-     *
-     * $onEvent には (eventName, payload) が渡される。
-     * eventName: user_message | delta | assistant_message | error | done
      *
      * @param callable(string, array<string, mixed>): void $onEvent
      */
@@ -140,42 +164,23 @@ TEXT;
     }
 
     /**
-     * Anthropic へストリーミングリクエストを送り、テキストを組み立てる。
-     * $onDelta が渡されていれば、受信トークンごとにコールバックする。
-     *
      * @param array<int, array{role: string, content: string}> $messages
      * @param callable(string): void|null $onDelta
      */
     public function chatStream(array $messages, ?callable $onDelta): string
     {
-        if ($messages === []) {
-            throw new InvalidArgumentException('messages is required');
-        }
-
-        $normalized = $this->normalizeMessages($messages);
-        $normalized = $this->injectProfileReminderIntoMessages($normalized);
-        $lastMessage = $normalized[array_key_last($normalized)];
-
-        if (($lastMessage['role'] ?? '') !== 'user') {
-            throw new InvalidArgumentException('The last message must be from the user');
-        }
+        $prepared = $this->prepareLlmPayload($messages);
 
         $apiKey = getenv('ANTHROPIC_API_KEY') ?: '';
         if ($apiKey === '') {
             throw new RuntimeException('ANTHROPIC_API_KEY が設定されていません。');
         }
 
-        $context = $this->buildUserContext();
-        $system = self::SYSTEM_PROMPT
-            . "\n\n【ユーザーの記録データ】\n"
-            . $context
-            . $this->buildProfileActionSummary();
-
         $payload = [
             'model' => self::MODEL,
             'max_tokens' => 1024,
-            'system' => $system,
-            'messages' => $normalized,
+            'system' => $prepared['system'],
+            'messages' => $prepared['messages'],
             'stream' => true,
         ];
 
@@ -186,6 +191,82 @@ TEXT;
         }
 
         return $text;
+    }
+
+    /**
+     * LLM へ渡す system / messages を組み立てる（テスト可能）。
+     *
+     * @param array<int, array{role?: mixed, content?: mixed}> $messages
+     * @return array{
+     *   system: string,
+     *   messages: array<int, array{role: string, content: string}>,
+     *   scope: RecordQueryScope,
+     *   authoritative: array<string, mixed>,
+     *   history_meta: array<string, int>
+     * }
+     */
+    public function prepareLlmPayload(array $messages): array
+    {
+        $normalized = $this->normalizeMessages($messages);
+        $lastIndex = array_key_last($normalized);
+        if ($lastIndex === null || ($normalized[$lastIndex]['role'] ?? '') !== 'user') {
+            throw new InvalidArgumentException('The last message must be from the user');
+        }
+
+        $userQuestion = $normalized[$lastIndex]['content'];
+        $today = new DateTimeImmutable('today', new DateTimeZone(self::TIMEZONE));
+        $activeRecordDate = $this->resolveActiveRecordDate($today);
+        $scope = $this->scopeResolver->resolve($userQuestion, $today, $activeRecordDate);
+
+        $historyWithoutCurrent = array_slice($normalized, 0, -1);
+        $sanitized = $this->historySanitizer->sanitize($historyWithoutCurrent);
+
+        $authoritative = $this->buildAuthoritativeContext($scope);
+        $system = self::SYSTEM_PROMPT
+            . "\n\n【今回解決された対象期間】\n"
+            . sprintf(
+                '%s 〜 %s（scope_type=%s / original=%s）',
+                $scope->startDateString(),
+                $scope->endDateString(),
+                $scope->type->value,
+                $scope->originalExpression,
+            )
+            . "\n\n"
+            . $authoritative['text']
+            . $this->buildProfileActionSummary();
+
+        $desiredDietMethod = $this->nullableProfileText(
+            $this->userProfileRepository->get()['desiredDietMethod'] ?? null
+        );
+        $safeMessages = $sanitized['messages'];
+        $safeMessages[] = [
+            'role' => 'user',
+            'content' => $this->messageComposer->composeFinalUserMessage(
+                $userQuestion,
+                $scope,
+                $authoritative,
+                $desiredDietMethod,
+            ),
+        ];
+
+        $this->logScopeResolution(
+            $userQuestion,
+            $scope,
+            $authoritative,
+            $sanitized,
+        );
+
+        return [
+            'system' => $system,
+            'messages' => $safeMessages,
+            'scope' => $scope,
+            'authoritative' => $authoritative,
+            'history_meta' => [
+                'history_count_before' => $sanitized['history_count_before'],
+                'history_count_after' => $sanitized['history_count_after'],
+                'excluded_count' => $sanitized['excluded_count'],
+            ],
+        ];
     }
 
     /**
@@ -225,94 +306,91 @@ TEXT;
         return $normalized;
     }
 
-    private function buildUserContext(): string
+    /**
+     * @return array<string, mixed>
+     */
+    private function buildAuthoritativeContext(RecordQueryScope $scope): array
     {
-        $today = WeightRepository::todayDate();
-        $timezone = new DateTimeZone('Asia/Tokyo');
-        $startDate = (new DateTimeImmutable($today, $timezone))
-            ->modify(sprintf('-%d days', self::RECENT_DAYS - 1))
-            ->format('Y-m-d');
+        $start = $scope->startDateString();
+        $end = $scope->endDateString();
 
-        $profile = $this->userProfileRepository->get();
-        $calorieGoal = CalorieGoalCalculator::calculate($profile);
-        $todayWeight = $this->weightRepository->getSummaryForDate($today);
-        $todayMeals = $this->mealEntryRepository->getSectionsForDate($today);
-        $todayNutritionSummary = $this->dailyNutritionSummaryRepository->getForDate($today);
-        if ($todayNutritionSummary === null) {
-            $todayNutritionSummary = $this->dailyNutritionSummaryRepository->recalculateForDate($today);
+        $mealRows = $this->mealEntryRepository->findBetween($start, $end);
+        $nutritionRows = $this->dailyNutritionSummaryRepository->getBetween($start, $end);
+        $nutritionByDate = [];
+        foreach ($nutritionRows as $row) {
+            $nutritionByDate[(string) $row['recordedOn']] = $row;
         }
-        $recentNutritionSummaries = $this->dailyNutritionSummaryRepository->getBetween($startDate, $today);
-        $todaySteps = $this->activityRepository->getStepsForDate($today);
-        $todayExercises = $this->activityRepository->getExercisesForDate($today);
-        $weightPoints = $this->weightRepository->getPointsBetween($startDate, $today);
-        $mealPoints = $this->mealEntryRepository->getDailyTotalsBetween($startDate, $today);
-        $exercisePoints = $this->activityRepository->getDailyExerciseCaloriesBetween($startDate, $today);
-        $stepPoints = $this->activityRepository->getDailyStepsBetween($startDate, $today);
 
-        $lines = [];
-        $lines[] = '今日の日付: ' . $today;
-        $lines[] = '';
+        $weightPoints = $this->weightRepository->getPointsBetween($start, $end);
+        $weightByDate = [];
+        foreach ($weightPoints as $point) {
+            $weightByDate[(string) $point['date']] = $point['value'];
+        }
 
-        $lines[] = '■ プロフィール（ユーザー登録・正）';
-        $lines[] = '※以下はユーザーがプロフィール画面で登録した正式な情報です。事実として扱い、再度確認しないでください。';
-        $lines[] = '性別: ' . $this->formatGender($profile['gender'] ?? null);
-        $lines[] = '生年月日: ' . ($profile['birthDate'] ?? '未設定');
-        if ($calorieGoal['ageYears'] !== null) {
-            $lines[] = '年齢: ' . $calorieGoal['ageYears'] . '歳';
+        $stepsByDate = [];
+        $exercisesByDate = [];
+        $cursor = $scope->startDate;
+        while ($cursor <= $scope->endDate) {
+            $date = $cursor->format('Y-m-d');
+            $stepsByDate[$date] = $this->activityRepository->getStepsForDate($date);
+            $exercisesByDate[$date] = $this->activityRepository->getExercisesForDate($date);
+            $cursor = $cursor->modify('+1 day');
         }
-        $lines[] = '身長: ' . $this->formatNullableNumber($profile['heightCm'], 'cm');
-        $lines[] = '現在の体重: ' . $this->formatNullableNumber($profile['currentWeightKg'], 'kg');
-        $lines[] = '目標体重: ' . $this->formatNullableNumber($profile['targetWeightKg'], 'kg');
-        $lines[] = '目標ペース: ' . $this->formatNullableNumber($profile['targetPaceKgPerMonth'], 'kg/月');
-        $lines[] = 'ダイエット目的: ' . $this->formatDietGoal($profile['dietGoal'] ?? null);
-        $desiredDietMethod = $this->nullableProfileText($profile['desiredDietMethod'] ?? null);
-        if ($desiredDietMethod !== null) {
-            $lines[] = '';
-            $lines[] = '【やりたいダイエット方法（登録済み・必ずこの方針に沿う）】';
-            $lines[] = $desiredDietMethod;
-            $lines[] = '';
-        } else {
-            $lines[] = 'やりたいダイエット方法: 未設定';
-        }
-        $lines[] = 'アレルギー・苦手食材: ' . $this->formatProfileText($profile['allergiesDislikes'] ?? null);
-        $lines[] = '過去のダイエット経験: ' . $this->formatProfileText($profile['pastDietExperience'] ?? null);
-        $lines[] = 'その他AIコーチに伝えておきたいこと: ' . $this->formatProfileText($profile['coachNotes'] ?? null);
-        if ($calorieGoal['bmrKcal'] !== null) {
-            $lines[] = '推定基礎代謝: ' . $calorieGoal['bmrKcal'] . 'kcal/日';
-        }
-        if ($calorieGoal['tdeeKcal'] !== null) {
-            $lines[] = '推定消費カロリー: ' . $calorieGoal['tdeeKcal'] . 'kcal/日';
-        }
-        if ($calorieGoal['dailyIntakeGoalKcal'] !== null) {
-            $lines[] = '目標摂取カロリー: ' . $calorieGoal['dailyIntakeGoalKcal'] . 'kcal/日';
-            if ($calorieGoal['dailyDeficitKcal'] !== null) {
-                $lines[] = '（目標ペースに基づく1日あたりの不足カロリー: 約'
-                    . $calorieGoal['dailyDeficitKcal'] . 'kcal）';
-            }
-        }
-        $lines[] = '';
 
-        $lines[] = '■ 今日の記録 (' . $today . ')';
-        $lines[] = $this->formatTodayWeight($todayWeight);
-        $lines[] = $this->formatTodayMeals($todayMeals);
-        $lines[] = $this->formatNutritionSummary($todayNutritionSummary, '今日の栄養サマリー');
-        $lines[] = $this->formatTodaySteps($todaySteps);
-        $lines[] = $this->formatTodayExercises($todayExercises);
-        $lines[] = '';
-
-        $lines[] = '■ 直近' . self::RECENT_DAYS . '日の推移';
-        $lines[] = $this->formatRecentWeight($weightPoints);
-        $lines[] = $this->formatRecentMetric('食事カロリー', $mealPoints, 'kcal');
-        $lines[] = $this->formatRecentNutritionSummaries($recentNutritionSummaries);
-        $lines[] = $this->formatRecentMetric('運動消費カロリー', $exercisePoints, 'kcal');
-        $lines[] = $this->formatRecentMetric('歩数', $stepPoints, '歩');
-
-        return implode("\n", $lines);
+        return $this->recordContextBuilder->build(
+            $scope,
+            $mealRows,
+            $nutritionByDate,
+            $weightByDate,
+            $stepsByDate,
+            $exercisesByDate,
+            $this->buildProfileSnapshot(),
+        );
     }
 
     /**
-     * 会話履歴に埋もれないよう、返信直前に参照すべき要点を再度明示する。
+     * @return array<string, mixed>
      */
+    private function buildProfileSnapshot(): array
+    {
+        $profile = $this->userProfileRepository->get();
+        $calorieGoal = CalorieGoalCalculator::calculate($profile);
+
+        return [
+            'gender' => $this->formatGender($profile['gender'] ?? null),
+            'birth_date' => $profile['birthDate'] ?? null,
+            'age_years' => $calorieGoal['ageYears'],
+            'height_cm' => $profile['heightCm'] ?? null,
+            'current_weight_kg' => $profile['currentWeightKg'] ?? null,
+            'target_weight_kg' => $profile['targetWeightKg'] ?? null,
+            'target_pace_kg_per_month' => $profile['targetPaceKgPerMonth'] ?? null,
+            'diet_goal' => $this->formatDietGoal($profile['dietGoal'] ?? null),
+            'desired_diet_method' => $this->nullableProfileText($profile['desiredDietMethod'] ?? null),
+            'allergies_dislikes' => $this->nullableProfileText($profile['allergiesDislikes'] ?? null),
+            'past_diet_experience' => $this->nullableProfileText($profile['pastDietExperience'] ?? null),
+            'coach_notes' => $this->nullableProfileText($profile['coachNotes'] ?? null),
+            'bmr_kcal' => $calorieGoal['bmrKcal'],
+            'tdee_kcal' => $calorieGoal['tdeeKcal'],
+            'daily_intake_goal_kcal' => $calorieGoal['dailyIntakeGoalKcal'],
+            'daily_deficit_kcal' => $calorieGoal['dailyDeficitKcal'],
+        ];
+    }
+
+    private function resolveActiveRecordDate(DateTimeImmutable $today): ?DateTimeImmutable
+    {
+        // 期間未指定かつ直前登録がある場合のフォールバック用。
+        // 明示期間・「最近」ヒントより優先度は低い（Resolver 側の順序で制御）。
+        $todayMeals = $this->mealEntryRepository->findBetween(
+            $today->format('Y-m-d'),
+            $today->format('Y-m-d'),
+        );
+        if ($todayMeals !== []) {
+            return $today;
+        }
+
+        return null;
+    }
+
     private function buildProfileActionSummary(): string
     {
         $profile = $this->userProfileRepository->get();
@@ -333,287 +411,44 @@ TEXT;
             $lines[] = '目標摂取カロリー: ' . $calorieGoal['dailyIntakeGoalKcal'] . 'kcal/日';
         }
 
-        $lines[] = '目標体重: ' . $this->formatNullableNumber($profile['targetWeightKg'], 'kg');
-        $lines[] = '目標ペース: ' . $this->formatNullableNumber($profile['targetPaceKgPerMonth'], 'kg/月');
+        $lines[] = '目標体重: ' . $this->formatNullableNumber($profile['targetWeightKg'] ?? null, 'kg');
+        $lines[] = '目標ペース: ' . $this->formatNullableNumber($profile['targetPaceKgPerMonth'] ?? null, 'kg/月');
 
         return implode("\n", $lines);
     }
 
     /**
-     * 直近のユーザー発言にもプロフィール要点を付与し、モデルの注意を引く。
-     *
-     * @param array<int, array{role: string, content: string}> $messages
-     * @return array<int, array{role: string, content: string}>
+     * @param array<string, mixed> $authoritative
+     * @param array{history_count_before: int, history_count_after: int, excluded_count: int} $sanitized
      */
-    private function injectProfileReminderIntoMessages(array $messages): array
-    {
-        $profile = $this->userProfileRepository->get();
-        $desiredDietMethod = $this->nullableProfileText($profile['desiredDietMethod'] ?? null);
-        if ($desiredDietMethod === null) {
-            return $messages;
-        }
+    private function logScopeResolution(
+        string $userQuestion,
+        RecordQueryScope $scope,
+        array $authoritative,
+        array $sanitized,
+    ): void {
+        $questionPreview = mb_substr(preg_replace("/\s+/u", ' ', $userQuestion) ?? $userQuestion, 0, 80);
+        $payload = [
+            'event' => 'ai_chat_record_scope_resolved',
+            'scope_type' => $scope->type->value,
+            'start_date' => $scope->startDateString(),
+            'end_date' => $scope->endDateString(),
+            'original_expression' => $scope->originalExpression,
+            'question_preview' => $questionPreview,
+            'meal_count' => (int) ($authoritative['meal_count'] ?? 0),
+            'history_count_before' => $sanitized['history_count_before'],
+            'history_count_after' => $sanitized['history_count_after'],
+            'excluded_count' => $sanitized['excluded_count'],
+            'daily_record_days' => count($authoritative['daily_records'] ?? []),
+            'authoritative_json_bytes' => strlen((string) ($authoritative['json'] ?? '')),
+        ];
 
-        $lastIndex = array_key_last($messages);
-        if ($lastIndex === null || ($messages[$lastIndex]['role'] ?? '') !== 'user') {
-            return $messages;
-        }
-
-        $messages[$lastIndex]['content'] .= "\n\n"
-            . '【参照用・プロフィール登録済み】やりたいダイエット方法: '
-            . $desiredDietMethod;
-
-        return $messages;
-    }
-
-    /**
-     * @param array{
-     *   current: float|null,
-     *   diffFromPreviousDay: float|null,
-     *   recordedOn: string,
-     *   referenceWeight?: float|null,
-     *   referenceRecordedOn?: string|null
-     * } $summary
-     */
-    private function formatTodayWeight(array $summary): string
-    {
-        if ($summary['current'] !== null) {
-            $line = '- 体重: ' . $summary['current'] . 'kg';
-            if ($summary['diffFromPreviousDay'] !== null) {
-                $diff = $summary['diffFromPreviousDay'];
-                $sign = $diff > 0 ? '+' : '';
-                $line .= '（前日比 ' . $sign . $diff . 'kg）';
-            }
-
-            return $line;
-        }
-
-        if (($summary['referenceWeight'] ?? null) !== null) {
-            return '- 体重: 今日は未記録（参考: ' . $summary['referenceWeight'] . 'kg / '
-                . ($summary['referenceRecordedOn'] ?? '不明') . '）';
-        }
-
-        return '- 体重: 未記録';
-    }
-
-    /**
-     * @param array<int, array{id: string, name: string, calories: int, items: array<int, array<string, mixed>>}> $sections
-     */
-    private function formatTodayMeals(array $sections): string
-    {
-        $lines = ['- 食事:'];
-        $totalCalories = 0;
-        $hasItems = false;
-
-        foreach ($sections as $section) {
-            $items = $section['items'] ?? [];
-            if ($items === []) {
-                continue;
-            }
-
-            $hasItems = true;
-            $sectionCalories = (int) ($section['calories'] ?? 0);
-            $totalCalories += $sectionCalories;
-            $itemLabels = array_map(
-                function (array $item): string {
-                    $label = ($item['label'] ?? '') . ' ' . ($item['calories'] ?? 0) . 'kcal';
-                    $parts = [];
-                    if (isset($item['amount'], $item['unit']) && $item['amount'] !== null && $item['unit'] !== null) {
-                        $parts[] = $item['amount'] . $item['unit'];
-                    }
-                    if (($item['proteinG'] ?? null) !== null) {
-                        $parts[] = 'P' . $item['proteinG'] . 'g';
-                    }
-                    if (($item['confidence'] ?? null) === 'low') {
-                        $parts[] = '低信頼度';
-                    }
-                    if (($item['caloriesEdited'] ?? false) === true) {
-                        $parts[] = '手修正';
-                    }
-
-                    return $parts === [] ? $label : $label . '（' . implode('、', $parts) . '）';
-                },
-                $items
-            );
-            $lines[] = '  - ' . ($section['name'] ?? $section['id']) . ': ' . $sectionCalories . 'kcal（'
-                . implode('、', $itemLabels) . '）';
-        }
-
-        if (!$hasItems) {
-            return '- 食事: 未記録';
-        }
-
-        $lines[] = '  - 合計: ' . $totalCalories . 'kcal';
-
-        return implode("\n", $lines);
-    }
-
-    /**
-     * @param array<string, mixed>|null $summary
-     */
-    private function formatNutritionSummary(?array $summary, string $title): string
-    {
-        if ($summary === null || (int) ($summary['mealEntryCount'] ?? 0) === 0) {
-            return '- ' . $title . ': 未記録';
-        }
-
-        $lines = ['- ' . $title . ':'];
-        $lines[] = '  - 合計: ' . ($summary['totalKcal'] ?? 0) . 'kcal（朝'
-            . ($summary['breakfastKcal'] ?? 0) . ' / 昼' . ($summary['lunchKcal'] ?? 0)
-            . ' / 夜' . ($summary['dinnerKcal'] ?? 0) . ' / 間食' . ($summary['snackKcal'] ?? 0) . '）';
-
-        $pfcParts = [];
-        if (($summary['totalProteinG'] ?? null) !== null) {
-            $pfcParts[] = 'P' . $summary['totalProteinG'] . 'g';
-        }
-        if (($summary['totalFatG'] ?? null) !== null) {
-            $pfcParts[] = 'F' . $summary['totalFatG'] . 'g';
-        }
-        if (($summary['totalCarbsG'] ?? null) !== null) {
-            $pfcParts[] = 'C' . $summary['totalCarbsG'] . 'g';
-        }
-        if ($pfcParts !== []) {
-            $known = (int) ($summary['pfcKnownEntryCount'] ?? 0);
-            $total = (int) ($summary['mealEntryCount'] ?? 0);
-            if ($known < $total) {
-                $lines[] = '  - PFC（部分合計のみ・総摂取ではない・' . $known . '/' . $total
-                    . '件にデータあり）: ' . implode(' / ', $pfcParts);
-                $lines[] = '  - 注意: PFC不完全のため総タンパク量などと断定禁止。不足を伝えkcal中心で話すこと';
-            } else {
-                $lines[] = '  - PFC（' . $known . '/' . $total . '件にデータあり・全日分）: '
-                    . implode(' / ', $pfcParts);
-            }
-        } else {
-            $lines[] = '  - PFC: データ不足（null は0扱いしない）。総摂取と断定せずkcal中心で話すこと';
-        }
-
-        if (($summary['summaryText'] ?? null) !== null && trim((string) $summary['summaryText']) !== '') {
-            $lines[] = '  - メモ: ' . trim((string) $summary['summaryText']);
-        }
-
-        return implode("\n", $lines);
-    }
-
-    /**
-     * @param array<int, array<string, mixed>> $summaries
-     */
-    private function formatRecentNutritionSummaries(array $summaries): string
-    {
-        if ($summaries === []) {
-            return '- 食事サマリー: データなし';
-        }
-
-        $lines = ['- 食事サマリー（日次）:'];
-        foreach ($summaries as $summary) {
-            $date = (string) ($summary['recordedOn'] ?? '');
-            $kcal = (int) ($summary['totalKcal'] ?? 0);
-            $snack = (int) ($summary['snackKcal'] ?? 0);
-            $pfcKnown = (int) ($summary['pfcKnownEntryCount'] ?? 0);
-            $entryCount = (int) ($summary['mealEntryCount'] ?? 0);
-            $line = '  - ' . $date . ': ' . $kcal . 'kcal';
-            if ($kcal > 0 && $snack > 0) {
-                $line .= '（間食' . $snack . 'kcal）';
-            }
-            if ($entryCount > 0) {
-                $line .= ' / PFCデータ' . $pfcKnown . '件';
-            }
-            $lines[] = $line;
-        }
-
-        return implode("\n", $lines);
-    }
-
-    /**
-     * @param array{count: int, burnedCalories: int} $steps
-     */
-    private function formatTodaySteps(array $steps): string
-    {
-        if (($steps['count'] ?? 0) <= 0) {
-            return '- 歩数: 未記録';
-        }
-
-        return '- 歩数: ' . $steps['count'] . '歩（推定消費 ' . $steps['burnedCalories'] . 'kcal）';
-    }
-
-    /**
-     * @param array{entries: array<int, array{name: string, amount: int, unit: string, burnedCalories: int}>, burnedCalories: int} $exercises
-     */
-    private function formatTodayExercises(array $exercises): string
-    {
-        $entries = $exercises['entries'] ?? [];
-        if ($entries === []) {
-            return '- 運動: 未記録';
-        }
-
-        $lines = ['- 運動:'];
-        foreach ($entries as $entry) {
-            $unitLabel = ($entry['unit'] ?? '') === 'rep' ? '回' : '分';
-            $lines[] = '  - ' . ($entry['name'] ?? '運動') . ' ' . ($entry['amount'] ?? 0) . $unitLabel
-                . ' / 約' . ($entry['burnedCalories'] ?? 0) . 'kcal';
-        }
-        $lines[] = '  - 合計消費: ' . ($exercises['burnedCalories'] ?? 0) . 'kcal';
-
-        return implode("\n", $lines);
-    }
-
-    /**
-     * @param array<int, array{label: string, value: float|null, date?: string}> $points
-     */
-    private function formatRecentWeight(array $points): string
-    {
-        $recorded = array_values(array_filter(
-            $points,
-            static fn (array $point): bool => ($point['value'] ?? null) !== null
-        ));
-
-        if ($recorded === []) {
-            return '- 体重推移: 記録なし';
-        }
-
-        $parts = array_map(
-            static fn (array $point): string => ($point['label'] ?? '') . ' ' . $point['value'] . 'kg',
-            $recorded
-        );
-
-        return '- 体重推移: ' . implode(' → ', $parts);
-    }
-
-    /**
-     * @param array<int, array{label: string, value: int, date?: string}> $points
-     */
-    private function formatRecentMetric(string $label, array $points, string $unit): string
-    {
-        $nonZero = array_values(array_filter(
-            $points,
-            static fn (array $point): bool => ($point['value'] ?? 0) > 0
-        ));
-
-        if ($nonZero === []) {
-            return '- ' . $label . ': 記録なし';
-        }
-
-        $parts = array_map(
-            static fn (array $point): string => ($point['label'] ?? '') . ' ' . $point['value'] . $unit,
-            $nonZero
-        );
-
-        $values = array_column($nonZero, 'value');
-        $average = (int) round(array_sum($values) / count($values));
-
-        return '- ' . $label . ': ' . implode(' / ', $parts) . '（平均 ' . $average . $unit . '）';
+        error_log('[ai_chat_record_scope] ' . json_encode($payload, JSON_UNESCAPED_UNICODE));
     }
 
     private function formatNullableNumber(?float $value, string $unit): string
     {
         return $value === null ? '未設定' : $value . $unit;
-    }
-
-    private function formatProfileText(?string $value): string
-    {
-        if ($value === null || $value === '') {
-            return '未設定';
-        }
-
-        return $value . '（ユーザー登録）';
     }
 
     private function nullableProfileText(?string $value): ?string
@@ -647,8 +482,6 @@ TEXT;
     }
 
     /**
-     * Anthropic Messages API へストリームリクエストを送り、テキストデルタを処理する。
-     *
      * @param array<string, mixed> $payload
      * @param callable(string): void|null $onDelta
      */
@@ -676,7 +509,7 @@ TEXT;
                 'Content-Type: application/json',
                 'Accept: text/event-stream',
                 'x-api-key: ' . $apiKey,
-                'anthropic-version: 2023-06-01',
+                'anthropic-version: ' . '2023-06-01',
             ],
             CURLOPT_POSTFIELDS => json_encode($payload, JSON_UNESCAPED_UNICODE),
             CURLOPT_WRITEFUNCTION => static function (

@@ -455,6 +455,75 @@ final class MealEntryRepository
     }
 
     /**
+     * 指定期間の食事エントリを日付順で返す（AIチャットの正式記録ソース）。
+     *
+     * @return list<array{
+     *   id: int,
+     *   recordedOn: string,
+     *   mealType: string,
+     *   foodName: string,
+     *   calories: int,
+     *   amount: float|null,
+     *   unit: string|null,
+     *   proteinG: float|null,
+     *   fatG: float|null,
+     *   carbsG: float|null,
+     *   calorieSource: string|null,
+     *   confidence: string|null,
+     *   rawInput: string|null
+     * }>
+     */
+    public function findBetween(string $startDate, string $endDate): array
+    {
+        $timezone = new DateTimeZone('Asia/Tokyo');
+        $start = new DateTimeImmutable($startDate, $timezone);
+        $end = new DateTimeImmutable($endDate, $timezone);
+        if ($start > $end) {
+            return [];
+        }
+
+        $statement = $this->db->prepare(
+            'SELECT id, recorded_on, meal_type, food_name, calories_kcal, amount, unit,
+                    protein_g, fat_g, carbs_g, calorie_source, confidence, raw_input
+             FROM meal_entries
+             WHERE user_id = :user_id AND recorded_on BETWEEN :start AND :end
+             ORDER BY recorded_on ASC, id ASC'
+        );
+        $statement->execute([
+            'user_id' => $this->userId,
+            'start' => $start->format('Y-m-d'),
+            'end' => $end->format('Y-m-d'),
+        ]);
+
+        $rows = [];
+        foreach ($statement->fetchAll() as $row) {
+            $rows[] = [
+                'id' => (int) $row['id'],
+                'recordedOn' => (string) $row['recorded_on'],
+                'mealType' => (string) $row['meal_type'],
+                'foodName' => (string) $row['food_name'],
+                'calories' => (int) $row['calories_kcal'],
+                'amount' => isset($row['amount']) && $row['amount'] !== null ? (float) $row['amount'] : null,
+                'unit' => isset($row['unit']) && $row['unit'] !== null ? (string) $row['unit'] : null,
+                'proteinG' => isset($row['protein_g']) && $row['protein_g'] !== null ? (float) $row['protein_g'] : null,
+                'fatG' => isset($row['fat_g']) && $row['fat_g'] !== null ? (float) $row['fat_g'] : null,
+                'carbsG' => isset($row['carbs_g']) && $row['carbs_g'] !== null ? (float) $row['carbs_g'] : null,
+                'calorieSource' => isset($row['calorie_source']) && $row['calorie_source'] !== null
+                    ? (string) $row['calorie_source']
+                    : null,
+                'confidence' => isset($row['confidence']) && $row['confidence'] !== null
+                    ? (string) $row['confidence']
+                    : null,
+                'rawInput' => isset($row['raw_input']) && $row['raw_input'] !== null
+                    ? (string) $row['raw_input']
+                    : null,
+            ];
+        }
+
+        return $rows;
+    }
+
+    /**
      * @return array<int, array{label: string, value: int, date: string}>
      */
     public function getDailyTotalsBetween(string $startDate, string $endDate): array
