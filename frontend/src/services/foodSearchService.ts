@@ -243,11 +243,16 @@ function buildEstimateDisplayName(
   }
 
   const hasWeight = assumedWeightG != null && assumedWeightG > 0;
-  if (hasWeight) {
-    return `${displayBaseName} ${assumedWeightG}g`;
+  if (!hasWeight) {
+    return displayBaseName;
   }
 
-  return displayBaseName;
+  // 入力側に既に g 表記がある場合は推定重量を重ねない
+  if (/\d+(?:\.\d+)?\s*g$/i.test(displayBaseName.trim())) {
+    return displayBaseName;
+  }
+
+  return `${displayBaseName} ${assumedWeightG}g`;
 }
 
 function resolveWebSearchSource(

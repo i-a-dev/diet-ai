@@ -19,7 +19,7 @@ export function TabBar({ active, onChange }: TabBarProps) {
         display: "flex",
         borderTop: "1px solid #F0F0F0",
         background: "#fff",
-        paddingBottom: 15,
+        paddingBottom: 22,
         paddingTop: 10,
       }}
     >
