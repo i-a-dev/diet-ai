@@ -35,7 +35,7 @@ export function ExerciseRegisterSheet({
   onSave,
 }: ExerciseRegisterSheetProps) {
   const [name, setName] = useState("");
-  const [amount, setAmount] = useState<number>(30);
+  const [amount, setAmount] = useState<number | null>(null);
   const [unit, setUnit] = useState<ExerciseUnit>("min");
   const [history, setHistory] = useState<ExerciseHistoryEntry[]>([]);
   const [historyError, setHistoryError] = useState<string | null>(null);
@@ -59,7 +59,7 @@ export function ExerciseRegisterSheet({
   useEffect(() => {
     if (!open) return;
     setName("");
-    setAmount(30);
+    setAmount(null);
     setUnit("min");
     setHistoryError(null);
     clearPreview();
@@ -84,7 +84,8 @@ export function ExerciseRegisterSheet({
   }, [open]);
 
   const trimmedName = name.trim();
-  const isValid = trimmedName.length > 0 && amount > 0 && amount <= 10000;
+  const isValid =
+    trimmedName.length > 0 && amount !== null && amount > 0 && amount <= 10000;
   const previewReady =
     preview !== null && !isPreviewLoading && previewError === null;
   const historyReady =
@@ -143,7 +144,7 @@ export function ExerciseRegisterSheet({
   };
 
   const handleCalculatePreview = () => {
-    if (!isValid || isPreviewLoading || isSaving) return;
+    if (!isValid || amount === null || isPreviewLoading || isSaving) return;
     requestPreview(trimmedName, amount, unit);
   };
 
@@ -159,7 +160,7 @@ export function ExerciseRegisterSheet({
   };
 
   const handleSave = () => {
-    if (!canSave || isSaving) return;
+    if (!canSave || amount === null || isSaving) return;
     // 変更: 登録名はユーザー入力を使い、計算の根拠は note/source で示す。
     void onSave({ name: trimmedName, amount, unit });
   };
@@ -177,7 +178,7 @@ export function ExerciseRegisterSheet({
               setName(event.target.value);
               clearPreview();
             }}
-            placeholder="例：ウォーキング、スクワット、ランニング"
+            placeholder="例：スクワット、ランニング"
             style={inputStyle}
           />
 
@@ -187,12 +188,19 @@ export function ExerciseRegisterSheet({
               type="number"
               min={1}
               max={10000}
-              value={Number.isNaN(amount) ? "" : amount}
+              value={amount ?? ""}
+              placeholder="例：30"
               onChange={(event) => {
-                const next = Number(event.target.value);
+                const raw = event.target.value;
+                if (raw === "") {
+                  setAmount(null);
+                  clearPreview();
+                  return;
+                }
+                const next = Number(raw);
                 setAmount(
                   Number.isNaN(next)
-                    ? 1
+                    ? null
                     : Math.max(1, Math.min(10000, Math.round(next))),
                 );
                 clearPreview();
