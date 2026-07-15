@@ -67,15 +67,32 @@ final class AiWebSearchService
 
         $diagnostics->setPlan($plan);
 
+        // 一時無効: 自炊判定でも AI Web 検索を続ける
         if ($plan->searchMode === 'no_web_search') {
-            $response = [
-                'web_search_status' => 'no_web_search',
-                'fallback_to_existing_estimate' => true,
-            ];
-            $diagnostics->setStoppedReason('no_web_search');
-            $diagnostics->log();
-
-            return $response;
+            // $response = [
+            //     'web_search_status' => 'no_web_search',
+            //     'fallback_to_existing_estimate' => true,
+            // ];
+            // $diagnostics->setStoppedReason('no_web_search');
+            // $diagnostics->log();
+            //
+            // return $response;
+            $plan = new FoodWebSearchPlan(
+                isFood: $plan->isFood,
+                normalizedProductName: $plan->normalizedProductName !== ''
+                    ? $plan->normalizedProductName
+                    : $trimmed,
+                brandName: $plan->brandName,
+                productType: $plan->productType === 'homemade_food' ? 'prepared_food' : $plan->productType,
+                likelyHasVariants: $plan->likelyHasVariants,
+                variantDimension: $plan->variantDimension,
+                expectedLabels: $plan->expectedLabels,
+                variantConfidence: $plan->variantConfidence,
+                searchMode: 'single_product',
+                queryTerms: $plan->queryTerms !== [] ? $plan->queryTerms : ['カロリー', '栄養成分'],
+            );
+            $diagnostics->addFallbackReason('homemade_guard_disabled');
+            $diagnostics->setPlan($plan);
         }
 
         $verifiedCandidates = $this->collectVerifiedCandidates($trimmed, $plan, $budget, $diagnostics);

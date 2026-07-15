@@ -138,9 +138,10 @@ final class CalorieEstimateService
 
     private function estimateWithWebSearchFlow(string $trimmed, string $apiKey): array
     {
-        if ($this->looksLikeHomeCookedMeal($trimmed)) {
-            throw new RuntimeException('商品検索ではなく通常のAI推定をご利用ください。');
-        }
+        // 一時無効: 「鶏もも」+「焼き」等で市販メニューが自炊誤判定されるため
+        // if ($this->looksLikeHomeCookedMeal($trimmed)) {
+        //     throw new RuntimeException('商品検索ではなく通常のAI推定をご利用ください。');
+        // }
 
         $result = $this->resolveAiWebSearchService()->search($trimmed, $apiKey);
 
