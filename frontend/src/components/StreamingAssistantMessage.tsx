@@ -7,15 +7,19 @@ import {
 } from "react";
 import { AssistantMessageEnter } from "./AssistantMessageEnter.tsx";
 import { BubbleCoach } from "./BubbleCoach.tsx";
+import { ChatMarkdown } from "./ChatMarkdown.tsx";
 import { CoachAvatar } from "./CoachAvatar.tsx";
 import {
   createStreamReveal,
   type StreamRevealController,
 } from "../utils/streamReveal.ts";
 import {
-  createStreamingTextFilter,
-  type StreamingTextFilter,
-} from "../utils/streamingTextFilter.ts";
+  partitionAllBlocksOnComplete,
+  partitionCompletedBlocks,
+  syncFinalizedBlocks,
+  type FinalizedMarkdownBlock,
+} from "../utils/streamBlockParser.ts";
+import { createStreamingTextFilter } from "../utils/streamingTextFilter.ts";
 import type { ChatMessage } from "../api/client.ts";
 
 export type StreamingAssistantHandle = {
@@ -30,27 +34,52 @@ interface StreamingAssistantMessageProps {
   onScrollRequest: (options?: { force?: boolean }) => void;
 }
 
+const MemoizedMarkdownBlock = memo(function MemoizedMarkdownBlock({
+  source,
+}: {
+  source: string;
+}) {
+  return <ChatMarkdown content={source} />;
+});
+
+function visibleFromRaw(raw: string): string {
+  if (raw === "") {
+    return "";
+  }
+  const filter = createStreamingTextFilter();
+  let visible = "";
+  for (const unit of Array.from(raw)) {
+    visible += filter.push(unit);
+  }
+  return visible;
+}
+
 /**
  * ChatGPT 風ストリーミングバブル。
- * - ストリーミング中は Markdown を使わずプレーンテキストのみ（append-only）
- * - 高さ変化は ResizeObserver → 親の rAF スクロールへ委譲
- * - 返信完了後に親へ返し、履歴側で一度だけ ReactMarkdown する
+ * - 完成ブロックだけ ReactMarkdown（memo）
+ * - 末尾の未完成部分だけプレーン（記号はフィルターで非表示）
+ * - 返信完了時は全文差し替えせず、残りの active を最終ブロック確定するだけ
  */
 export const StreamingAssistantMessage = memo(function StreamingAssistantMessage({
   onReady,
   onSettled,
   onScrollRequest,
 }: StreamingAssistantMessageProps) {
-  const [plainText, setPlainText] = useState("");
+  const [finalizedBlocks, setFinalizedBlocks] = useState<
+    FinalizedMarkdownBlock[]
+  >([]);
+  const [activePlainText, setActivePlainText] = useState("");
   const [hasStarted, setHasStarted] = useState(false);
+  const [isComplete, setIsComplete] = useState(false);
 
   const revealRef = useRef<StreamRevealController | null>(null);
-  const filterRef = useRef<StreamingTextFilter>(createStreamingTextFilter());
   const prevDisplayedRef = useRef("");
   const pendingMessageRef = useRef<ChatMessage | null>(null);
   const settledRef = useRef(false);
+  const blockIdRef = useRef(0);
   const bubbleRef = useRef<HTMLDivElement>(null);
   const streamBodyRef = useRef<HTMLDivElement>(null);
+  const pendingFullTextRef = useRef<string | null>(null);
 
   const onSettledRef = useRef(onSettled);
   const onScrollRequestRef = useRef(onScrollRequest);
@@ -59,44 +88,44 @@ export const StreamingAssistantMessage = memo(function StreamingAssistantMessage
   onScrollRequestRef.current = onScrollRequest;
   onReadyRef.current = onReady;
 
+  const createBlockId = () => {
+    blockIdRef.current += 1;
+    return `md-block-${blockIdRef.current}`;
+  };
+
   useEffect(() => {
-    const filter = createStreamingTextFilter();
-    filterRef.current = filter;
     prevDisplayedRef.current = "";
+    blockIdRef.current = 0;
 
     const reveal = createStreamReveal({
       onUpdate: (displayed) => {
-        const prev = prevDisplayedRef.current;
-        const chunk = displayed.slice(prev.length);
         prevDisplayedRef.current = displayed;
 
-        let appended = "";
-        for (const unit of Array.from(chunk)) {
-          appended += filter.push(unit);
-        }
+        const { blocks, active } = partitionCompletedBlocks(displayed);
+        setFinalizedBlocks((previous) =>
+          syncFinalizedBlocks(previous, blocks, createBlockId),
+        );
+        setActivePlainText(visibleFromRaw(active));
 
-        if (appended !== "" || displayed !== "") {
+        if (displayed !== "") {
           setHasStarted(true);
         }
-        if (appended !== "") {
-          // append-only。一度出した文字は書き換えない
-          setPlainText((current) => current + appended);
-        }
-        // スクロールは ResizeObserver / 入場開始時のみ。ここでは呼ばない
       },
       onCaughtUp: (fullText) => {
         if (settledRef.current) {
           return;
         }
         settledRef.current = true;
-        const message = pendingMessageRef.current;
-        if (!message) {
-          return;
-        }
-        onSettledRef.current({
-          ...message,
-          content: fullText,
-        });
+        pendingFullTextRef.current = fullText;
+
+        // 全文差し替え禁止: 残りの active だけ最終ブロックへ確定
+        const allSources = partitionAllBlocksOnComplete(fullText);
+        setFinalizedBlocks((previous) =>
+          syncFinalizedBlocks(previous, allSources, createBlockId),
+        );
+        setActivePlainText("");
+        setHasStarted(true);
+        setIsComplete(true);
       },
     });
 
@@ -127,7 +156,28 @@ export const StreamingAssistantMessage = memo(function StreamingAssistantMessage
     };
   }, []);
 
-  // 高さ変化のみでスクロール予約（改行・折り返し・フォント描画）
+  // 最終ブロック確定後、同じ構造のまま履歴へコミット（コンテナ差し替えは親の責務だが MD 一括切替はしない）
+  useEffect(() => {
+    if (!isComplete) {
+      return;
+    }
+
+    const message = pendingMessageRef.current;
+    const fullText = pendingFullTextRef.current;
+    if (!message || fullText === null) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      onSettledRef.current({
+        ...message,
+        content: fullText,
+      });
+    }, 0);
+
+    return () => window.clearTimeout(timer);
+  }, [isComplete]);
+
   useEffect(() => {
     if (!hasStarted) {
       return;
@@ -138,7 +188,6 @@ export const StreamingAssistantMessage = memo(function StreamingAssistantMessage
       return;
     }
 
-    // 入場開始時に1回
     onScrollRequestRef.current();
 
     const observer = new ResizeObserver(() => {
@@ -160,12 +209,20 @@ export const StreamingAssistantMessage = memo(function StreamingAssistantMessage
   }
 
   return (
-    <AssistantMessageEnter animate>
+    <AssistantMessageEnter animate={!isComplete}>
       <CoachAvatar />
       <div style={bodyStyle}>
         <BubbleCoach ref={bubbleRef}>
-          <div ref={streamBodyRef} className="streaming-text">
-            {plainText}
+          <div
+            ref={streamBodyRef}
+            className="streaming-message-body chat-stream-body"
+          >
+            {finalizedBlocks.map((block) => (
+              <MemoizedMarkdownBlock key={block.id} source={block.source} />
+            ))}
+            {activePlainText !== "" ? (
+              <div className="streaming-text">{activePlainText}</div>
+            ) : null}
           </div>
         </BubbleCoach>
       </div>

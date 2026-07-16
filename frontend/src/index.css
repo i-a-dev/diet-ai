@@ -23,9 +23,10 @@ body {
 
 /*
  * ストリーミング（.streaming-text）と Markdown（.chat-markdown）で
- * フォント・行間・字間・余白を揃え、完了時の差し替えジャンプを抑える
+ * フォント・行間・字間・余白を揃え、ブロック確定時のジャンプを抑える
  */
 .chat-stream-body,
+.streaming-message-body,
 .chat-markdown,
 .streaming-text {
   font-family: inherit;
@@ -38,6 +39,12 @@ body {
   overflow-wrap: anywhere;
   margin: 0;
   padding: 0;
+}
+
+.streaming-message-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
 }
 
 .streaming-text {
@@ -65,18 +72,23 @@ body {
   margin-bottom: 0;
 }
 
+.chat-markdown p,
+.chat-markdown li,
+.chat-markdown blockquote {
+  font-family: inherit;
+  font-size: inherit;
+  line-height: 1.65;
+  letter-spacing: inherit;
+}
+
 .chat-markdown p {
   margin: 0;
-  font-size: inherit;
   font-weight: inherit;
-  line-height: inherit;
-  letter-spacing: inherit;
   color: inherit;
 }
 
-/* ストリーミングの空行（約 1 line-height）に近づける */
 .chat-markdown p + p {
-  margin-top: 1.65em;
+  margin-top: 1em;
 }
 
 .chat-markdown h1,
@@ -114,14 +126,38 @@ body {
 }
 
 .chat-markdown li {
-  margin: 0.2em 0;
+  margin: 0;
   font-size: inherit;
   line-height: inherit;
   letter-spacing: inherit;
 }
 
+.chat-markdown li + li {
+  margin-top: 0.2em;
+}
+
 .chat-markdown li > p {
   margin: 0;
+}
+
+.chat-markdown strong {
+  animation: markdown-emphasis-in 120ms ease-out;
+}
+
+@keyframes markdown-emphasis-in {
+  from {
+    opacity: 0.75;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-markdown strong {
+    animation: none;
+  }
 }
 
 .chat-markdown pre {
