@@ -271,6 +271,69 @@ function resolveWebSearchSource(
   return "ai_web_search";
 }
 
+function formatWebSearchOriginLabel(
+  source?: string | null,
+): "Brave" | "Claude Web Search" | "Alias DB" | "不明" {
+  switch (source) {
+    case "brave_html":
+      return "Brave";
+    case "claude_web_search":
+      return "Claude Web Search";
+    case "alias_db":
+      return "Alias DB";
+    default:
+      return "不明";
+  }
+}
+
+/** ブラウザ console で Brave / Claude 由来を確認できるようにする */
+function logAiWebSearchOrigin(
+  input: string,
+  estimate: CalorieEstimateResponse,
+): void {
+  const candidates = estimate.candidates ?? [];
+  if (estimate.needs_confirmation && candidates.length > 0) {
+    const origins = candidates.map((candidate) => ({
+      product_name: candidate.product_name,
+      kcal: candidate.kcal,
+      origin: formatWebSearchOriginLabel(candidate.source),
+      source: candidate.source,
+    }));
+    const uniqueOrigins = [...new Set(origins.map((item) => item.origin))];
+    console.log("[AI Web検索] 結果由来", {
+      input,
+      outcome: "needs_confirmation",
+      originSummary: uniqueOrigins.join(" / "),
+      web_search_status: estimate.web_search_status ?? null,
+      reason: estimate.reason ?? null,
+      variant_dimension: estimate.variant_dimension ?? null,
+      candidates: origins,
+    });
+    return;
+  }
+
+  if (estimate.kcal != null) {
+    console.log("[AI Web検索] 結果由来", {
+      input,
+      outcome: "confirmed",
+      origin: formatWebSearchOriginLabel(estimate.source),
+      source: estimate.source ?? null,
+      product_name: estimate.product_name ?? null,
+      kcal: estimate.kcal,
+      web_search_status: estimate.web_search_status ?? null,
+    });
+    return;
+  }
+
+  console.log("[AI Web検索] 結果由来", {
+    input,
+    outcome: "no_kcal",
+    origin: formatWebSearchOriginLabel(estimate.source),
+    source: estimate.source ?? null,
+    web_search_status: estimate.web_search_status ?? null,
+  });
+}
+
 function mapEstimateCandidate(
   candidate: CalorieEstimateCandidate,
 ): FoodSearchCandidate {
@@ -1120,6 +1183,7 @@ export async function runAiWebSearch(
     );
 
     const webEstimate = await estimateCalories(input, "web");
+    logAiWebSearchOrigin(input, webEstimate);
 
     emitProgress(
       onProgress,
@@ -1173,6 +1237,12 @@ export async function runAiWebSearch(
       error instanceof Error ? error.message : "商品情報検索に失敗しました";
 
     if (message.includes("通常のAI推定")) {
+      console.log("[AI Web検索] 結果由来", {
+        input,
+        outcome: "no_web_search_fallback",
+        origin: "なし（通常のAI推定へ）",
+        error: message,
+      });
       const fallbackEstimate = await estimateWithClaude(
         input,
         parseFoodInputByRegex(input),
@@ -1191,6 +1261,11 @@ export async function runAiWebSearch(
     );
   }
 
+  console.log("[AI Web検索] 結果由来", {
+    input,
+    outcome: "estimated_fallback",
+    origin: "なし（AI推定フォールバック）",
+  });
   const fallbackEstimate = await estimateWithClaude(
     input,
     parseFoodInputByRegex(input),
