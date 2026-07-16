@@ -10,14 +10,10 @@ export function shouldUseEstimateCard(
   result: FoodSearchResult,
   mode: FoodResultDisplayMode,
 ): boolean {
-  if (mode === "detail") {
+  // 詳細・履歴は source に関わらず推定カード（手入力 / 登録）を出す。
+  // 履歴で FatSecret 等だけ FoodSearchResultCard(detail) に落ちるとボタンが消えるため。
+  if (mode === "detail" || mode === "history") {
     return true;
-  }
-
-  if (mode === "history") {
-    return (
-      result.source === "claude_estimate" || result.source === "user_registered"
-    );
   }
 
   return result.source === "claude_estimate";
