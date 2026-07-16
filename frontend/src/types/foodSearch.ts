@@ -103,6 +103,7 @@ export interface FoodConfirmationCandidate {
   label: string;
   kcal: number;
   badge?: string | null;
+  sourceUrl?: string | null;
   aliasId?: number;
   webCandidate?: FoodSearchCandidate;
   localDbCandidate?: LocalDbSearchCandidate;

@@ -47,6 +47,7 @@ export function toWebConfirmationCandidates(
       label,
       kcal: candidate.kcal,
       badge: variantLabel !== "通常サイズ" ? variantLabel : null,
+      sourceUrl: candidate.source_url?.trim() || null,
       webCandidate: candidate,
     };
   });

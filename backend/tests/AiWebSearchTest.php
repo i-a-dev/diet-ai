@@ -8,6 +8,9 @@ require_once __DIR__ . '/../src/FoodVariantAnalyzer.php';
 require_once __DIR__ . '/../src/NutritionPageExtractor.php';
 require_once __DIR__ . '/../src/NutritionSearchQueryBuilder.php';
 require_once __DIR__ . '/../src/WebSearchBudget.php';
+require_once __DIR__ . '/../src/OfficialSiteBrandResolver.php';
+require_once __DIR__ . '/../src/ProductMatchResult.php';
+require_once __DIR__ . '/../src/ProductMatchEvaluator.php';
 require_once __DIR__ . '/../src/NutritionPageVariantExtractor.php';
 
 function assertTrue(bool $condition, string $message): void

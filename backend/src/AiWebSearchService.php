@@ -95,9 +95,16 @@ final class AiWebSearchService
             $diagnostics->setPlan($plan);
         }
 
-        $verifiedCandidates = $this->collectVerifiedCandidates($trimmed, $plan, $budget, $diagnostics);
+        $searchCandidates = $this->collectSearchCandidates($trimmed, $plan, $budget, $diagnostics);
+        $acceptedCandidates = $searchCandidates['accepted'];
+        $confirmationCandidates = $searchCandidates['confirmation'];
 
-        if ($verifiedCandidates === [] && $budget->canClaudeWebSearch() && $this->claudeWebSearchFallback !== null) {
+        if (
+            $acceptedCandidates === []
+            && $confirmationCandidates === []
+            && $budget->canClaudeWebSearch()
+            && $this->claudeWebSearchFallback !== null
+        ) {
             $budget->recordClaudeWebSearch();
             $fallbackResult = ($this->claudeWebSearchFallback)($trimmed, $apiKey);
             if (is_array($fallbackResult) && $fallbackResult !== []) {
@@ -109,7 +116,7 @@ final class AiWebSearchService
             }
         }
 
-        if ($verifiedCandidates === []) {
+        if ($acceptedCandidates === [] && $confirmationCandidates === []) {
             $response = [
                 'web_search_status' => 'estimated_fallback',
                 'message_code' => 'WEB_RESULT_NOT_FOUND',
@@ -122,7 +129,18 @@ final class AiWebSearchService
             return $response;
         }
 
-        $response = $this->formatResponse($trimmed, $plan, $verifiedCandidates, $diagnostics);
+        if ($acceptedCandidates === [] && $confirmationCandidates !== []) {
+            $response = $this->formatConfirmationOnlyResponse($plan, $confirmationCandidates, $diagnostics);
+            $this->cache->put($trimmed, [
+                'plan' => $plan->toArray(),
+                'response' => $response,
+            ]);
+            $diagnostics->log();
+
+            return $response;
+        }
+
+        $response = $this->formatResponse($trimmed, $plan, $acceptedCandidates, $diagnostics);
         $this->cache->put($trimmed, [
             'plan' => $plan->toArray(),
             'response' => $response,
@@ -133,9 +151,9 @@ final class AiWebSearchService
     }
 
     /**
-     * @return list<array<string, mixed>>
+     * @return array{accepted: list<array<string, mixed>>, confirmation: list<array<string, mixed>>}
      */
-    private function collectVerifiedCandidates(
+    private function collectSearchCandidates(
         string $userInput,
         FoodWebSearchPlan $plan,
         WebSearchBudget $budget,
@@ -144,7 +162,8 @@ final class AiWebSearchService
         $queries = $this->queryBuilder->build($plan, $userInput);
         /** @var array<string, array{title: string, url: string, description: string}> $mergedResults */
         $mergedResults = [];
-        $verified = [];
+        $accepted = [];
+        $confirmation = [];
 
         foreach ($queries as $query) {
             if (!$budget->shouldExecuteBraveQuery($query)) {
@@ -164,41 +183,45 @@ final class AiWebSearchService
                 }
             }
 
-            $verified = $this->mergeVerifiedCandidates(
-                $verified,
-                $this->extractFromRankedUrls(
-                    array_values($mergedResults),
-                    $plan,
-                    $budget,
-                    $userInput,
-                ),
-            );
-
-            if ($this->hasSufficientCandidates($verified, $plan)) {
-                $diagnostics->setStoppedReason('sufficient_variants');
-
-                return $verified;
-            }
-        }
-
-        if ($mergedResults === []) {
-            return [];
-        }
-
-        $verified = $this->mergeVerifiedCandidates(
-            $verified,
-            $this->extractFromRankedUrls(
+            $extracted = $this->extractFromRankedUrls(
                 array_values($mergedResults),
                 $plan,
                 $budget,
                 $userInput,
-            ),
-        );
+            );
+            $accepted = $this->mergeVerifiedCandidates($accepted, $extracted['accepted']);
+            $confirmation = $this->mergeConfirmationCandidates($confirmation, $extracted['confirmation']);
 
-        if ($this->hasSufficientCandidates($verified, $plan)) {
+            if ($this->hasSufficientCandidates($accepted, $plan)) {
+                $diagnostics->setStoppedReason('sufficient_variants');
+
+                return [
+                    'accepted' => $accepted,
+                    'confirmation' => $this->finalizeConfirmationCandidates($confirmation),
+                ];
+            }
+        }
+
+        if ($mergedResults === []) {
+            return ['accepted' => [], 'confirmation' => []];
+        }
+
+        $extracted = $this->extractFromRankedUrls(
+            array_values($mergedResults),
+            $plan,
+            $budget,
+            $userInput,
+        );
+        $accepted = $this->mergeVerifiedCandidates($accepted, $extracted['accepted']);
+        $confirmation = $this->mergeConfirmationCandidates($confirmation, $extracted['confirmation']);
+
+        if ($this->hasSufficientCandidates($accepted, $plan)) {
             $diagnostics->setStoppedReason('sufficient_variants');
 
-            return $verified;
+            return [
+                'accepted' => $accepted,
+                'confirmation' => $this->finalizeConfirmationCandidates($confirmation),
+            ];
         }
 
         while ($budget->canAdditionalBraveSearch()) {
@@ -220,26 +243,67 @@ final class AiWebSearchService
                 }
             }
 
-            $verified = $this->mergeVerifiedCandidates(
-                $verified,
-                $this->extractFromRankedUrls(
-                    array_values($mergedResults),
-                    $plan,
-                    $budget,
-                    $userInput,
-                ),
+            $extracted = $this->extractFromRankedUrls(
+                array_values($mergedResults),
+                $plan,
+                $budget,
+                $userInput,
             );
+            $accepted = $this->mergeVerifiedCandidates($accepted, $extracted['accepted']);
+            $confirmation = $this->mergeConfirmationCandidates($confirmation, $extracted['confirmation']);
 
-            if ($this->hasSufficientCandidates($verified, $plan)) {
+            if ($this->hasSufficientCandidates($accepted, $plan)) {
                 $diagnostics->setStoppedReason('sufficient_variants');
 
-                return $verified;
+                return [
+                    'accepted' => $accepted,
+                    'confirmation' => $this->finalizeConfirmationCandidates($confirmation),
+                ];
             }
         }
 
-        $diagnostics->setStoppedReason($verified === [] ? 'no_candidates' : 'search_budget_exhausted');
+        $diagnostics->setStoppedReason(
+            $accepted === [] && $confirmation === [] ? 'no_candidates' : 'search_budget_exhausted',
+        );
 
-        return $verified;
+        return [
+            'accepted' => $accepted,
+            'confirmation' => $this->finalizeConfirmationCandidates($confirmation),
+        ];
+    }
+
+    /**
+     * @param list<array<string, mixed>> $existing
+     * @param list<array<string, mixed>> $incoming
+     * @return list<array<string, mixed>>
+     */
+    private function mergeConfirmationCandidates(array $existing, array $incoming): array
+    {
+        if ($incoming === []) {
+            return $existing;
+        }
+
+        if ($existing === []) {
+            return $incoming;
+        }
+
+        return array_merge($existing, $incoming);
+    }
+
+    /**
+     * @param list<array<string, mixed>> $candidates
+     * @return list<array<string, mixed>>
+     */
+    private function finalizeConfirmationCandidates(array $candidates): array
+    {
+        $prepared = [];
+        foreach ($candidates as $candidate) {
+            $prepared[] = array_merge($candidate, [
+                'match_score' => (float) ($candidate['match_score'] ?? 0),
+            ]);
+        }
+
+        return (new ProductMatchEvaluator())->finalizeConfirmationCandidates($prepared);
     }
 
     /**
@@ -262,7 +326,7 @@ final class AiWebSearchService
 
     /**
      * @param list<array{title: string, url: string, description: string}> $results
-     * @return list<array<string, mixed>>
+     * @return array{accepted: list<array<string, mixed>>, confirmation: list<array<string, mixed>>}
      */
     private function extractFromRankedUrls(
         array $results,
@@ -271,7 +335,8 @@ final class AiWebSearchService
         string $userInput,
     ): array {
         $ranked = $this->urlRanker->rank($results, $plan->normalizedProductName, $plan->brandName);
-        $verified = [];
+        $accepted = [];
+        $confirmation = [];
 
         foreach ($ranked as $entry) {
             if (!$budget->canFetchHtml($entry['url'])) {
@@ -294,20 +359,36 @@ final class AiWebSearchService
             );
 
             foreach ($extracted as $item) {
-                $verified[] = $this->toVerifiedCandidate(
+                $candidate = $this->toVerifiedCandidate(
                     $item,
                     $entry,
                     $userInput,
                     $plan,
                 );
+                $this->logProductMatch($candidate);
+
+                $decision = (string) ($item['matchDecision'] ?? ProductMatchResult::DECISION_ACCEPTED);
+                if ($decision === ProductMatchResult::DECISION_NEEDS_CONFIRMATION) {
+                    $confirmation[] = $candidate;
+                    continue;
+                }
+
+                if ($decision === ProductMatchResult::DECISION_REJECTED) {
+                    continue;
+                }
+
+                $accepted[] = $candidate;
             }
 
-            if ($this->hasSufficientCandidates($verified, $plan)) {
+            if ($this->hasSufficientCandidates($accepted, $plan)) {
                 break;
             }
         }
 
-        return $this->dedupeVerifiedCandidates($verified);
+        return [
+            'accepted' => $this->dedupeVerifiedCandidates($accepted),
+            'confirmation' => $confirmation,
+        ];
     }
 
     /**
@@ -349,7 +430,7 @@ final class AiWebSearchService
 
         $source = $sourceType === 'claude_web_search' ? 'claude_web_search' : 'brave_html';
 
-        return [
+        $candidate = [
             'product_name' => $displayProductName,
             'brand' => $brandName,
             'kcal' => (int) ($item['kcal'] ?? 0),
@@ -368,6 +449,60 @@ final class AiWebSearchService
             'evidence_text' => $item['evidenceText'] ?? null,
             'verification_confidence' => $item['verificationConfidence'] ?? 'medium',
             'fetched_at' => gmdate('c'),
+            'match_decision' => $item['matchDecision'] ?? null,
+            'match_score' => $item['matchScore'] ?? null,
+            'match_reasons' => $item['matchReasons'] ?? null,
+        ];
+
+        return $candidate;
+    }
+
+    /**
+     * @param array<string, mixed> $candidate
+     */
+    private function logProductMatch(array $candidate): void
+    {
+        $reasons = $candidate['match_reasons'] ?? null;
+        if (!is_array($reasons)) {
+            $reasons = [
+                'query_product_name' => $candidate['base_product_name'] ?? null,
+                'query_brand_name' => $candidate['brand'] ?? null,
+                'candidate_product_name' => $candidate['product_name'] ?? null,
+                'page_title' => $candidate['source_title'] ?? null,
+                'url' => $candidate['source_url'] ?? null,
+                'decision' => $candidate['match_decision'] ?? null,
+                'total_score' => $candidate['match_score'] ?? null,
+            ];
+        }
+
+        error_log('[ai_web_search_product_match] ' . json_encode($reasons, JSON_UNESCAPED_UNICODE));
+    }
+
+    /**
+     * @param list<array<string, mixed>> $candidates
+     * @return array<string, mixed>
+     */
+    private function formatConfirmationOnlyResponse(
+        FoodWebSearchPlan $plan,
+        array $candidates,
+        WebSearchDiagnostics $diagnostics,
+    ): array {
+        $diagnostics->setFinalCandidateCount(count($candidates));
+        $diagnostics->setStoppedReason('sufficient_variants');
+        $diagnostics->addFallbackReason('product_match_needs_confirmation');
+
+        return [
+            'needs_confirmation' => true,
+            'reason' => 'identity_ambiguous',
+            'web_search_status' => 'needs_variant_confirmation',
+            'product_name' => $plan->normalizedProductName,
+            'variant_dimension' => $plan->variantDimension,
+            'allow_manual_variant' => true,
+            'allow_estimated_add' => true,
+            'candidates' => array_map(
+                fn (array $candidate): array => $this->formatCandidateForUi($candidate),
+                $candidates,
+            ),
         ];
     }
 

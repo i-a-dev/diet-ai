@@ -74,6 +74,7 @@ describe("toWebConfirmationCandidates", () => {
     ]);
 
     expect(visible[0]?.label).toBe("ナッシュ 和風おろしハンバーグ");
+    expect(visible[0]?.sourceUrl).toBe("https://nosh.jp/menu/detail/469");
     expect(visible[0]?.webCandidate?.source_url).toBe(
       "https://nosh.jp/menu/detail/469",
     );

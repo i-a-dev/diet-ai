@@ -46,26 +46,50 @@ export function ProductConfirmationCard({
       <div style={listStyle}>
         {candidates.map((candidate) => {
           const isSelected = selectedKey === candidate.key;
+          const sourceUrl =
+            candidate.sourceUrl?.trim() ||
+            candidate.webCandidate?.source_url?.trim() ||
+            null;
 
           return (
-            <button
+            <div
               key={candidate.key}
-              type="button"
+              role="button"
+              tabIndex={0}
               onClick={() => onSelect(candidate)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  onSelect(candidate);
+                }
+              }}
               style={{
                 ...candidateButtonStyle,
                 borderColor: isSelected ? ORANGE : "#DBEAFE",
                 boxShadow: isSelected ? "0 0 0 1px #F97316" : "none",
               }}
             >
-              <span style={candidateTextWrapStyle}>
-                {candidate.badge && (
-                  <span style={candidateBadgeStyle}>{candidate.badge}</span>
+              <span style={candidateMainStyle}>
+                <span style={candidateTextWrapStyle}>
+                  {candidate.badge && (
+                    <span style={candidateBadgeStyle}>{candidate.badge}</span>
+                  )}
+                  <span style={candidateNameStyle}>{candidate.label}</span>
+                </span>
+                {sourceUrl && (
+                  <a
+                    href={sourceUrl}
+                    target="_blank"
+                    rel="noreferrer noopener"
+                    onClick={(event) => event.stopPropagation()}
+                    style={sourceLinkStyle}
+                  >
+                    参照元を見る
+                  </a>
                 )}
-                <span style={candidateNameStyle}>{candidate.label}</span>
               </span>
               <span style={candidateKcalStyle}>{candidate.kcal} kcal</span>
-            </button>
+            </div>
           );
         })}
       </div>
@@ -154,6 +178,15 @@ const candidateTextWrapStyle: CSSProperties = {
   minWidth: 0,
 };
 
+const candidateMainStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  alignItems: "flex-start",
+  gap: 4,
+  minWidth: 0,
+  flex: 1,
+};
+
 const candidateBadgeStyle: CSSProperties = {
   flexShrink: 0,
   borderRadius: 999,
@@ -170,6 +203,14 @@ const candidateNameStyle: CSSProperties = {
   fontWeight: 600,
   color: "#111827",
   lineHeight: 1.4,
+};
+
+const sourceLinkStyle: CSSProperties = {
+  fontSize: 12,
+  fontWeight: 600,
+  color: "#047857",
+  textDecoration: "underline",
+  wordBreak: "break-all",
 };
 
 const candidateKcalStyle: CSSProperties = {

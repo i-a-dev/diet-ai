@@ -48,6 +48,7 @@ final class NutritionPageVariantExtractor
     public function __construct(
         private readonly FoodVariantAnalyzer $variantAnalyzer = new FoodVariantAnalyzer(),
         private readonly NutritionPageExtractor $pageExtractor = new NutritionPageExtractor(),
+        private readonly ProductMatchEvaluator $matchEvaluator = new ProductMatchEvaluator(),
     ) {
     }
 
@@ -63,7 +64,10 @@ final class NutritionPageVariantExtractor
      *   evidenceText: string|null,
      *   verificationConfidence: string,
      *   packageSize: string|null,
-     *   servingWeightG: int|null
+     *   servingWeightG: int|null,
+     *   matchDecision?: string,
+     *   matchScore?: float,
+     *   matchReasons?: array<string, mixed>
      * }>
      */
     public function extractFromHtml(
@@ -79,17 +83,25 @@ final class NutritionPageVariantExtractor
         }
 
         $baseProductName = $this->variantAnalyzer->extractBaseProductName($productName);
+        $pageTitle = $this->extractPageTitle($html);
+        $pageContext = [
+            'queryProductName' => $productName,
+            'queryBrandName' => $brandName,
+            'pageTitle' => $pageTitle,
+            'url' => $url,
+            'html' => $html,
+        ];
         $found = [];
 
-        $found = array_merge($found, $this->extractFromJsonLd($html, $baseProductName, $variantDimension));
-        $found = array_merge($found, $this->extractFromTables($html, $baseProductName, $variantDimension, $expectedLabels));
-        $found = array_merge($found, $this->extractFromDefinitionLists($html, $baseProductName, $variantDimension, $expectedLabels));
-        $found = array_merge($found, $this->extractFromText($html, $baseProductName, $variantDimension, $expectedLabels));
+        $found = array_merge($found, $this->extractFromJsonLd($html, $baseProductName, $variantDimension, $pageContext));
+        $found = array_merge($found, $this->extractFromTables($html, $baseProductName, $variantDimension, $expectedLabels, $pageContext));
+        $found = array_merge($found, $this->extractFromDefinitionLists($html, $baseProductName, $variantDimension, $expectedLabels, $pageContext));
+        $found = array_merge($found, $this->extractFromText($html, $baseProductName, $variantDimension, $expectedLabels, $pageContext));
 
         if ($found === []) {
             $found = array_merge(
                 $found,
-                $this->extractFromSingleProductPage($html, $productName, $baseProductName, $variantDimension, $url),
+                $this->extractFromSingleProductPage($html, $productName, $baseProductName, $variantDimension, $url, $pageContext),
             );
         }
 
@@ -97,6 +109,7 @@ final class NutritionPageVariantExtractor
     }
 
     /**
+     * @param array<string, mixed> $pageContext
      * @return list<array<string, mixed>>
      */
     private function extractFromSingleProductPage(
@@ -105,6 +118,7 @@ final class NutritionPageVariantExtractor
         string $baseProductName,
         string $variantDimension,
         string $url,
+        array $pageContext,
     ): array {
         $candidate = $this->pageExtractor->extractSingleProductCandidate($html, $productName, $url);
         if ($candidate === null) {
@@ -118,7 +132,15 @@ final class NutritionPageVariantExtractor
             . ' '
             . ($candidate['evidenceText'] ?? ''),
         );
-        if (!$this->rowMatchesProduct($context, $baseProductName)) {
+
+        $match = $this->matchEvaluator->evaluate(array_merge($pageContext, [
+            'candidateProductName' => (string) ($candidate['productName'] ?? $baseProductName),
+            'evidenceText' => $context,
+            'sourceType' => 'html_single_product',
+            'url' => $url,
+        ]));
+
+        if ($match->isRejected()) {
             return [];
         }
 
@@ -126,28 +148,36 @@ final class NutritionPageVariantExtractor
         $variantLabel = $packageSize ?? '通常サイズ';
 
         return [
-            $this->makeCandidate(
-                (string) $candidate['productName'],
-                (string) $candidate['productName'],
-                $variantLabel,
-                $variantDimension,
-                (int) $candidate['kcal'],
-                'html_single_product',
-                $candidate['evidenceText'] ?? null,
-                'high',
-                $packageSize,
-                isset($candidate['brandName']) && is_string($candidate['brandName'])
-                    ? $candidate['brandName']
-                    : null,
+            $this->attachMatchMeta(
+                $this->makeCandidate(
+                    (string) $candidate['productName'],
+                    (string) $candidate['productName'],
+                    $variantLabel,
+                    $variantDimension,
+                    (int) $candidate['kcal'],
+                    'html_single_product',
+                    $candidate['evidenceText'] ?? null,
+                    $match->isAccepted() ? 'high' : 'medium',
+                    $packageSize,
+                    isset($candidate['brandName']) && is_string($candidate['brandName'])
+                        ? $candidate['brandName']
+                        : null,
+                ),
+                $match,
             ),
         ];
     }
 
     /**
+     * @param array<string, mixed> $pageContext
      * @return list<array<string, mixed>>
      */
-    private function extractFromJsonLd(string $html, string $baseProductName, string $variantDimension): array
-    {
+    private function extractFromJsonLd(
+        string $html,
+        string $baseProductName,
+        string $variantDimension,
+        array $pageContext,
+    ): array {
         $found = [];
 
         if (preg_match_all('/<script[^>]+type=["\']application\/ld\+json["\'][^>]*>(.*?)<\/script>/isu', $html, $matches) < 1) {
@@ -172,15 +202,28 @@ final class NutritionPageVariantExtractor
                 }
 
                 $label = $this->extractLabelFromStructuredNode($node);
-                $found[] = $this->makeCandidate(
-                    $baseProductName,
-                    $baseProductName,
-                    $label,
-                    $variantDimension,
-                    $kcal,
-                    'html_table',
-                    (string) ($node['name'] ?? ''),
-                    'medium',
+                $nodeName = trim((string) ($node['name'] ?? $baseProductName));
+                $match = $this->matchEvaluator->evaluate(array_merge($pageContext, [
+                    'candidateProductName' => $nodeName !== '' ? $nodeName : $baseProductName,
+                    'evidenceText' => $nodeName . ' ' . $kcal . 'kcal',
+                    'sourceType' => 'html_table',
+                ]));
+                if ($match->isRejected()) {
+                    continue;
+                }
+
+                $found[] = $this->attachMatchMeta(
+                    $this->makeCandidate(
+                        $baseProductName,
+                        $baseProductName,
+                        $label,
+                        $variantDimension,
+                        $kcal,
+                        'html_table',
+                        (string) ($node['name'] ?? ''),
+                        $match->isAccepted() ? 'medium' : 'medium',
+                    ),
+                    $match,
                 );
             }
         }
@@ -223,6 +266,7 @@ final class NutritionPageVariantExtractor
 
     /**
      * @param list<string> $expectedLabels
+     * @param array<string, mixed> $pageContext
      * @return list<array<string, mixed>>
      */
     private function extractFromTables(
@@ -230,6 +274,7 @@ final class NutritionPageVariantExtractor
         string $baseProductName,
         string $variantDimension,
         array $expectedLabels,
+        array $pageContext,
     ): array {
         $found = [];
 
@@ -264,22 +309,29 @@ final class NutritionPageVariantExtractor
                     continue;
                 }
 
-                if (!$this->rowMatchesProduct($text, $baseProductName)) {
+                $rowProductName = $this->extractProductNameFromRow($text, $baseProductName);
+                $match = $this->matchEvaluator->evaluate(array_merge($pageContext, [
+                    'candidateProductName' => $rowProductName,
+                    'evidenceText' => $text,
+                    'sourceType' => 'html_table',
+                ]));
+                if ($match->isRejected()) {
                     continue;
                 }
 
-                $rowProductName = $this->extractProductNameFromRow($text, $baseProductName);
-
-                $found[] = $this->makeCandidate(
-                    $rowProductName,
-                    $this->variantAnalyzer->extractBaseProductName($rowProductName),
-                    $label ?? $packageSize,
-                    $variantDimension,
-                    $kcal,
-                    'html_table',
-                    mb_substr($text, 0, 120),
-                    $label !== null ? 'high' : 'medium',
-                    $packageSize,
+                $found[] = $this->attachMatchMeta(
+                    $this->makeCandidate(
+                        $rowProductName,
+                        $this->variantAnalyzer->extractBaseProductName($rowProductName),
+                        $label ?? $packageSize,
+                        $variantDimension,
+                        $kcal,
+                        'html_table',
+                        mb_substr($text, 0, 120),
+                        $match->isAccepted() ? ($label !== null ? 'high' : 'medium') : 'medium',
+                        $packageSize,
+                    ),
+                    $match,
                 );
             }
         }
@@ -289,6 +341,7 @@ final class NutritionPageVariantExtractor
 
     /**
      * @param list<string> $expectedLabels
+     * @param array<string, mixed> $pageContext
      * @return list<array<string, mixed>>
      */
     private function extractFromDefinitionLists(
@@ -296,6 +349,7 @@ final class NutritionPageVariantExtractor
         string $baseProductName,
         string $variantDimension,
         array $expectedLabels,
+        array $pageContext,
     ): array {
         $found = [];
 
@@ -316,20 +370,33 @@ final class NutritionPageVariantExtractor
             }
 
             $label = $this->detectVariantLabel($buffer, $variantDimension, $expectedLabels);
-            if ($label === null || !$this->rowMatchesProduct($buffer, $baseProductName)) {
+            if ($label === null) {
                 $buffer = '';
                 continue;
             }
 
-            $found[] = $this->makeCandidate(
-                $baseProductName,
-                $baseProductName,
-                $label,
-                $variantDimension,
-                $kcal,
-                'html_table',
-                mb_substr(trim($buffer), 0, 120),
-                'medium',
+            $match = $this->matchEvaluator->evaluate(array_merge($pageContext, [
+                'candidateProductName' => $baseProductName,
+                'evidenceText' => trim($buffer),
+                'sourceType' => 'html_table',
+            ]));
+            if ($match->isRejected()) {
+                $buffer = '';
+                continue;
+            }
+
+            $found[] = $this->attachMatchMeta(
+                $this->makeCandidate(
+                    $baseProductName,
+                    $baseProductName,
+                    $label,
+                    $variantDimension,
+                    $kcal,
+                    'html_table',
+                    mb_substr(trim($buffer), 0, 120),
+                    $match->isAccepted() ? 'medium' : 'medium',
+                ),
+                $match,
             );
             $buffer = '';
         }
@@ -339,6 +406,7 @@ final class NutritionPageVariantExtractor
 
     /**
      * @param list<string> $expectedLabels
+     * @param array<string, mixed> $pageContext
      * @return list<array<string, mixed>>
      */
     private function extractFromText(
@@ -346,6 +414,7 @@ final class NutritionPageVariantExtractor
         string $baseProductName,
         string $variantDimension,
         array $expectedLabels,
+        array $pageContext,
     ): array {
         $text = $this->normalizeWhitespace(strip_tags($html));
         $found = [];
@@ -375,7 +444,13 @@ final class NutritionPageVariantExtractor
                 }
 
                 $context = substr($text, max(0, $offset - 120), 240);
-                if (!$this->rowMatchesProduct($context, $baseProductName)) {
+                $rowProductName = $this->extractProductNameFromRow($context, $baseProductName);
+                $productMatch = $this->matchEvaluator->evaluate(array_merge($pageContext, [
+                    'candidateProductName' => $rowProductName,
+                    'evidenceText' => $context,
+                    'sourceType' => 'html_text',
+                ]));
+                if ($productMatch->isRejected()) {
                     continue;
                 }
 
@@ -393,18 +468,19 @@ final class NutritionPageVariantExtractor
                     continue;
                 }
 
-                $rowProductName = $this->extractProductNameFromRow($context, $baseProductName);
-
-                $found[] = $this->makeCandidate(
-                    $rowProductName,
-                    $this->variantAnalyzer->extractBaseProductName($rowProductName),
-                    $label,
-                    $variantDimension,
-                    $kcal,
-                    'html_text',
-                    mb_substr($context, 0, 120),
-                    'medium',
-                    $packageSize,
+                $found[] = $this->attachMatchMeta(
+                    $this->makeCandidate(
+                        $rowProductName,
+                        $this->variantAnalyzer->extractBaseProductName($rowProductName),
+                        $label,
+                        $variantDimension,
+                        $kcal,
+                        'html_text',
+                        mb_substr($context, 0, 120),
+                        $productMatch->isAccepted() ? 'medium' : 'medium',
+                        $packageSize,
+                    ),
+                    $productMatch,
                 );
             }
         }
@@ -579,84 +655,26 @@ final class NutritionPageVariantExtractor
         return $trimmed;
     }
 
-    private function rowMatchesProduct(string $text, string $baseProductName): bool
+    /**
+     * @param array<string, mixed> $candidate
+     * @return array<string, mixed>
+     */
+    private function attachMatchMeta(array $candidate, ProductMatchResult $match): array
     {
-        $normalizedText = mb_strtolower($text);
-        $core = mb_strtolower($this->variantAnalyzer->extractBaseProductName($baseProductName));
+        $candidate['matchDecision'] = $match->decision;
+        $candidate['matchScore'] = $match->score;
+        $candidate['matchReasons'] = $match->reasons;
 
-        if ($core === '') {
-            return true;
-        }
-
-        $tokens = preg_split('/\s+/u', $core) ?: [];
-        $matched = 0;
-        foreach ($tokens as $token) {
-            if (mb_strlen($token) >= 2 && mb_strpos($normalizedText, $token) !== false) {
-                $matched++;
-            }
-        }
-
-        if ($matched >= min(2, count($tokens))) {
-            return true;
-        }
-
-        $partialTokens = $this->extractProductPartialTokens($core);
-        if ($partialTokens !== []) {
-            foreach ($partialTokens as $token) {
-                if (mb_strpos($normalizedText, $token) === false) {
-                    return false;
-                }
-            }
-
-            return true;
-        }
-
-        $productMarkers = ['ポテト', '牛丼', 'カレー', 'ハンバーグ', 'ラーメン', 'うどん', 'コーラ', 'お茶', 'ビーフ', 'わさ'];
-        foreach ($productMarkers as $marker) {
-            if (mb_strpos($core, $marker) !== false && mb_strpos($normalizedText, $marker) !== false) {
-                return true;
-            }
-        }
-
-        return count($tokens) <= 1;
+        return $candidate;
     }
 
-    /**
-     * @return list<string>
-     */
-    private function extractProductPartialTokens(string $productName): array
+    private function extractPageTitle(string $html): string
     {
-        $tokens = [];
-        foreach ([
-            'ハンバーグ',
-            'チーズ',
-            'トマト',
-            'きのこ',
-            'デミ',
-            'チリ',
-            'おろし',
-            '和風',
-            'カレー',
-            'チキン',
-            'ビーフ',
-            'ポーク',
-            'ソース',
-            'ステーキ',
-            '唐揚げ',
-            'からあげ',
-            'ポテト',
-            'ラーメン',
-            'うどん',
-            'パスタ',
-            'バーガー',
-        ] as $token) {
-            $token = mb_strtolower($token);
-            if (mb_strpos($productName, $token) !== false && !in_array($token, $tokens, true)) {
-                $tokens[] = $token;
-            }
+        if (preg_match('/<title[^>]*>(.*?)<\/title>/isu', $html, $match) === 1) {
+            return trim(html_entity_decode(strip_tags($match[1]), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
         }
 
-        return count($tokens) >= 2 ? $tokens : [];
+        return '';
     }
 
     /**

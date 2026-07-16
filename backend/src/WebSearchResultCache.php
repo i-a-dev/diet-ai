@@ -10,7 +10,7 @@ final class WebSearchResultCache
     private const DEFAULT_TTL_SECONDS = 86400;
 
     /** 候補スキーマ変更時に上げて古いキャッシュを無効化する */
-    private const CACHE_SCHEMA_VERSION = 'v2';
+    private const CACHE_SCHEMA_VERSION = 'v3';
 
     public function __construct(
         private readonly string $cacheDir = '',
