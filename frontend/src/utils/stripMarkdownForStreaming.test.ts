@@ -30,9 +30,9 @@ describe("stripMarkdownForStreaming", () => {
   });
 
   it("strips fenced code markers and keeps content", () => {
-    expect(
-      stripMarkdownForStreaming("```js\nconst a = 1\n```"),
-    ).toBe("const a = 1");
+    expect(stripMarkdownForStreaming("```js\nconst a = 1\n```")).toBe(
+      "const a = 1\n",
+    );
     expect(stripMarkdownForStreaming("```js\nconst a = 1\n")).toBe(
       "const a = 1\n",
     );

@@ -1,4 +1,11 @@
-import { memo, useCallback, useEffect, useRef, useState } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { AssistantMessageEnter } from "../AssistantMessageEnter.tsx";
 import { BubbleCoach } from "../BubbleCoach.tsx";
 import { BubbleUser } from "../BubbleUser.tsx";
@@ -25,7 +32,9 @@ interface DisplayMessage extends ChatMessage {
 }
 
 const SCROLL_BOTTOM_THRESHOLD_PX = 48;
-const SCROLL_MIN_INTERVAL_MS = 60;
+const STREAM_RESUME_THRESHOLD_PX = 96;
+const INITIAL_SETTLE_DISTANCE_PX = 2;
+const INITIAL_SETTLE_TIMEOUT_MS = 180;
 
 function formatTime(date: Date): string {
   return date.toLocaleTimeString("ja-JP", {
@@ -63,14 +72,12 @@ function renderPlainText(content: string) {
 const AssistantHistoryMessage = memo(function AssistantHistoryMessage({
   message,
   animate,
-  onScrollRequest,
 }: {
   message: DisplayMessage;
   animate: boolean;
-  onScrollRequest: () => void;
 }) {
   return (
-    <AssistantMessageEnter animate={animate} onTick={onScrollRequest}>
+    <AssistantMessageEnter animate={animate}>
       <CoachAvatar />
       <div
         style={{
@@ -90,14 +97,12 @@ const AssistantHistoryMessage = memo(function AssistantHistoryMessage({
 const UserHistoryMessage = memo(function UserHistoryMessage({
   message,
   animate,
-  onScrollRequest,
 }: {
   message: DisplayMessage;
   animate: boolean;
-  onScrollRequest: () => void;
 }) {
   return (
-    <UserMessageEnter animate={animate} onTick={onScrollRequest}>
+    <UserMessageEnter animate={animate}>
       <BubbleUser>{renderPlainText(message.content)}</BubbleUser>
       <span style={{ fontSize: 11, color: "#C0C0C0" }}>
         {formatTime(message.createdAtDate)}
@@ -116,14 +121,32 @@ export function ChatScreen() {
   const [streamingKey, setStreamingKey] = useState<string | null>(null);
 
   const scrollRef = useRef<HTMLDivElement>(null);
+  const messagesContentRef = useRef<HTMLDivElement>(null);
   const initialMessageIdsRef = useRef<Set<number> | null>(null);
-  const shouldAutoScrollRef = useRef(true);
+
+  const shouldFollowBottomRef = useRef(true);
+  const isInitialScrollPendingRef = useRef(true);
+  const isProgrammaticScrollRef = useRef(false);
+  const userInterruptedFollowRef = useRef(false);
+  const isStreamingRef = useRef(false);
+  const isUserInteractingRef = useRef(false);
+  const isBootstrappingRef = useRef(true);
+
   const scrollFrameRef = useRef<number | null>(null);
-  const lastScrollAtRef = useRef(0);
+  const pendingForceScrollRef = useRef(false);
+  const programmaticClearFrameRef = useRef<number | null>(null);
+  const lastContentHeightRef = useRef(0);
+  const stableHeightFramesRef = useRef(0);
+  const initialSettleTimerRef = useRef<number | null>(null);
+  /** 初回履歴の初期下端追従を一度だけ開始したか */
+  const initialHistoryScrollStartedRef = useRef(false);
+
   const streamHandleRef = useRef<StreamingAssistantHandle | null>(null);
   const streamingKeyRef = useRef<string | null>(null);
   const pendingDeltasRef = useRef<string[]>([]);
   const pendingCompleteRef = useRef<ChatMessage | null>(null);
+
+  isBootstrappingRef.current = isBootstrapping;
 
   const pushDeltaToStream = useCallback((text: string) => {
     if (streamHandleRef.current) {
@@ -147,71 +170,121 @@ export function ChatScreen() {
       handle.cancel();
     }
     streamHandleRef.current = null;
+    isStreamingRef.current = false;
     pendingDeltasRef.current = [];
     pendingCompleteRef.current = null;
   }, []);
 
-  const isNearBottom = useCallback(() => {
-    const container = scrollRef.current;
-    if (!container) {
-      return true;
-    }
-    const distanceFromBottom =
-      container.scrollHeight - container.scrollTop - container.clientHeight;
-    return distanceFromBottom <= SCROLL_BOTTOM_THRESHOLD_PX;
+  const markUserInteracting = useCallback(() => {
+    isUserInteractingRef.current = true;
   }, []);
 
   /**
-   * 生成中のスクロールは instant のみ（smooth 不使用）。
-   * 文字更新とは分離し、最大 60ms に1回。
+   * スクロール要求を破棄しない。同一フレーム内は次の rAF で1回に統合。
+   * smooth / scrollIntoView は使わない。
    */
-  const scrollToBottom = useCallback(
-    (options?: { force?: boolean }) => {
-      const force = options?.force === true;
-
-      if (!force && !shouldAutoScrollRef.current) {
-        return;
-      }
-
-      const now = performance.now();
-      if (!force && now - lastScrollAtRef.current < SCROLL_MIN_INTERVAL_MS) {
-        return;
-      }
-
-      const container = scrollRef.current;
-      if (!container) {
-        return;
-      }
+  const scheduleScrollToBottom = useCallback(
+    ({ force = false }: { force?: boolean } = {}) => {
+      pendingForceScrollRef.current ||= force;
 
       if (scrollFrameRef.current !== null) {
-        window.cancelAnimationFrame(scrollFrameRef.current);
+        return;
       }
 
       scrollFrameRef.current = window.requestAnimationFrame(() => {
         scrollFrameRef.current = null;
-        const el = scrollRef.current;
-        if (!el) {
+
+        const container = scrollRef.current;
+        if (!container) {
+          pendingForceScrollRef.current = false;
           return;
         }
-        if (!force && !shouldAutoScrollRef.current) {
+
+        const shouldScroll =
+          pendingForceScrollRef.current ||
+          isInitialScrollPendingRef.current ||
+          (isStreamingRef.current && !userInterruptedFollowRef.current) ||
+          shouldFollowBottomRef.current;
+
+        pendingForceScrollRef.current = false;
+
+        if (!shouldScroll) {
           return;
         }
-        lastScrollAtRef.current = performance.now();
-        el.scrollTop = el.scrollHeight;
+
+        if (programmaticClearFrameRef.current !== null) {
+          window.cancelAnimationFrame(programmaticClearFrameRef.current);
+          programmaticClearFrameRef.current = null;
+        }
+
+        isProgrammaticScrollRef.current = true;
+        container.scrollTop = container.scrollHeight;
+
+        programmaticClearFrameRef.current = window.requestAnimationFrame(() => {
+          programmaticClearFrameRef.current = null;
+          isProgrammaticScrollRef.current = false;
+
+          const distanceFromBottom =
+            container.scrollHeight -
+            container.scrollTop -
+            container.clientHeight;
+
+          if (distanceFromBottom <= INITIAL_SETTLE_DISTANCE_PX) {
+            shouldFollowBottomRef.current = true;
+
+            if (
+              !isStreamingRef.current &&
+              !isBootstrappingRef.current &&
+              isInitialScrollPendingRef.current
+            ) {
+              const height = container.scrollHeight;
+              if (height === lastContentHeightRef.current) {
+                stableHeightFramesRef.current += 1;
+              } else {
+                lastContentHeightRef.current = height;
+                stableHeightFramesRef.current = 0;
+              }
+
+              if (stableHeightFramesRef.current >= 2) {
+                isInitialScrollPendingRef.current = false;
+                userInterruptedFollowRef.current = false;
+              }
+            }
+          } else if (isInitialScrollPendingRef.current) {
+            stableHeightFramesRef.current = 0;
+          }
+        });
       });
     },
     [],
   );
 
   const handleScroll = useCallback(() => {
-    shouldAutoScrollRef.current = isNearBottom();
-  }, [isNearBottom]);
-
-  const shouldAnimateAssistantMessage = useCallback((messageId: number) => {
-    if (initialMessageIdsRef.current === null) {
-      return false;
+    if (isProgrammaticScrollRef.current) {
+      return;
     }
-    return !initialMessageIdsRef.current.has(messageId);
+
+    const container = scrollRef.current;
+    if (!container) {
+      return;
+    }
+
+    const distanceFromBottom =
+      container.scrollHeight - container.scrollTop - container.clientHeight;
+    const isNearBottom = distanceFromBottom <= SCROLL_BOTTOM_THRESHOLD_PX;
+
+    if (!isUserInteractingRef.current) {
+      return;
+    }
+
+    shouldFollowBottomRef.current = isNearBottom;
+    userInterruptedFollowRef.current = !isNearBottom;
+
+    if (isNearBottom) {
+      userInterruptedFollowRef.current = false;
+      shouldFollowBottomRef.current = true;
+      isUserInteractingRef.current = false;
+    }
   }, []);
 
   const createWelcomeMessage = useCallback(
@@ -221,9 +294,23 @@ export function ChatScreen() {
       content: buildWelcomeMessage(targetWeightKg),
       createdAt: new Date().toISOString(),
       createdAtDate: new Date(),
+      animateEnter: false,
     }),
     [],
   );
+
+  // タブ再マウント時の追従状態初期化
+  useEffect(() => {
+    isInitialScrollPendingRef.current = true;
+    shouldFollowBottomRef.current = true;
+    userInterruptedFollowRef.current = false;
+    isProgrammaticScrollRef.current = false;
+    isStreamingRef.current = false;
+    isUserInteractingRef.current = false;
+    lastContentHeightRef.current = 0;
+    stableHeightFramesRef.current = 0;
+    initialHistoryScrollStartedRef.current = false;
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -240,7 +327,12 @@ export function ChatScreen() {
         }
 
         if (historyResponse.messages.length > 0) {
-          setMessages(historyResponse.messages.map(toDisplayMessage));
+          setMessages(
+            historyResponse.messages.map((message) => ({
+              ...toDisplayMessage(message),
+              animateEnter: false,
+            })),
+          );
           return;
         }
 
@@ -267,18 +359,108 @@ export function ChatScreen() {
 
   useEffect(() => {
     if (!isBootstrapping && initialMessageIdsRef.current === null) {
-      initialMessageIdsRef.current = new Set(messages.map((message) => message.id));
+      initialMessageIdsRef.current = new Set(
+        messages.map((message) => message.id),
+      );
     }
   }, [isBootstrapping, messages]);
 
+  // 初回履歴表示時のみ初期下端追従を開始（送信・settled の length 変化では再発火しない）
+  useLayoutEffect(() => {
+    if (isBootstrapping || messages.length === 0) {
+      return;
+    }
+    if (initialHistoryScrollStartedRef.current) {
+      return;
+    }
+    initialHistoryScrollStartedRef.current = true;
+    isInitialScrollPendingRef.current = true;
+    stableHeightFramesRef.current = 0;
+    lastContentHeightRef.current = 0;
+    scheduleScrollToBottom({ force: true });
+  }, [isBootstrapping, messages.length, scheduleScrollToBottom]);
+
+  // 履歴全体（+ストリーミング）の高さ変化を監視
   useEffect(() => {
-    scrollToBottom({ force: true });
-  }, [isBootstrapping, scrollToBottom]);
+    const content = messagesContentRef.current;
+    if (!content) {
+      return;
+    }
+
+    const observer = new ResizeObserver(() => {
+      if (isInitialScrollPendingRef.current) {
+        scheduleScrollToBottom({ force: true });
+        return;
+      }
+      scheduleScrollToBottom();
+    });
+
+    observer.observe(content);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [scheduleScrollToBottom]);
+
+  // 初期追従の最終確認（Markdown 遅延レイアウト用・初回のみ）
+  useEffect(() => {
+    if (isBootstrapping || messages.length === 0) {
+      return;
+    }
+    if (!isInitialScrollPendingRef.current) {
+      return;
+    }
+
+    if (initialSettleTimerRef.current !== null) {
+      window.clearTimeout(initialSettleTimerRef.current);
+    }
+
+    initialSettleTimerRef.current = window.setTimeout(() => {
+      initialSettleTimerRef.current = null;
+      if (!isInitialScrollPendingRef.current) {
+        return;
+      }
+
+      scheduleScrollToBottom({ force: true });
+
+      window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => {
+          const container = scrollRef.current;
+          if (!container || !isInitialScrollPendingRef.current) {
+            return;
+          }
+
+          const distance =
+            container.scrollHeight -
+            container.scrollTop -
+            container.clientHeight;
+
+          if (distance <= INITIAL_SETTLE_DISTANCE_PX) {
+            isInitialScrollPendingRef.current = false;
+            shouldFollowBottomRef.current = true;
+            userInterruptedFollowRef.current = false;
+            lastContentHeightRef.current = container.scrollHeight;
+            stableHeightFramesRef.current = 2;
+          }
+        });
+      });
+    }, INITIAL_SETTLE_TIMEOUT_MS);
+
+    return () => {
+      if (initialSettleTimerRef.current !== null) {
+        window.clearTimeout(initialSettleTimerRef.current);
+        initialSettleTimerRef.current = null;
+      }
+    };
+  }, [isBootstrapping, messages.length, scheduleScrollToBottom]);
 
   useEffect(() => {
     return () => {
       if (scrollFrameRef.current !== null) {
         window.cancelAnimationFrame(scrollFrameRef.current);
+      }
+      if (programmaticClearFrameRef.current !== null) {
+        window.cancelAnimationFrame(programmaticClearFrameRef.current);
       }
       abortActiveStream();
     };
@@ -304,6 +486,7 @@ export function ChatScreen() {
     const key = streamingKeyRef.current;
     streamingKeyRef.current = null;
     streamHandleRef.current = null;
+    isStreamingRef.current = false;
     setStreamingKey(null);
     setMessages((current) => [
       ...current,
@@ -314,7 +497,6 @@ export function ChatScreen() {
       },
     ]);
     setIsLoading(false);
-    // 返信完了時は強制スクロールしない
   }, []);
 
   const handleSend = async () => {
@@ -337,7 +519,22 @@ export function ChatScreen() {
       clientKey: userClientKey,
     };
 
-    shouldAutoScrollRef.current = true;
+    // AI返信開始: 下端付近なら追従を明示的に有効化
+    const container = scrollRef.current;
+    if (container) {
+      const distanceFromBottom =
+        container.scrollHeight - container.scrollTop - container.clientHeight;
+      if (distanceFromBottom <= STREAM_RESUME_THRESHOLD_PX) {
+        shouldFollowBottomRef.current = true;
+        userInterruptedFollowRef.current = false;
+      }
+    } else {
+      shouldFollowBottomRef.current = true;
+      userInterruptedFollowRef.current = false;
+    }
+
+    isStreamingRef.current = true;
+    isUserInteractingRef.current = false;
     streamingKeyRef.current = assistantClientKey;
     streamHandleRef.current = null;
     pendingDeltasRef.current = [];
@@ -347,7 +544,7 @@ export function ChatScreen() {
     setInput("");
     setError(null);
     setIsLoading(true);
-    scrollToBottom({ force: true });
+    scheduleScrollToBottom({ force: true });
 
     try {
       await sendChatMessageStream(trimmed, {
@@ -366,11 +563,9 @@ export function ChatScreen() {
           );
         },
         onDelta: (text) => {
-          // 親 setState はしない。専用バッファ／ハンドルへ積むだけ
           pushDeltaToStream(text);
         },
         onAssistantMessage: (assistantMessage) => {
-          // 全文への即時切替はしない。表示追いつき後に settled で一覧へ反映
           completeStream(assistantMessage);
         },
         onError: (message) => {
@@ -412,52 +607,58 @@ export function ChatScreen() {
       <div
         ref={scrollRef}
         onScroll={handleScroll}
+        onPointerDown={markUserInteracting}
+        onTouchStart={markUserInteracting}
+        onWheel={markUserInteracting}
+        className="chat-scroll-container"
         style={{
           flex: 1,
           padding: "14px 16px",
-          display: "flex",
-          flexDirection: "column",
-          gap: 14,
           overflowY: "auto",
           background: "#fff",
         }}
       >
-        {messages.map((message) =>
-          message.role === "assistant" ? (
-            <AssistantHistoryMessage
-              key={message.clientKey ?? message.id}
-              message={message}
-              animate={
-                message.animateEnter === true ||
-                (message.animateEnter !== false &&
-                  shouldAnimateAssistantMessage(message.id))
-              }
-              onScrollRequest={scrollToBottom}
-            />
-          ) : (
-            <UserHistoryMessage
-              key={message.clientKey ?? message.id}
-              message={message}
-              animate={message.animateEnter === true}
-              onScrollRequest={scrollToBottom}
-            />
-          ),
-        )}
+        <div
+          ref={messagesContentRef}
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 14,
+          }}
+        >
+          {messages.map((message) =>
+            message.role === "assistant" ? (
+              <AssistantHistoryMessage
+                key={message.clientKey ?? message.id}
+                message={message}
+                animate={message.animateEnter === true}
+              />
+            ) : (
+              <UserHistoryMessage
+                key={message.clientKey ?? message.id}
+                message={message}
+                animate={message.animateEnter === true}
+              />
+            ),
+          )}
 
-        {streamingKey ? (
-          <StreamingAssistantMessage
-            key={streamingKey}
-            onReady={handleStreamReady}
-            onSettled={handleStreamSettled}
-            onScrollRequest={scrollToBottom}
-          />
-        ) : null}
+          {streamingKey ? (
+            <StreamingAssistantMessage
+              key={streamingKey}
+              onReady={handleStreamReady}
+              onSettled={handleStreamSettled}
+              onScrollRequest={scheduleScrollToBottom}
+            />
+          ) : null}
 
-        {error ? (
-          <div style={{ fontSize: 12, color: "#D64545", textAlign: "center" }}>
-            {error}
-          </div>
-        ) : null}
+          {error ? (
+            <div
+              style={{ fontSize: 12, color: "#D64545", textAlign: "center" }}
+            >
+              {error}
+            </div>
+          ) : null}
+        </div>
       </div>
 
       <div

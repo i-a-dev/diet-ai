@@ -12,7 +12,10 @@ import {
   createStreamReveal,
   type StreamRevealController,
 } from "../utils/streamReveal.ts";
-import { stripMarkdownForStreaming } from "../utils/stripMarkdownForStreaming.ts";
+import {
+  createStreamingTextFilter,
+  type StreamingTextFilter,
+} from "../utils/streamingTextFilter.ts";
 import type { ChatMessage } from "../api/client.ts";
 
 export type StreamingAssistantHandle = {
@@ -24,14 +27,14 @@ export type StreamingAssistantHandle = {
 interface StreamingAssistantMessageProps {
   onReady: (handle: StreamingAssistantHandle) => void;
   onSettled: (assistantMessage: ChatMessage) => void;
-  onScrollRequest: () => void;
+  onScrollRequest: (options?: { force?: boolean }) => void;
 }
 
 /**
  * ChatGPT 風ストリーミングバブル。
- * - ストリーミング中は Markdown を使わずプレーンテキストのみ
- * - 記号は除去し、文字だけが増えていく見た目を維持
- * - 表示追いつき後に親へ返し、履歴側で一度だけ ReactMarkdown する
+ * - ストリーミング中は Markdown を使わずプレーンテキストのみ（append-only）
+ * - 高さ変化は ResizeObserver → 親の rAF スクロールへ委譲
+ * - 返信完了後に親へ返し、履歴側で一度だけ ReactMarkdown する
  */
 export const StreamingAssistantMessage = memo(function StreamingAssistantMessage({
   onReady,
@@ -42,8 +45,12 @@ export const StreamingAssistantMessage = memo(function StreamingAssistantMessage
   const [hasStarted, setHasStarted] = useState(false);
 
   const revealRef = useRef<StreamRevealController | null>(null);
+  const filterRef = useRef<StreamingTextFilter>(createStreamingTextFilter());
+  const prevDisplayedRef = useRef("");
   const pendingMessageRef = useRef<ChatMessage | null>(null);
   const settledRef = useRef(false);
+  const bubbleRef = useRef<HTMLDivElement>(null);
+  const streamBodyRef = useRef<HTMLDivElement>(null);
 
   const onSettledRef = useRef(onSettled);
   const onScrollRequestRef = useRef(onScrollRequest);
@@ -53,13 +60,29 @@ export const StreamingAssistantMessage = memo(function StreamingAssistantMessage
   onReadyRef.current = onReady;
 
   useEffect(() => {
+    const filter = createStreamingTextFilter();
+    filterRef.current = filter;
+    prevDisplayedRef.current = "";
+
     const reveal = createStreamReveal({
       onUpdate: (displayed) => {
-        if (displayed !== "") {
+        const prev = prevDisplayedRef.current;
+        const chunk = displayed.slice(prev.length);
+        prevDisplayedRef.current = displayed;
+
+        let appended = "";
+        for (const unit of Array.from(chunk)) {
+          appended += filter.push(unit);
+        }
+
+        if (appended !== "" || displayed !== "") {
           setHasStarted(true);
         }
-        setPlainText(stripMarkdownForStreaming(displayed));
-        onScrollRequestRef.current();
+        if (appended !== "") {
+          // append-only。一度出した文字は書き換えない
+          setPlainText((current) => current + appended);
+        }
+        // スクロールは ResizeObserver / 入場開始時のみ。ここでは呼ばない
       },
       onCaughtUp: (fullText) => {
         if (settledRef.current) {
@@ -70,7 +93,6 @@ export const StreamingAssistantMessage = memo(function StreamingAssistantMessage
         if (!message) {
           return;
         }
-        // フェード等なし。親が履歴へ差し替え、そこで一度だけ Markdown 化
         onSettledRef.current({
           ...message,
           content: fullText,
@@ -105,6 +127,30 @@ export const StreamingAssistantMessage = memo(function StreamingAssistantMessage
     };
   }, []);
 
+  // 高さ変化のみでスクロール予約（改行・折り返し・フォント描画）
+  useEffect(() => {
+    if (!hasStarted) {
+      return;
+    }
+
+    const element = bubbleRef.current ?? streamBodyRef.current;
+    if (!element) {
+      return;
+    }
+
+    // 入場開始時に1回
+    onScrollRequestRef.current();
+
+    const observer = new ResizeObserver(() => {
+      onScrollRequestRef.current();
+    });
+    observer.observe(element);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [hasStarted]);
+
   if (!hasStarted) {
     return (
       <div style={rowStyle}>
@@ -114,14 +160,13 @@ export const StreamingAssistantMessage = memo(function StreamingAssistantMessage
   }
 
   return (
-    <AssistantMessageEnter
-      animate
-      onTick={() => onScrollRequestRef.current()}
-    >
+    <AssistantMessageEnter animate>
       <CoachAvatar />
       <div style={bodyStyle}>
-        <BubbleCoach>
-          <div className="streaming-text">{plainText}</div>
+        <BubbleCoach ref={bubbleRef}>
+          <div ref={streamBodyRef} className="streaming-text">
+            {plainText}
+          </div>
         </BubbleCoach>
       </div>
     </AssistantMessageEnter>
