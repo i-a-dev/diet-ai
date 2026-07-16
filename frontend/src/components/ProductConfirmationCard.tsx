@@ -112,11 +112,12 @@ export function ProductConfirmationCard({
           onClick={onSearchWeb}
           disabled={searchWebDisabled}
           style={{
-            ...linkButtonStyle,
+            ...primaryButtonStyle,
             opacity: searchWebDisabled ? 0.45 : 1,
+            cursor: searchWebDisabled ? "not-allowed" : "pointer",
           }}
         >
-          サイズ・商品を確認する
+          AI web検索を行う
         </button>
       )}
     </div>
@@ -243,16 +244,5 @@ const primaryButtonStyle: CSSProperties = {
   fontWeight: 700,
   fontSize: 14,
   padding: "11px 12px",
-  cursor: "pointer",
-};
-
-const linkButtonStyle: CSSProperties = {
-  width: "100%",
-  marginTop: 8,
-  border: "none",
-  background: "transparent",
-  color: "#4B5563",
-  fontWeight: 600,
-  fontSize: 13,
   cursor: "pointer",
 };

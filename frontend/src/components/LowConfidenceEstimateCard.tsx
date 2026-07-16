@@ -33,12 +33,12 @@ export function LowConfidenceEstimateCard({
             より正確に記録できます
           </div>
           <button type="button" onClick={onSearchWeb} style={primaryButtonStyle}>
-            サイズ・商品を確認する
+            AI web検索を行う
           </button>
           <button type="button" onClick={onUseAiEstimate} style={secondaryButtonStyle}>
             このまま記録
           </button>
-          <button type="button" onClick={onEdit} style={linkButtonStyle}>
+          <button type="button" onClick={onEdit} style={secondaryButtonStyle}>
             手入力する
           </button>
         </>
@@ -53,7 +53,7 @@ export function LowConfidenceEstimateCard({
           <button type="button" onClick={onUseAiEstimate} style={primaryButtonStyle}>
             このまま記録
           </button>
-          <button type="button" onClick={onEdit} style={linkButtonStyle}>
+          <button type="button" onClick={onEdit} style={secondaryButtonStyle}>
             手入力する
           </button>
         </>
@@ -127,16 +127,5 @@ const secondaryButtonStyle: CSSProperties = {
   fontWeight: 600,
   fontSize: 14,
   padding: "11px 12px",
-  cursor: "pointer",
-};
-
-const linkButtonStyle: CSSProperties = {
-  width: "100%",
-  marginTop: 8,
-  border: "none",
-  background: "transparent",
-  color: "#4B5563",
-  fontWeight: 600,
-  fontSize: 13,
   cursor: "pointer",
 };

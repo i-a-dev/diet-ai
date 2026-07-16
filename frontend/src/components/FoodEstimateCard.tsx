@@ -77,7 +77,7 @@ export function FoodEstimateCard({
             <button
               type="button"
               onClick={onSearchWeb}
-              style={webSearchLinkButtonStyle}
+              style={webSearchButtonStyle}
             >
               AI web検索を行う
             </button>
@@ -170,16 +170,15 @@ const primaryButtonStyle: CSSProperties = {
   cursor: "pointer",
 };
 
-const webSearchLinkButtonStyle: CSSProperties = {
-  display: "block",
+const webSearchButtonStyle: CSSProperties = {
   width: "100%",
   marginTop: 8,
   border: "none",
-  background: "transparent",
-  color: "#6B7280",
-  fontWeight: 500,
-  fontSize: 12,
-  padding: "4px 0 0",
+  borderRadius: 10,
+  background: ORANGE,
+  color: "#fff",
+  fontWeight: 700,
+  fontSize: 13,
+  padding: "10px 8px",
   cursor: "pointer",
-  textAlign: "center",
 };
