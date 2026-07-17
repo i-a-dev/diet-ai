@@ -50,7 +50,7 @@ final class RecordQueryScopeResolver
     ];
 
     /**
-     * @param DateTimeImmutable|null $activeRecordDate 直前登録や会話の対象日（取れる場合）
+     * @param DateTimeImmutable|null $activeRecordDate 互換のため残置（未使用）
      */
     public function resolve(
         string $userMessage,
@@ -59,6 +59,7 @@ final class RecordQueryScopeResolver
     ): RecordQueryScope {
         $today = $today->setTimezone(new DateTimeZone(self::TIMEZONE))->setTime(0, 0);
         $normalized = $this->normalizeMessage($userMessage);
+        unset($activeRecordDate);
 
         if (($explicit = $this->resolveExplicitScope($normalized, $today)) !== null) {
             return $explicit;
@@ -66,17 +67,6 @@ final class RecordQueryScopeResolver
 
         if ($this->matchesAny($normalized, self::RECENT_TREND_HINTS)) {
             return $this->recentDays($today, 7, '最近の傾向（デフォルト直近7日）');
-        }
-
-        if ($activeRecordDate !== null) {
-            $active = $activeRecordDate->setTimezone(new DateTimeZone(self::TIMEZONE))->setTime(0, 0);
-
-            return new RecordQueryScope(
-                RecordScopeType::DATE_RANGE,
-                $active,
-                $active,
-                '会話対象日（デフォルト）',
-            );
         }
 
         if ($this->matchesAny($normalized, self::TODAY_HINTS)) {
@@ -88,13 +78,9 @@ final class RecordQueryScopeResolver
             );
         }
 
-        // 判定できない場合は既存仕様に合わせ今日を対象にする
-        return new RecordQueryScope(
-            RecordScopeType::UNSPECIFIED,
-            $today,
-            $today,
-            '期間未指定（デフォルト今日）',
-        );
+        // $activeRecordDate は互換のため残すが、today_detail 常時付与後は未使用。
+        // 期間未指定は進捗質問でも答えられるよう直近7日を既定にする。
+        return $this->recentDays($today, 7, '期間未指定（デフォルト直近7日）');
     }
 
     private function normalizeMessage(string $message): string

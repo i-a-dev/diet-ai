@@ -241,13 +241,12 @@ TEXT;
             ->setTimezone(new DateTimeZone(self::TIMEZONE));
         $today = $now->setTime(0, 0);
         $suppressTodayMissingRecordMention = self::shouldSuppressTodayMissingRecordMention($now);
-        $activeRecordDate = $this->resolveActiveRecordDate($today);
-        $scope = $this->scopeResolver->resolve($userQuestion, $today, $activeRecordDate);
+        $scope = $this->scopeResolver->resolve($userQuestion, $today, null);
 
         $historyWithoutCurrent = array_slice($normalized, 0, -1);
         $sanitized = $this->historySanitizer->sanitize($historyWithoutCurrent);
 
-        $authoritative = $this->buildAuthoritativeContext($scope);
+        $authoritative = $this->buildAuthoritativeContext($scope, $today);
         $system = self::SYSTEM_PROMPT
             . "\n\n【今回解決された対象期間】\n"
             . sprintf(
@@ -337,41 +336,57 @@ TEXT;
     /**
      * @return array<string, mixed>
      */
-    private function buildAuthoritativeContext(RecordQueryScope $scope): array
+    private function buildAuthoritativeContext(RecordQueryScope $scope, DateTimeImmutable $today): array
     {
-        $start = $scope->startDateString();
-        $end = $scope->endDateString();
+        $today = $today->setTime(0, 0);
+        $todayStr = $today->format('Y-m-d');
+        $start7 = $today->modify('-6 days');
+        $start30 = $today->modify('-29 days');
+        $start30Str = $start30->format('Y-m-d');
 
-        $mealRows = $this->mealEntryRepository->findBetween($start, $end);
-        $nutritionRows = $this->dailyNutritionSummaryRepository->getBetween($start, $end);
+        $mealRows30 = $this->mealEntryRepository->findBetween($start30Str, $todayStr);
+        $nutritionRows = $this->dailyNutritionSummaryRepository->getBetween($start30Str, $todayStr);
         $nutritionByDate = [];
         foreach ($nutritionRows as $row) {
             $nutritionByDate[(string) $row['recordedOn']] = $row;
         }
 
-        $weightPoints = $this->weightRepository->getPointsBetween($start, $end);
+        $weightPoints = $this->weightRepository->getPointsBetween($start30Str, $todayStr);
         $weightByDate = [];
         foreach ($weightPoints as $point) {
             $weightByDate[(string) $point['date']] = $point['value'];
         }
 
-        $stepsByDate = [];
-        $exercisesByDate = [];
-        $cursor = $scope->startDate;
-        while ($cursor <= $scope->endDate) {
+        $stepsByDate7 = [];
+        $exercisesByDate7 = [];
+        $cursor = $start7;
+        while ($cursor <= $today) {
             $date = $cursor->format('Y-m-d');
-            $stepsByDate[$date] = $this->activityRepository->getStepsForDate($date);
-            $exercisesByDate[$date] = $this->activityRepository->getExercisesForDate($date);
+            $stepsByDate7[$date] = $this->activityRepository->getStepsForDate($date);
+            $exercisesByDate7[$date] = $this->activityRepository->getExercisesForDate($date);
             $cursor = $cursor->modify('+1 day');
         }
 
-        return $this->recordContextBuilder->build(
+        $stepsCountByDate30 = [];
+        foreach ($this->activityRepository->getDailyStepsBetween($start30Str, $todayStr) as $point) {
+            $stepsCountByDate30[(string) $point['date']] = (int) $point['value'];
+        }
+
+        $exerciseKcalByDate30 = [];
+        foreach ($this->activityRepository->getDailyExerciseCaloriesBetween($start30Str, $todayStr) as $point) {
+            $exerciseKcalByDate30[(string) $point['date']] = (int) $point['value'];
+        }
+
+        return $this->recordContextBuilder->buildLayered(
             $scope,
-            $mealRows,
+            $today,
+            $mealRows30,
             $nutritionByDate,
             $weightByDate,
-            $stepsByDate,
-            $exercisesByDate,
+            $stepsByDate7,
+            $exercisesByDate7,
+            $stepsCountByDate30,
+            $exerciseKcalByDate30,
             $this->buildProfileSnapshot(),
         );
     }
@@ -402,21 +417,6 @@ TEXT;
             'daily_intake_goal_kcal' => $calorieGoal['dailyIntakeGoalKcal'],
             'daily_deficit_kcal' => $calorieGoal['dailyDeficitKcal'],
         ];
-    }
-
-    private function resolveActiveRecordDate(DateTimeImmutable $today): ?DateTimeImmutable
-    {
-        // 期間未指定かつ直前登録がある場合のフォールバック用。
-        // 明示期間・「最近」ヒントより優先度は低い（Resolver 側の順序で制御）。
-        $todayMeals = $this->mealEntryRepository->findBetween(
-            $today->format('Y-m-d'),
-            $today->format('Y-m-d'),
-        );
-        if ($todayMeals !== []) {
-            return $today;
-        }
-
-        return null;
     }
 
     private function buildProfileActionSummary(): string

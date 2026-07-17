@@ -326,5 +326,109 @@ assertNotContains(
 );
 echo "OK today missing-record mention time rule\n";
 
+// --- 期間未指定は直近7日 ---
+$scopeUnspecified = $resolver->resolve('ダイエットの進捗を教えて', $today);
+assertSame(RecordScopeType::RECENT_DAYS, $scopeUnspecified->type, 'unspecified uses recent_days');
+assertSame('2026-07-10', $scopeUnspecified->startDateString(), 'unspecified start = today-6');
+assertSame('2026-07-16', $scopeUnspecified->endDateString(), 'unspecified end = today');
+assertContains('デフォルト直近7日', $scopeUnspecified->originalExpression, 'unspecified expression');
+echo "OK unspecified defaults to recent 7 days\n";
+
+// --- 層付きコンテキスト（Claude API 不使用） ---
+$todayForLayer = new DateTimeImmutable('2026-07-16', $tz);
+$mealRows30 = [
+    [
+        'recordedOn' => '2026-06-20',
+        'mealType' => 'lunch',
+        'foodName' => '過去の定食',
+        'calories' => 800,
+    ],
+    [
+        'recordedOn' => '2026-07-10',
+        'mealType' => 'lunch',
+        'foodName' => 'パスタ',
+        'calories' => 500,
+    ],
+    [
+        'recordedOn' => '2026-07-16',
+        'mealType' => 'lunch',
+        'foodName' => '白米 200g',
+        'calories' => 312,
+        'amount' => 200.0,
+        'unit' => 'g',
+    ],
+];
+$weightByDate30 = [
+    '2026-06-20' => 70.0,
+    '2026-07-16' => 68.5,
+];
+$stepsByDate7 = [
+    '2026-07-16' => ['count' => 5000, 'burnedCalories' => 150],
+];
+$exercisesByDate7 = [];
+$stepsCount30 = [
+    '2026-07-16' => 5000,
+    '2026-07-01' => 3000,
+];
+$exerciseKcal30 = [
+    '2026-07-15' => 200,
+];
+
+$layered = $builder->buildLayered(
+    $scopeUnspecified,
+    $todayForLayer,
+    $mealRows30,
+    [],
+    $weightByDate30,
+    $stepsByDate7,
+    $exercisesByDate7,
+    $stepsCount30,
+    $exerciseKcal30,
+    ['daily_intake_goal_kcal' => 1200],
+);
+
+assertSame('recent_7d_and_summary_30d', $layered['primary_focus'], 'progress primary focus');
+assertSame('2026-07-16', $layered['today_detail']['date'] ?? null, 'today_detail date');
+assertSame('白米 200g', $layered['today_detail']['meals'][0]['food_name'] ?? null, 'today_detail meal');
+assertSame(7, count($layered['recent_7d']), 'recent_7d has 7 days');
+assertContains('today_detail', $layered['json'], 'json has today_detail');
+assertContains('recent_7d', $layered['json'], 'json has recent_7d');
+assertContains('summary_30d', $layered['json'], 'json has summary_30d');
+assertSame('2026-06-17', $layered['summary_30d']['period_start'] ?? null, 'summary 30d start');
+assertSame('2026-07-16', $layered['summary_30d']['period_end'] ?? null, 'summary 30d end');
+assertSame(3, $layered['summary_30d']['days_with_meals'] ?? null, 'summary meal days');
+assertSame(-1.5, $layered['summary_30d']['weight_delta_kg'] ?? null, 'summary weight delta');
+assertTrue(
+    !isset($layered['summary_30d']['meals']) && !str_contains(
+        json_encode($layered['summary_30d'], JSON_UNESCAPED_UNICODE) ?: '',
+        '過去の定食',
+    ),
+    'summary_30d must not include meal food names',
+);
+
+$layeredTodayScope = $builder->buildLayered(
+    $scopeToday,
+    $todayForLayer,
+    $mealRows30,
+    [],
+    $weightByDate30,
+    $stepsByDate7,
+    $exercisesByDate7,
+    $stepsCount30,
+    $exerciseKcal30,
+    [],
+);
+assertSame('today_detail', $layeredTodayScope['primary_focus'], 'today scope primary focus');
+
+$finalLayered = $composer->composeFinalUserMessage(
+    'ダイエットの進捗を教えて',
+    $scopeUnspecified,
+    $layered,
+);
+assertContains('today_detail', $finalLayered, 'final message mentions today_detail layer');
+assertContains('summary_30d', $finalLayered, 'final message mentions summary_30d layer');
+assertContains('primary_focus: recent_7d_and_summary_30d', $finalLayered, 'final message has primary_focus');
+echo "OK layered authoritative context\n";
+
 echo str_repeat('=', 48) . "\n";
 echo "All chat record scope tests passed.\n";
