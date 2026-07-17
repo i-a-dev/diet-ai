@@ -14,6 +14,8 @@ final class ChatCoachService
     private const API_URL = 'https://api.anthropic.com/v1/messages';
     private const MODEL = 'claude-haiku-4-5-20251001';
     private const TIMEZONE = 'Asia/Tokyo';
+    /** この時刻未満なら、当日の食事・歩数・運動の未記録へ原則言及しない */
+    private const TODAY_MISSING_RECORD_MENTION_CUTOFF_HOUR = 18;
 
     private const SYSTEM_PROMPT = <<<'TEXT'
 あなたはダイエット記録アプリの専属AIコーチです。
@@ -204,6 +206,17 @@ TEXT;
     }
 
     /**
+     * 当日の食事・歩数・運動の未記録言及を時間帯で抑制するか（Asia/Tokyo）。
+     * 実時刻に依存するテスト向けに公開。
+     */
+    public static function shouldSuppressTodayMissingRecordMention(DateTimeImmutable $now): bool
+    {
+        $now = $now->setTimezone(new DateTimeZone(self::TIMEZONE));
+
+        return (int) $now->format('H') < self::TODAY_MISSING_RECORD_MENTION_CUTOFF_HOUR;
+    }
+
+    /**
      * LLM へ渡す system / messages を組み立てる（テスト可能）。
      *
      * @param array<int, array{role?: mixed, content?: mixed}> $messages
@@ -215,7 +228,7 @@ TEXT;
      *   history_meta: array<string, int>
      * }
      */
-    public function prepareLlmPayload(array $messages): array
+    public function prepareLlmPayload(array $messages, ?DateTimeImmutable $now = null): array
     {
         $normalized = $this->normalizeMessages($messages);
         $lastIndex = array_key_last($normalized);
@@ -224,7 +237,10 @@ TEXT;
         }
 
         $userQuestion = $normalized[$lastIndex]['content'];
-        $today = new DateTimeImmutable('today', new DateTimeZone(self::TIMEZONE));
+        $now = ($now ?? new DateTimeImmutable('now', new DateTimeZone(self::TIMEZONE)))
+            ->setTimezone(new DateTimeZone(self::TIMEZONE));
+        $today = $now->setTime(0, 0);
+        $suppressTodayMissingRecordMention = self::shouldSuppressTodayMissingRecordMention($now);
         $activeRecordDate = $this->resolveActiveRecordDate($today);
         $scope = $this->scopeResolver->resolve($userQuestion, $today, $activeRecordDate);
 
@@ -256,6 +272,8 @@ TEXT;
                 $scope,
                 $authoritative,
                 $desiredDietMethod,
+                $now,
+                $suppressTodayMissingRecordMention,
             ),
         ];
 

@@ -8,6 +8,7 @@ require_once __DIR__ . '/../src/RecordQueryScopeResolver.php';
 require_once __DIR__ . '/../src/ChatHistorySanitizer.php';
 require_once __DIR__ . '/../src/AuthoritativeRecordContextBuilder.php';
 require_once __DIR__ . '/../src/ChatLlmMessageComposer.php';
+require_once __DIR__ . '/../src/ChatCoachService.php';
 
 function assertTrue(bool $condition, string $message): void
 {
@@ -258,6 +259,72 @@ $scope2w = $resolver->resolve('直近２週間の傾向は', $today);
 assertSame('2026-07-03', $scope2w->startDateString(), '2 weeks start');
 assertSame('2026-07-16', $scope2w->endDateString(), '2 weeks end');
 echo "OK recent 2 weeks\n";
+
+// --- 当日未記録言及の時間帯ルール ---
+$beforeCutoff = new DateTimeImmutable('2026-07-17 17:59:00', $tz);
+$atCutoff = new DateTimeImmutable('2026-07-17 18:00:00', $tz);
+assertTrue(
+    ChatCoachService::shouldSuppressTodayMissingRecordMention($beforeCutoff),
+    '17:59 suppresses today missing-record mention',
+);
+assertTrue(
+    !ChatCoachService::shouldSuppressTodayMissingRecordMention($atCutoff),
+    '18:00 does not suppress today missing-record mention',
+);
+
+// UTC 入力でも Asia/Tokyo で判定されること
+// 2026-07-17 08:59 UTC = 17:59 JST / 09:00 UTC = 18:00 JST
+$utc = new DateTimeZone('UTC');
+$beforeCutoffUtc = new DateTimeImmutable('2026-07-17 08:59:00', $utc);
+$atCutoffUtc = new DateTimeImmutable('2026-07-17 09:00:00', $utc);
+assertTrue(
+    ChatCoachService::shouldSuppressTodayMissingRecordMention($beforeCutoffUtc),
+    'UTC 08:59 (=17:59 JST) suppresses',
+);
+assertTrue(
+    !ChatCoachService::shouldSuppressTodayMissingRecordMention($atCutoffUtc),
+    'UTC 09:00 (=18:00 JST) does not suppress',
+);
+
+$authForRule = $builder->build($scopeToday, [], [], [], [], [], []);
+$finalBefore = $composer->composeFinalUserMessage(
+    '今日の調子はどう？',
+    $scopeToday,
+    $authForRule,
+    null,
+    $beforeCutoff,
+    true,
+);
+assertContains('Asia/Tokyo', $finalBefore, 'before-cutoff message uses Asia/Tokyo');
+assertContains('2026-07-17 17:59', $finalBefore, 'before-cutoff message shows injected now');
+assertContains(
+    '今日の食事・歩数・運動が未記録でも、原則として言及しない',
+    $finalBefore,
+    'before-cutoff final message suppresses missing-record mention',
+);
+assertNotContains('時間帯による当日の未記録言及の抑制はありません', $finalBefore, 'before-cutoff must not say no suppress');
+
+$finalAfter = $composer->composeFinalUserMessage(
+    '今日の調子はどう？',
+    $scopeToday,
+    $authForRule,
+    null,
+    $atCutoff,
+    false,
+);
+assertContains('Asia/Tokyo', $finalAfter, 'after-cutoff message uses Asia/Tokyo');
+assertContains('2026-07-17 18:00', $finalAfter, 'after-cutoff message shows injected now');
+assertContains(
+    '時間帯による当日の未記録言及の抑制はありません',
+    $finalAfter,
+    'after-cutoff final message lifts time-based suppress',
+);
+assertNotContains(
+    '今日の食事・歩数・運動が未記録でも、原則として言及しない',
+    $finalAfter,
+    'after-cutoff must not keep suppress instruction',
+);
+echo "OK today missing-record mention time rule\n";
 
 echo str_repeat('=', 48) . "\n";
 echo "All chat record scope tests passed.\n";
