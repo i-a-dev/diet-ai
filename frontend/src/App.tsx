@@ -51,7 +51,7 @@ function LoadingScreen() {
 }
 
 function AppContent() {
-  const [tab, setTab] = useState<number>(0)
+  const [tab, setTab] = useState<number>(1)
   const [onboardingOpen, setOnboardingOpen] = useState(false)
   const [profileChecked, setProfileChecked] = useState(false)
   const isDesktopPreview = useMediaQuery('(min-width: 768px)')
