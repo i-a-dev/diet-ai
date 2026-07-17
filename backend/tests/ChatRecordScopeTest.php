@@ -336,7 +336,13 @@ echo "OK unspecified defaults to recent 7 days\n";
 
 // --- 層付きコンテキスト（Claude API 不使用） ---
 $todayForLayer = new DateTimeImmutable('2026-07-16', $tz);
-$mealRows30 = [
+$mealRows6m = [
+    [
+        'recordedOn' => '2026-02-01',
+        'mealType' => 'lunch',
+        'foodName' => '半年前の定食',
+        'calories' => 900,
+    ],
     [
         'recordedOn' => '2026-06-20',
         'mealType' => 'lunch',
@@ -358,7 +364,8 @@ $mealRows30 = [
         'unit' => 'g',
     ],
 ];
-$weightByDate30 = [
+$weightByDate6m = [
+    '2026-02-01' => 72.0,
     '2026-06-20' => 70.0,
     '2026-07-16' => 68.5,
 ];
@@ -366,24 +373,25 @@ $stepsByDate7 = [
     '2026-07-16' => ['count' => 5000, 'burnedCalories' => 150],
 ];
 $exercisesByDate7 = [];
-$stepsCount30 = [
+$stepsCount6m = [
     '2026-07-16' => 5000,
     '2026-07-01' => 3000,
+    '2026-02-01' => 2000,
 ];
-$exerciseKcal30 = [
+$exerciseKcal6m = [
     '2026-07-15' => 200,
 ];
 
 $layered = $builder->buildLayered(
     $scopeUnspecified,
     $todayForLayer,
-    $mealRows30,
+    $mealRows6m,
     [],
-    $weightByDate30,
+    $weightByDate6m,
     $stepsByDate7,
     $exercisesByDate7,
-    $stepsCount30,
-    $exerciseKcal30,
+    $stepsCount6m,
+    $exerciseKcal6m,
     ['daily_intake_goal_kcal' => 1200],
 );
 
@@ -394,10 +402,15 @@ assertSame(7, count($layered['recent_7d']), 'recent_7d has 7 days');
 assertContains('today_detail', $layered['json'], 'json has today_detail');
 assertContains('recent_7d', $layered['json'], 'json has recent_7d');
 assertContains('summary_30d', $layered['json'], 'json has summary_30d');
+assertContains('summary_6m', $layered['json'], 'json has summary_6m');
 assertSame('2026-06-17', $layered['summary_30d']['period_start'] ?? null, 'summary 30d start');
 assertSame('2026-07-16', $layered['summary_30d']['period_end'] ?? null, 'summary 30d end');
-assertSame(3, $layered['summary_30d']['days_with_meals'] ?? null, 'summary meal days');
-assertSame(-1.5, $layered['summary_30d']['weight_delta_kg'] ?? null, 'summary weight delta');
+assertSame(3, $layered['summary_30d']['days_with_meals'] ?? null, 'summary 30d meal days');
+assertSame(-1.5, $layered['summary_30d']['weight_delta_kg'] ?? null, 'summary 30d weight delta');
+assertSame('2026-01-16', $layered['summary_6m']['period_start'] ?? null, 'summary 6m start');
+assertSame('2026-07-16', $layered['summary_6m']['period_end'] ?? null, 'summary 6m end');
+assertSame(4, $layered['summary_6m']['days_with_meals'] ?? null, 'summary 6m meal days');
+assertSame(-3.5, $layered['summary_6m']['weight_delta_kg'] ?? null, 'summary 6m weight delta');
 assertTrue(
     !isset($layered['summary_30d']['meals']) && !str_contains(
         json_encode($layered['summary_30d'], JSON_UNESCAPED_UNICODE) ?: '',
@@ -405,17 +418,21 @@ assertTrue(
     ),
     'summary_30d must not include meal food names',
 );
+assertTrue(
+    !str_contains(json_encode($layered['summary_6m'], JSON_UNESCAPED_UNICODE) ?: '', '半年前の定食'),
+    'summary_6m must not include meal food names',
+);
 
 $layeredTodayScope = $builder->buildLayered(
     $scopeToday,
     $todayForLayer,
-    $mealRows30,
+    $mealRows6m,
     [],
-    $weightByDate30,
+    $weightByDate6m,
     $stepsByDate7,
     $exercisesByDate7,
-    $stepsCount30,
-    $exerciseKcal30,
+    $stepsCount6m,
+    $exerciseKcal6m,
     [],
 );
 assertSame('today_detail', $layeredTodayScope['primary_focus'], 'today scope primary focus');
@@ -427,6 +444,7 @@ $finalLayered = $composer->composeFinalUserMessage(
 );
 assertContains('today_detail', $finalLayered, 'final message mentions today_detail layer');
 assertContains('summary_30d', $finalLayered, 'final message mentions summary_30d layer');
+assertContains('summary_6m', $finalLayered, 'final message mentions summary_6m layer');
 assertContains('primary_focus: recent_7d_and_summary_30d', $finalLayered, 'final message has primary_focus');
 echo "OK layered authoritative context\n";
 

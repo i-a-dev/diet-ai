@@ -83,41 +83,44 @@ final class AuthoritativeRecordContextBuilder
     }
 
     /**
-     * 今日詳細・直近7日・30日サマリーの層付きコンテキストを組み立てる。
+     * 今日詳細・直近7日・30日/6ヶ月サマリーの層付きコンテキストを組み立てる。
      *
-     * @param list<array<string, mixed>> $mealRows30
-     * @param array<string, array<string, mixed>> $nutritionByDate30
-     * @param array<string, float|null> $weightByDate30
+     * @param list<array<string, mixed>> $mealRows6m
+     * @param array<string, array<string, mixed>> $nutritionByDate7
+     * @param array<string, float|null> $weightByDate6m
      * @param array<string, array{count: int, burnedCalories: int}> $stepsByDate7
      * @param array<string, array{entries: list<array<string, mixed>>, burnedCalories: int}> $exercisesByDate7
-     * @param array<string, int> $stepsCountByDate30 date => step count
-     * @param array<string, int> $exerciseKcalByDate30 date => burned kcal
+     * @param array<string, int> $stepsCountByDate6m date => step count
+     * @param array<string, int> $exerciseKcalByDate6m date => burned kcal
      * @param array<string, mixed> $profileSnapshot
      * @return array<string, mixed>
      */
     public function buildLayered(
         RecordQueryScope $scope,
         DateTimeImmutable $today,
-        array $mealRows30,
-        array $nutritionByDate30,
-        array $weightByDate30,
+        array $mealRows6m,
+        array $nutritionByDate7,
+        array $weightByDate6m,
         array $stepsByDate7,
         array $exercisesByDate7,
-        array $stepsCountByDate30,
-        array $exerciseKcalByDate30,
+        array $stepsCountByDate6m,
+        array $exerciseKcalByDate6m,
         array $profileSnapshot,
     ): array {
         $today = $today->setTime(0, 0);
         $start7 = $today->modify('-6 days');
         $start30 = $today->modify('-29 days');
+        $start6m = $today->modify('-6 months');
         $todayDate = $today->format('Y-m-d');
+        $start30Str = $start30->format('Y-m-d');
+        $start6mStr = $start6m->format('Y-m-d');
 
         $recent7 = $this->buildDailyRecordsForRange(
             $start7,
             $today,
-            $mealRows30,
-            $nutritionByDate30,
-            $weightByDate30,
+            $mealRows6m,
+            $nutritionByDate7,
+            $weightByDate6m,
             $stepsByDate7,
             $exercisesByDate7,
         );
@@ -144,13 +147,21 @@ final class AuthoritativeRecordContextBuilder
             ];
         }
 
-        $summary30d = $this->buildSummary30d(
-            $start30->format('Y-m-d'),
+        $summary30d = $this->buildPeriodSummary(
+            $start30Str,
             $todayDate,
-            $mealRows30,
-            $weightByDate30,
-            $stepsCountByDate30,
-            $exerciseKcalByDate30,
+            $mealRows6m,
+            $weightByDate6m,
+            $stepsCountByDate6m,
+            $exerciseKcalByDate6m,
+        );
+        $summary6m = $this->buildPeriodSummary(
+            $start6mStr,
+            $todayDate,
+            $mealRows6m,
+            $weightByDate6m,
+            $stepsCountByDate6m,
+            $exerciseKcalByDate6m,
         );
 
         $primaryFocus = $scope->type === RecordScopeType::TODAY
@@ -158,8 +169,8 @@ final class AuthoritativeRecordContextBuilder
             : 'recent_7d_and_summary_30d';
 
         $layerGuidance = $primaryFocus === 'today_detail'
-            ? '主参照は today_detail。recent_7d と summary_30d は補助。'
-            : '主参照は recent_7d と summary_30d。today_detail は当日状況の補足。';
+            ? '主参照は today_detail。recent_7d / summary_30d / summary_6m は補助。'
+            : '主参照は recent_7d と summary_30d。summary_6m は中長期の補助。today_detail は当日状況の補足。';
 
         $payload = [
             'query_scope' => $scope->toArray(),
@@ -169,10 +180,11 @@ final class AuthoritativeRecordContextBuilder
             'today_detail' => $todayDetail,
             'recent_7d' => $recent7d,
             'summary_30d' => $summary30d,
+            'summary_6m' => $summary6m,
             'notes' => [
                 'record_status=no_record means no DB entry for that day; do not assert the user ate nothing',
                 'food names and kcal for specific meals must come from today_detail or recent_7d',
-                'summary_30d has aggregates only (no meal food names)',
+                'summary_30d and summary_6m have aggregates only (no meal food names)',
                 'conversation history must not supply food facts',
             ],
         ];
@@ -190,6 +202,7 @@ final class AuthoritativeRecordContextBuilder
             'today_detail' => $todayDetail,
             'recent_7d' => $recent7d,
             'summary_30d' => $summary30d,
+            'summary_6m' => $summary6m,
             'daily_records' => $recent7d,
             'meal_count' => $recent7['meal_count'],
             'json' => $json,
@@ -200,6 +213,7 @@ final class AuthoritativeRecordContextBuilder
                 $todayDetail,
                 $recent7d,
                 $summary30d,
+                $summary6m,
                 $profileSnapshot,
             ),
         ];
@@ -303,7 +317,7 @@ final class AuthoritativeRecordContextBuilder
      * @param array<string, int> $exerciseKcalByDate
      * @return array<string, mixed>
      */
-    public function buildSummary30d(
+    public function buildPeriodSummary(
         string $startDate,
         string $endDate,
         array $mealRows,
@@ -390,6 +404,25 @@ final class AuthoritativeRecordContextBuilder
         ];
     }
 
+    /** @deprecated use buildPeriodSummary */
+    public function buildSummary30d(
+        string $startDate,
+        string $endDate,
+        array $mealRows,
+        array $weightByDate,
+        array $stepsCountByDate,
+        array $exerciseKcalByDate,
+    ): array {
+        return $this->buildPeriodSummary(
+            $startDate,
+            $endDate,
+            $mealRows,
+            $weightByDate,
+            $stepsCountByDate,
+            $exerciseKcalByDate,
+        );
+    }
+
     /**
      * @param array<string, mixed> $summary
      * @return array<string, mixed>
@@ -473,6 +506,7 @@ final class AuthoritativeRecordContextBuilder
      * @param array<string, mixed> $todayDetail
      * @param list<array<string, mixed>> $recent7d
      * @param array<string, mixed> $summary30d
+     * @param array<string, mixed> $summary6m
      * @param array<string, mixed> $profileSnapshot
      */
     private function formatLayeredText(
@@ -482,6 +516,7 @@ final class AuthoritativeRecordContextBuilder
         array $todayDetail,
         array $recent7d,
         array $summary30d,
+        array $summary6m,
         array $profileSnapshot,
     ): string {
         $lines = [];
@@ -518,19 +553,30 @@ final class AuthoritativeRecordContextBuilder
         }
         $lines[] = '';
         $lines[] = '■ summary_30d';
-        $lines[] = sprintf(
-            '期間: %s 〜 %s / 食事記録日数: %s / 平均摂取: %s / 体重変化: %s',
-            (string) ($summary30d['period_start'] ?? ''),
-            (string) ($summary30d['period_end'] ?? ''),
-            (string) ($summary30d['days_with_meals'] ?? '0'),
-            $summary30d['avg_intake_kcal_on_recorded_days'] === null
-                ? 'なし'
-                : $summary30d['avg_intake_kcal_on_recorded_days'] . 'kcal',
-            $summary30d['weight_delta_kg'] === null
-                ? 'なし'
-                : $summary30d['weight_delta_kg'] . 'kg',
-        );
+        $lines[] = $this->formatSummaryLine($summary30d);
+        $lines[] = '';
+        $lines[] = '■ summary_6m';
+        $lines[] = $this->formatSummaryLine($summary6m);
 
         return implode("\n", $lines);
+    }
+
+    /**
+     * @param array<string, mixed> $summary
+     */
+    private function formatSummaryLine(array $summary): string
+    {
+        return sprintf(
+            '期間: %s 〜 %s / 食事記録日数: %s / 平均摂取: %s / 体重変化: %s',
+            (string) ($summary['period_start'] ?? ''),
+            (string) ($summary['period_end'] ?? ''),
+            (string) ($summary['days_with_meals'] ?? '0'),
+            $summary['avg_intake_kcal_on_recorded_days'] === null
+                ? 'なし'
+                : $summary['avg_intake_kcal_on_recorded_days'] . 'kcal',
+            $summary['weight_delta_kg'] === null
+                ? 'なし'
+                : $summary['weight_delta_kg'] . 'kg',
+        );
     }
 }

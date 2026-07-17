@@ -341,20 +341,20 @@ TEXT;
         $today = $today->setTime(0, 0);
         $todayStr = $today->format('Y-m-d');
         $start7 = $today->modify('-6 days');
-        $start30 = $today->modify('-29 days');
-        $start30Str = $start30->format('Y-m-d');
+        $start7Str = $start7->format('Y-m-d');
+        $start6mStr = $today->modify('-6 months')->format('Y-m-d');
 
-        $mealRows30 = $this->mealEntryRepository->findBetween($start30Str, $todayStr);
-        $nutritionRows = $this->dailyNutritionSummaryRepository->getBetween($start30Str, $todayStr);
-        $nutritionByDate = [];
+        $mealRows6m = $this->mealEntryRepository->findBetween($start6mStr, $todayStr);
+        $nutritionRows = $this->dailyNutritionSummaryRepository->getBetween($start7Str, $todayStr);
+        $nutritionByDate7 = [];
         foreach ($nutritionRows as $row) {
-            $nutritionByDate[(string) $row['recordedOn']] = $row;
+            $nutritionByDate7[(string) $row['recordedOn']] = $row;
         }
 
-        $weightPoints = $this->weightRepository->getPointsBetween($start30Str, $todayStr);
-        $weightByDate = [];
+        $weightPoints = $this->weightRepository->getPointsBetween($start6mStr, $todayStr);
+        $weightByDate6m = [];
         foreach ($weightPoints as $point) {
-            $weightByDate[(string) $point['date']] = $point['value'];
+            $weightByDate6m[(string) $point['date']] = $point['value'];
         }
 
         $stepsByDate7 = [];
@@ -367,26 +367,26 @@ TEXT;
             $cursor = $cursor->modify('+1 day');
         }
 
-        $stepsCountByDate30 = [];
-        foreach ($this->activityRepository->getDailyStepsBetween($start30Str, $todayStr) as $point) {
-            $stepsCountByDate30[(string) $point['date']] = (int) $point['value'];
+        $stepsCountByDate6m = [];
+        foreach ($this->activityRepository->getDailyStepsBetween($start6mStr, $todayStr) as $point) {
+            $stepsCountByDate6m[(string) $point['date']] = (int) $point['value'];
         }
 
-        $exerciseKcalByDate30 = [];
-        foreach ($this->activityRepository->getDailyExerciseCaloriesBetween($start30Str, $todayStr) as $point) {
-            $exerciseKcalByDate30[(string) $point['date']] = (int) $point['value'];
+        $exerciseKcalByDate6m = [];
+        foreach ($this->activityRepository->getDailyExerciseCaloriesBetween($start6mStr, $todayStr) as $point) {
+            $exerciseKcalByDate6m[(string) $point['date']] = (int) $point['value'];
         }
 
         return $this->recordContextBuilder->buildLayered(
             $scope,
             $today,
-            $mealRows30,
-            $nutritionByDate,
-            $weightByDate,
+            $mealRows6m,
+            $nutritionByDate7,
+            $weightByDate6m,
             $stepsByDate7,
             $exercisesByDate7,
-            $stepsCountByDate30,
-            $exerciseKcalByDate30,
+            $stepsCountByDate6m,
+            $exerciseKcalByDate6m,
             $this->buildProfileSnapshot(),
         );
     }

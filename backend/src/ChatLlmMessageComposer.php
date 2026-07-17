@@ -27,7 +27,7 @@ final class ChatLlmMessageComposer
         $blocks[] = '';
         $blocks[] = '【正式な記録データ authoritative_record_context】';
         $blocks[] = '以下の JSON のみが食事・体重・kcal などの正式事実です。会話履歴の食品名や過去assistantの要約は使わないでください。';
-        $blocks[] = '記録は層分けされています: today_detail（今日詳細） / recent_7d（直近7日） / summary_30d（直近30日の集計のみ）。';
+        $blocks[] = '記録は層分けされています: today_detail（今日詳細） / recent_7d（直近7日） / summary_30d（直近30日の集計） / summary_6m（直近6ヶ月の集計）。';
         if (isset($authoritative['primary_focus'], $authoritative['layer_guidance'])) {
             $blocks[] = 'primary_focus: ' . (string) $authoritative['primary_focus'];
             $blocks[] = 'layer_guidance: ' . (string) $authoritative['layer_guidance'];
