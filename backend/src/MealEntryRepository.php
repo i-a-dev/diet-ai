@@ -455,6 +455,24 @@ final class MealEntryRepository
     }
 
     /**
+     * 最も古い食事記録日を返す。
+     */
+    public function getEarliestRecordedDate(): ?string
+    {
+        $statement = $this->db->prepare(
+            'SELECT MIN(recorded_on) FROM meal_entries WHERE user_id = :user_id'
+        );
+        $statement->execute(['user_id' => $this->userId]);
+        $value = $statement->fetchColumn();
+
+        if (!is_string($value) || $value === '') {
+            return null;
+        }
+
+        return $value;
+    }
+
+    /**
      * 指定期間の食事エントリを日付順で返す（AIチャットの正式記録ソース）。
      *
      * @return list<array{

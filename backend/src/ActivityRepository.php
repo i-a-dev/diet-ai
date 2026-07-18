@@ -17,6 +17,42 @@ final class ActivityRepository
     }
 
     /**
+     * 最も古い歩数記録日を返す。
+     */
+    public function getEarliestStepsRecordedDate(): ?string
+    {
+        $statement = $this->db->prepare(
+            'SELECT MIN(recorded_on) FROM step_entries WHERE user_id = :user_id'
+        );
+        $statement->execute(['user_id' => $this->userId]);
+        $value = $statement->fetchColumn();
+
+        if (!is_string($value) || $value === '') {
+            return null;
+        }
+
+        return $value;
+    }
+
+    /**
+     * 最も古い運動記録日を返す。
+     */
+    public function getEarliestExerciseRecordedDate(): ?string
+    {
+        $statement = $this->db->prepare(
+            'SELECT MIN(recorded_on) FROM exercise_entries WHERE user_id = :user_id'
+        );
+        $statement->execute(['user_id' => $this->userId]);
+        $value = $statement->fetchColumn();
+
+        if (!is_string($value) || $value === '') {
+            return null;
+        }
+
+        return $value;
+    }
+
+    /**
      * @return array{count: int, burnedCalories: int}
      */
     public function getStepsForDate(string $date): array

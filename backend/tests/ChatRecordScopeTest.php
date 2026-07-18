@@ -393,9 +393,21 @@ $layered = $builder->buildLayered(
     $stepsCount6m,
     $exerciseKcal6m,
     ['daily_intake_goal_kcal' => 1200],
+    [
+        'first_meal_recorded_on' => '2026-07-04',
+        'first_weight_recorded_on' => '2026-07-04',
+        'first_steps_recorded_on' => null,
+        'first_exercise_recorded_on' => null,
+    ],
 );
 
 assertSame('recent_7d_and_summary_30d', $layered['primary_focus'], 'progress primary focus');
+assertSame('2026-07-04', $layered['recording_meta']['first_any_recorded_on'] ?? null, 'recording start date');
+assertSame('2026-07-04', $layered['recording_meta']['first_meal_recorded_on'] ?? null, 'first meal date');
+assertSame('2026-07-04', $layered['recording_meta']['first_weight_recorded_on'] ?? null, 'first weight date');
+assertSame(12, $layered['recording_meta']['days_since_first_record'] ?? null, 'days since first record');
+assertTrue(($layered['recording_meta']['has_any_record'] ?? false) === true, 'has any record');
+assertContains('recording_meta', $layered['json'], 'json has recording_meta');
 assertSame('2026-07-16', $layered['today_detail']['date'] ?? null, 'today_detail date');
 assertSame('白米 200g', $layered['today_detail']['meals'][0]['food_name'] ?? null, 'today_detail meal');
 assertSame(7, count($layered['recent_7d']), 'recent_7d has 7 days');
@@ -407,10 +419,24 @@ assertSame('2026-06-17', $layered['summary_30d']['period_start'] ?? null, 'summa
 assertSame('2026-07-16', $layered['summary_30d']['period_end'] ?? null, 'summary 30d end');
 assertSame(3, $layered['summary_30d']['days_with_meals'] ?? null, 'summary 30d meal days');
 assertSame(-1.5, $layered['summary_30d']['weight_delta_kg'] ?? null, 'summary 30d weight delta');
+assertSame('2026-06-20', $layered['summary_30d']['weight_start_recorded_on'] ?? null, 'summary 30d weight start date');
+assertSame('2026-07-16', $layered['summary_30d']['weight_end_recorded_on'] ?? null, 'summary 30d weight end date');
+assertSame('no_record', $layered['summary_30d']['weight_on_period_start']['status'] ?? null, 'no weight on period_start');
+assertTrue(
+    array_key_exists('kg', $layered['summary_30d']['weight_on_period_start'] ?? []),
+    'period_start has kg key',
+);
+assertSame(null, $layered['summary_30d']['weight_on_period_start']['kg'], 'period_start kg is null');
+assertSame('recorded', $layered['summary_30d']['weight_on_period_end']['status'] ?? null, 'weight on period_end');
+assertSame(68.5, $layered['summary_30d']['weight_on_period_end']['kg'] ?? null, 'period_end kg');
 assertSame('2026-01-16', $layered['summary_6m']['period_start'] ?? null, 'summary 6m start');
 assertSame('2026-07-16', $layered['summary_6m']['period_end'] ?? null, 'summary 6m end');
 assertSame(4, $layered['summary_6m']['days_with_meals'] ?? null, 'summary 6m meal days');
 assertSame(-3.5, $layered['summary_6m']['weight_delta_kg'] ?? null, 'summary 6m weight delta');
+assertSame('2026-02-01', $layered['summary_6m']['weight_start_recorded_on'] ?? null, 'summary 6m weight start date');
+assertSame('no_record', $layered['summary_6m']['weight_on_period_start']['status'] ?? null, '6m no weight on period_start');
+assertContains('weight_start_recorded_on', $layered['json'], 'json exposes weight_start_recorded_on');
+assertContains('weight_on_period_start', $layered['json'], 'json exposes weight_on_period_start');
 assertTrue(
     !isset($layered['summary_30d']['meals']) && !str_contains(
         json_encode($layered['summary_30d'], JSON_UNESCAPED_UNICODE) ?: '',
@@ -445,6 +471,9 @@ $finalLayered = $composer->composeFinalUserMessage(
 assertContains('today_detail', $finalLayered, 'final message mentions today_detail layer');
 assertContains('summary_30d', $finalLayered, 'final message mentions summary_30d layer');
 assertContains('summary_6m', $finalLayered, 'final message mentions summary_6m layer');
+assertContains('recording_meta', $finalLayered, 'final message mentions recording_meta');
+assertContains('first_any_recorded_on', $finalLayered, 'final message mentions first_any_recorded_on');
+assertContains('weight_start_recorded_on', $finalLayered, 'final message mentions weight date fields');
 assertContains('primary_focus: recent_7d_and_summary_30d', $finalLayered, 'final message has primary_focus');
 echo "OK layered authoritative context\n";
 

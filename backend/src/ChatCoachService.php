@@ -388,6 +388,12 @@ TEXT;
             $stepsCountByDate6m,
             $exerciseKcalByDate6m,
             $this->buildProfileSnapshot(),
+            [
+                'first_meal_recorded_on' => $this->mealEntryRepository->getEarliestRecordedDate(),
+                'first_weight_recorded_on' => $this->weightRepository->getEarliestRecordedDate(),
+                'first_steps_recorded_on' => $this->activityRepository->getEarliestStepsRecordedDate(),
+                'first_exercise_recorded_on' => $this->activityRepository->getEarliestExerciseRecordedDate(),
+            ],
         );
     }
 

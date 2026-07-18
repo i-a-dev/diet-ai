@@ -93,6 +93,12 @@ final class AuthoritativeRecordContextBuilder
      * @param array<string, int> $stepsCountByDate6m date => step count
      * @param array<string, int> $exerciseKcalByDate6m date => burned kcal
      * @param array<string, mixed> $profileSnapshot
+     * @param array{
+     *   first_meal_recorded_on: ?string,
+     *   first_weight_recorded_on: ?string,
+     *   first_steps_recorded_on: ?string,
+     *   first_exercise_recorded_on: ?string
+     * }|null $recordingStartDates
      * @return array<string, mixed>
      */
     public function buildLayered(
@@ -106,6 +112,7 @@ final class AuthoritativeRecordContextBuilder
         array $stepsCountByDate6m,
         array $exerciseKcalByDate6m,
         array $profileSnapshot,
+        ?array $recordingStartDates = null,
     ): array {
         $today = $today->setTime(0, 0);
         $start7 = $today->modify('-6 days');
@@ -164,18 +171,29 @@ final class AuthoritativeRecordContextBuilder
             $exerciseKcalByDate6m,
         );
 
+        $recordingMeta = $this->buildRecordingMeta(
+            $today,
+            $recordingStartDates ?? [
+                'first_meal_recorded_on' => null,
+                'first_weight_recorded_on' => null,
+                'first_steps_recorded_on' => null,
+                'first_exercise_recorded_on' => null,
+            ],
+        );
+
         $primaryFocus = $scope->type === RecordScopeType::TODAY
             ? 'today_detail'
             : 'recent_7d_and_summary_30d';
 
         $layerGuidance = $primaryFocus === 'today_detail'
-            ? '主参照は today_detail。recent_7d / summary_30d / summary_6m は補助。'
-            : '主参照は recent_7d と summary_30d。summary_6m は中長期の補助。today_detail は当日状況の補足。';
+            ? '主参照は today_detail。recent_7d / summary_30d / summary_6m は補助。recording_meta は記録開始時期の事実。'
+            : '主参照は recent_7d と summary_30d。summary_6m は中長期の補助。today_detail は当日状況の補足。recording_meta は記録開始時期の事実。';
 
         $payload = [
             'query_scope' => $scope->toArray(),
             'primary_focus' => $primaryFocus,
             'layer_guidance' => $layerGuidance,
+            'recording_meta' => $recordingMeta,
             'profile' => $profileSnapshot,
             'today_detail' => $todayDetail,
             'recent_7d' => $recent7d,
@@ -185,6 +203,10 @@ final class AuthoritativeRecordContextBuilder
                 'record_status=no_record means no DB entry for that day; do not assert the user ate nothing',
                 'food names and kcal for specific meals must come from today_detail or recent_7d',
                 'summary_30d and summary_6m have aggregates only (no meal food names)',
+                'summary weight_start_kg/weight_end_kg must be quoted with weight_start_recorded_on/weight_end_recorded_on',
+                'weight_end_kg is the latest (直近) recorded weight in the period; not necessarily period_end',
+                'if weight_on_period_start.status=no_record, there was no weight on period_start',
+                'recording_meta.first_any_recorded_on is when the user started recording; do not invent history before that date',
                 'conversation history must not supply food facts',
             ],
         ];
@@ -198,6 +220,7 @@ final class AuthoritativeRecordContextBuilder
             'query_scope' => $scope->toArray(),
             'primary_focus' => $primaryFocus,
             'layer_guidance' => $layerGuidance,
+            'recording_meta' => $recordingMeta,
             'profile' => $profileSnapshot,
             'today_detail' => $todayDetail,
             'recent_7d' => $recent7d,
@@ -210,12 +233,52 @@ final class AuthoritativeRecordContextBuilder
                 $scope,
                 $primaryFocus,
                 $layerGuidance,
+                $recordingMeta,
                 $todayDetail,
                 $recent7d,
                 $summary30d,
                 $summary6m,
                 $profileSnapshot,
             ),
+        ];
+    }
+
+    /**
+     * @param array{
+     *   first_meal_recorded_on: ?string,
+     *   first_weight_recorded_on: ?string,
+     *   first_steps_recorded_on: ?string,
+     *   first_exercise_recorded_on: ?string
+     * } $recordingStartDates
+     * @return array<string, mixed>
+     */
+    public function buildRecordingMeta(DateTimeImmutable $today, array $recordingStartDates): array
+    {
+        $today = $today->setTime(0, 0);
+        $candidates = array_values(array_filter([
+            $recordingStartDates['first_meal_recorded_on'] ?? null,
+            $recordingStartDates['first_weight_recorded_on'] ?? null,
+            $recordingStartDates['first_steps_recorded_on'] ?? null,
+            $recordingStartDates['first_exercise_recorded_on'] ?? null,
+        ], static fn ($value): bool => is_string($value) && $value !== ''));
+        sort($candidates);
+        $firstAny = $candidates[0] ?? null;
+
+        $daysSinceFirst = null;
+        if ($firstAny !== null) {
+            $firstDate = new DateTimeImmutable($firstAny, $today->getTimezone());
+            $daysSinceFirst = (int) $firstDate->diff($today)->format('%a');
+        }
+
+        return [
+            'first_meal_recorded_on' => $recordingStartDates['first_meal_recorded_on'] ?? null,
+            'first_weight_recorded_on' => $recordingStartDates['first_weight_recorded_on'] ?? null,
+            'first_steps_recorded_on' => $recordingStartDates['first_steps_recorded_on'] ?? null,
+            'first_exercise_recorded_on' => $recordingStartDates['first_exercise_recorded_on'] ?? null,
+            'first_any_recorded_on' => $firstAny,
+            'days_since_first_record' => $daysSinceFirst,
+            'has_any_record' => $firstAny !== null,
+            'note' => 'first_any_recorded_on より前の日付にはユーザー記録がない。summary の period_start と混同しないこと。',
         ];
     }
 
@@ -352,11 +415,36 @@ final class AuthoritativeRecordContextBuilder
         }
         ksort($weights);
         $weightDates = array_keys($weights);
-        $weightStart = $weightDates === [] ? null : $weights[$weightDates[0]];
-        $weightEnd = $weightDates === [] ? null : $weights[$weightDates[count($weightDates) - 1]];
+        $weightStartRecordedOn = $weightDates === [] ? null : $weightDates[0];
+        $weightEndRecordedOn = $weightDates === [] ? null : $weightDates[count($weightDates) - 1];
+        $weightStart = $weightStartRecordedOn === null ? null : $weights[$weightStartRecordedOn];
+        $weightEnd = $weightEndRecordedOn === null ? null : $weights[$weightEndRecordedOn];
         $weightDelta = ($weightStart !== null && $weightEnd !== null)
             ? round($weightEnd - $weightStart, 2)
             : null;
+
+        $weightOnPeriodStart = array_key_exists($startDate, $weights)
+            ? [
+                'date' => $startDate,
+                'kg' => $weights[$startDate],
+                'status' => 'recorded',
+            ]
+            : [
+                'date' => $startDate,
+                'kg' => null,
+                'status' => 'no_record',
+            ];
+        $weightOnPeriodEnd = array_key_exists($endDate, $weights)
+            ? [
+                'date' => $endDate,
+                'kg' => $weights[$endDate],
+                'status' => 'recorded',
+            ]
+            : [
+                'date' => $endDate,
+                'kg' => null,
+                'status' => 'no_record',
+            ];
 
         $stepsTotal = 0;
         $stepsDays = 0;
@@ -393,9 +481,22 @@ final class AuthoritativeRecordContextBuilder
             'total_intake_kcal' => $totalIntakeKcal,
             'avg_intake_kcal_on_recorded_days' => $avgIntakeKcal,
             'weight_start_kg' => $weightStart,
+            'weight_start_recorded_on' => $weightStartRecordedOn,
             'weight_end_kg' => $weightEnd,
+            'weight_end_recorded_on' => $weightEndRecordedOn,
+            // 直近 = 期間内で最も新しい記録（weight_end と同値）
+            'weight_latest_kg' => $weightEnd,
+            'weight_latest_recorded_on' => $weightEndRecordedOn,
             'weight_delta_kg' => $weightDelta,
             'weight_record_days' => count($weights),
+            'weight_on_period_start' => $weightOnPeriodStart,
+            'weight_on_period_end' => $weightOnPeriodEnd,
+            'notes' => [
+                'weight_start_kg is the earliest recorded weight inside the period; use weight_start_recorded_on for its real date',
+                'weight_end_kg / weight_latest_kg is the latest (直近) recorded weight inside the period; use weight_latest_recorded_on',
+                'Do not treat weight_start_kg as the weight on period_start unless weight_on_period_start.status=recorded',
+                'status=no_record means no weight entry on that calendar date',
+            ],
             'steps_total' => $stepsTotal,
             'steps_recorded_days' => $stepsDays,
             'avg_steps_on_recorded_days' => $stepsDays > 0 ? (int) round($stepsTotal / $stepsDays) : null,
@@ -503,6 +604,7 @@ final class AuthoritativeRecordContextBuilder
     }
 
     /**
+     * @param array<string, mixed> $recordingMeta
      * @param array<string, mixed> $todayDetail
      * @param list<array<string, mixed>> $recent7d
      * @param array<string, mixed> $summary30d
@@ -513,6 +615,7 @@ final class AuthoritativeRecordContextBuilder
         RecordQueryScope $scope,
         string $primaryFocus,
         string $layerGuidance,
+        array $recordingMeta,
         array $todayDetail,
         array $recent7d,
         array $summary30d,
@@ -531,6 +634,17 @@ final class AuthoritativeRecordContextBuilder
         $lines[] = 'primary_focus: ' . $primaryFocus;
         $lines[] = 'layer_guidance: ' . $layerGuidance;
         $lines[] = '';
+        $lines[] = '■ recording_meta（記録開始時期）';
+        $lines[] = sprintf(
+            'first_any_recorded_on: %s / days_since_first_record: %s / meal: %s / weight: %s',
+            (string) ($recordingMeta['first_any_recorded_on'] ?? 'なし'),
+            $recordingMeta['days_since_first_record'] === null
+                ? 'なし'
+                : (string) $recordingMeta['days_since_first_record'],
+            (string) ($recordingMeta['first_meal_recorded_on'] ?? 'なし'),
+            (string) ($recordingMeta['first_weight_recorded_on'] ?? 'なし'),
+        );
+        $lines[] = '';
         $lines[] = '■ プロフィール・目標（登録値）';
         foreach ($profileSnapshot as $key => $value) {
             if (is_scalar($value) || $value === null) {
@@ -542,7 +656,7 @@ final class AuthoritativeRecordContextBuilder
         $lines[] = '食事合計: ' . (int) ($todayDetail['total_calories'] ?? 0) . 'kcal / status='
             . (string) ($todayDetail['record_status'] ?? 'no_record');
         $lines[] = '';
-        $lines[] = '■ recent_7d（' . count($recent7d) . '日）';
+        $lines[] = '■ recent_7d（' . count($recent7d) . '日・日次明細）';
         foreach ($recent7d as $day) {
             $lines[] = sprintf(
                 '- %s: %s / %dkcal',
@@ -566,8 +680,19 @@ final class AuthoritativeRecordContextBuilder
      */
     private function formatSummaryLine(array $summary): string
     {
+        $startOn = $summary['weight_start_recorded_on'] ?? null;
+        $endOn = $summary['weight_end_recorded_on'] ?? null;
+        $periodStartStatus = is_array($summary['weight_on_period_start'] ?? null)
+            ? (string) ($summary['weight_on_period_start']['status'] ?? 'no_record')
+            : 'no_record';
+        $periodEndStatus = is_array($summary['weight_on_period_end'] ?? null)
+            ? (string) ($summary['weight_on_period_end']['status'] ?? 'no_record')
+            : 'no_record';
+
         return sprintf(
-            '期間: %s 〜 %s / 食事記録日数: %s / 平均摂取: %s / 体重変化: %s',
+            '期間: %s 〜 %s / 食事記録日数: %s / 平均摂取: %s / 体重変化: %s'
+            . ' / 最初の体重記録日: %s / 最後の体重記録日: %s'
+            . ' / period_start体重: %s / period_end体重: %s',
             (string) ($summary['period_start'] ?? ''),
             (string) ($summary['period_end'] ?? ''),
             (string) ($summary['days_with_meals'] ?? '0'),
@@ -577,6 +702,14 @@ final class AuthoritativeRecordContextBuilder
             $summary['weight_delta_kg'] === null
                 ? 'なし'
                 : $summary['weight_delta_kg'] . 'kg',
+            $startOn === null ? 'なし' : (string) $startOn,
+            $endOn === null ? 'なし' : (string) $endOn,
+            $periodStartStatus === 'recorded'
+                ? (string) ($summary['weight_on_period_start']['kg'] ?? '') . 'kg'
+                : 'なし(no_record)',
+            $periodEndStatus === 'recorded'
+                ? (string) ($summary['weight_on_period_end']['kg'] ?? '') . 'kg'
+                : 'なし(no_record)',
         );
     }
 }

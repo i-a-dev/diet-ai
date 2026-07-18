@@ -27,7 +27,9 @@ final class ChatLlmMessageComposer
         $blocks[] = '';
         $blocks[] = '【正式な記録データ authoritative_record_context】';
         $blocks[] = '以下の JSON のみが食事・体重・kcal などの正式事実です。会話履歴の食品名や過去assistantの要約は使わないでください。';
-        $blocks[] = '記録は層分けされています: today_detail（今日詳細） / recent_7d（直近7日） / summary_30d（直近30日の集計） / summary_6m（直近6ヶ月の集計）。';
+        $blocks[] = '記録は層分けされています: recording_meta（記録開始時期） / today_detail（今日詳細） / recent_7d（直近7日） / summary_30d（直近30日の集計） / summary_6m（直近6ヶ月の集計）。';
+        $blocks[] = 'recording_meta.first_any_recorded_on より前にはユーザー記録がありません。summary の period_start と混同しないでください。';
+        $blocks[] = 'summary の体重は weight_start_recorded_on / weight_end_recorded_on の日付とセットで扱ってください。period_start 当日に体重がない場合は weight_on_period_start.status=no_record です。';
         if (isset($authoritative['primary_focus'], $authoritative['layer_guidance'])) {
             $blocks[] = 'primary_focus: ' . (string) $authoritative['primary_focus'];
             $blocks[] = 'layer_guidance: ' . (string) $authoritative['layer_guidance'];
