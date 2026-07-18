@@ -2,15 +2,16 @@ import { useEffect, useMemo, useState } from "react";
 import {
   ChevronLeft,
   ChevronRight,
-  Cookie,
+  Dumbbell,
   Footprints,
+  HeartPlus,
+  Lollipop,
   Moon,
   PersonStanding,
   StickyNote,
   Sun,
-  Sunset,
-  UtensilsCrossed,
-  Weight,
+  Sunrise,
+  Utensils,
 } from "lucide-react";
 import {
   type ExerciseEntrySummary,
@@ -56,11 +57,11 @@ interface MealSectionData {
 const BASE_MEALS: Record<MealKey, Omit<MealSectionData, "items">> = {
   breakfast: {
     title: "朝ごはん",
-    icon: <Sun size={14} />,
+    icon: <Sunrise size={14} />,
   },
   lunch: {
     title: "昼ごはん",
-    icon: <Sunset size={14} />,
+    icon: <Sun size={14} />,
   },
   dinner: {
     title: "夜ごはん",
@@ -68,7 +69,7 @@ const BASE_MEALS: Record<MealKey, Omit<MealSectionData, "items">> = {
   },
   snack: {
     title: "間食・おやつ",
-    icon: <Cookie size={14} />,
+    icon: <Lollipop size={14} />,
     isLast: true,
   },
 };
@@ -596,7 +597,7 @@ export function RecordScreen() {
           <div style={secHead}>
             <div style={secTitle}>
               <SecIcon bg="#FDE8C8" color={ORANGE}>
-                <Weight size={16} />
+                <PersonStanding size={16} />
               </SecIcon>
               体重
             </div>
@@ -784,7 +785,7 @@ export function RecordScreen() {
           <div style={secHead}>
             <div style={secTitle}>
               <SecIcon bg="#FDE8C8" color={ORANGE}>
-                <UtensilsCrossed size={16} />
+                <Utensils size={16} />
               </SecIcon>
               食事
             </div>
@@ -831,9 +832,9 @@ export function RecordScreen() {
           <div style={secHead}>
             <div style={secTitle}>
               <SecIcon bg="#D6F5E8" color="#2EAA72">
-                <Footprints size={16} />
+                <HeartPlus size={16} />
               </SecIcon>
-              運動・歩数
+              活動
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
               <span style={{ fontSize: 14, color: "#2EAA72" }}>
@@ -855,7 +856,7 @@ export function RecordScreen() {
             </div>
           </div>
           <ActivitySubSection
-            icon={<Sun size={14} />}
+            icon={<Footprints size={14} />}
             title="歩数"
             totalKcal={String(steps.burnedCalories)}
             onAdd={() => setStepsSheetOpen(true)}
@@ -869,7 +870,7 @@ export function RecordScreen() {
             </div>
           </ActivitySubSection>
           <ActivitySubSection
-            icon={<PersonStanding size={14} />}
+            icon={<Dumbbell size={14} />}
             title="運動"
             totalKcal={String(exerciseTotalKcal)}
             isLast

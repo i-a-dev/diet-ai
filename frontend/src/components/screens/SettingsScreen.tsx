@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { LogOut, User } from "lucide-react";
+import { LogOut, UserCog } from "lucide-react";
 import { ProfileSettingsSheet } from "../ProfileSettingsSheet.tsx";
 import { TopNav } from "../TopNav.tsx";
 import { useAuth } from "../../contexts/AuthContext.tsx";
@@ -42,7 +42,7 @@ export function SettingsScreen({ onProfileUpdated }: SettingsScreenProps) {
               textAlign: "left",
             }}
           >
-            <User size={20} color="#666" />
+            <UserCog size={20} color="#666" />
             <span style={{ fontSize: 15, color: "#111", fontWeight: 500 }}>プロフィール</span>
           </button>
         </div>
