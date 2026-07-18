@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { PhoneMockFrame, phoneAppShellStyle } from './components/PhoneMockFrame.tsx'
 import { SBar } from './components/SBar.tsx'
 import { TabBar } from './components/TabBar.tsx'
@@ -13,8 +13,12 @@ import { VerifyEmailScreen } from './components/screens/VerifyEmailScreen.tsx'
 import { fetchUserProfile } from './api/client.ts'
 import { useAuth } from './contexts/AuthContext.tsx'
 import { useMediaQuery } from './hooks/useMediaQuery.ts'
+import splashLogo from './assets/splash-logo.png'
 
 type GuestView = 'login' | 'forgot-password'
+
+const SPLASH_FADE_MS = 500
+const SPLASH_MIN_MS = 700
 
 function parseAuthRoute(pathname: string, search: string) {
   const params = new URLSearchParams(search)
@@ -31,7 +35,72 @@ function parseAuthRoute(pathname: string, search: string) {
   return null
 }
 
-function LoadingScreen() {
+/** 読み込み完了後もフェードアウトが終わるまでスプラッシュを残す */
+function useSplashGate(isBusy: boolean) {
+  const [blocking, setBlocking] = useState(isBusy)
+  const [fadingOut, setFadingOut] = useState(false)
+  const shownAtRef = useRef<number | null>(isBusy ? Date.now() : null)
+  const finishedRef = useRef(false)
+
+  const finish = useCallback(() => {
+    if (finishedRef.current) return
+    finishedRef.current = true
+    setBlocking(false)
+    setFadingOut(false)
+    shownAtRef.current = null
+  }, [])
+
+  useEffect(() => {
+    if (isBusy) {
+      finishedRef.current = false
+      if (!blocking) {
+        setBlocking(true)
+        setFadingOut(false)
+        shownAtRef.current = Date.now()
+      }
+      return
+    }
+
+    if (!blocking || fadingOut) return
+
+    const elapsed = shownAtRef.current ? Date.now() - shownAtRef.current : SPLASH_MIN_MS
+    const wait = Math.max(0, SPLASH_MIN_MS - elapsed)
+    const timer = window.setTimeout(() => setFadingOut(true), wait)
+    return () => window.clearTimeout(timer)
+  }, [isBusy, blocking, fadingOut])
+
+  // transitionend が飛ばない場合（HMR・opacity 変化なし等）の保険
+  useEffect(() => {
+    if (!fadingOut) return
+    const timer = window.setTimeout(finish, SPLASH_FADE_MS + 100)
+    return () => window.clearTimeout(timer)
+  }, [fadingOut, finish])
+
+  return { showSplash: blocking, fadingOut, onFadedOut: finish }
+}
+
+function LoadingScreen({
+  fadingOut = false,
+  onFadedOut,
+}: {
+  fadingOut?: boolean
+  onFadedOut?: () => void
+}) {
+  const [opaque, setOpaque] = useState(false)
+
+  useEffect(() => {
+    // HMR などでフェードアウト中に再マウントされた場合、フェードインさせない
+    if (fadingOut) {
+      setOpaque(false)
+      return
+    }
+
+    const id = requestAnimationFrame(() => {
+      requestAnimationFrame(() => setOpaque(true))
+    })
+    return () => cancelAnimationFrame(id)
+  }, [fadingOut])
+
   return (
     <PhoneMockFrame>
       <div
@@ -40,49 +109,43 @@ function LoadingScreen() {
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          color: '#888',
-          fontSize: 14,
+          background: '#fff',
+          padding: '0 40px',
         }}
       >
-        読み込み中...
+        <img
+          src={splashLogo}
+          alt="Movi"
+          style={{
+            width: '100%',
+            maxWidth: 280,
+            height: 'auto',
+            display: 'block',
+            opacity: opaque ? 1 : 0,
+            transition: `opacity ${SPLASH_FADE_MS}ms ease`,
+          }}
+          onTransitionEnd={(event) => {
+            if (event.propertyName !== 'opacity') return
+            if (fadingOut && !opaque) {
+              onFadedOut?.()
+            }
+          }}
+        />
       </div>
     </PhoneMockFrame>
   )
 }
 
-function AppContent() {
+function AppContent({
+  onboardingOpen,
+  onOnboardingClose,
+}: {
+  onboardingOpen: boolean
+  onOnboardingClose: () => void
+}) {
   const [tab, setTab] = useState<number>(1)
-  const [onboardingOpen, setOnboardingOpen] = useState(false)
-  const [profileChecked, setProfileChecked] = useState(false)
   const isDesktopPreview = useMediaQuery('(min-width: 768px)')
   const screens = [<ChatScreen key="chat" />, <RecordScreen key="record" />, <GraphScreen key="graph" />]
-
-  useEffect(() => {
-    let cancelled = false
-
-    fetchUserProfile()
-      .then((response) => {
-        if (!cancelled && !response.profile.isComplete) {
-          setOnboardingOpen(true)
-        }
-      })
-      .catch(() => {
-        // プロフィール取得失敗時はオンボーディングをスキップ
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setProfileChecked(true)
-        }
-      })
-
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
-  if (!profileChecked) {
-    return <LoadingScreen />
-  }
 
   return (
     <PhoneMockFrame>
@@ -95,8 +158,8 @@ function AppContent() {
         <ProfileSettingsSheet
           open={onboardingOpen}
           mode="onboarding"
-          onClose={() => setOnboardingOpen(false)}
-          onSaved={() => setOnboardingOpen(false)}
+          onClose={onOnboardingClose}
+          onSaved={onOnboardingClose}
         />
       </div>
     </PhoneMockFrame>
@@ -106,14 +169,56 @@ function AppContent() {
 export default function App() {
   const { isAuthenticated, isLoading, user } = useAuth()
   const [guestView, setGuestView] = useState<GuestView>('login')
+  const [bootstrapReady, setBootstrapReady] = useState(false)
+  const [onboardingOpen, setOnboardingOpen] = useState(false)
+
+  // 認証復元 +（ログイン時）プロフィール確認をまとめて待つ → スプラッシュは1回だけ
+  useEffect(() => {
+    if (isLoading) {
+      setBootstrapReady(false)
+      return
+    }
+
+    if (!isAuthenticated || user === null) {
+      setBootstrapReady(true)
+      setOnboardingOpen(false)
+      return
+    }
+
+    let cancelled = false
+    setBootstrapReady(false)
+
+    fetchUserProfile()
+      .then((response) => {
+        if (!cancelled && !response.profile.isComplete) {
+          setOnboardingOpen(true)
+        }
+      })
+      .catch(() => {
+        // プロフィール取得失敗時はオンボーディングをスキップ
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setBootstrapReady(true)
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [isLoading, isAuthenticated, user])
+
+  const splash = useSplashGate(isLoading || !bootstrapReady)
 
   const authRoute = useMemo(
     () => parseAuthRoute(window.location.pathname, window.location.search),
     [],
   )
 
-  if (isLoading) {
-    return <LoadingScreen />
+  if (splash.showSplash) {
+    return (
+      <LoadingScreen fadingOut={splash.fadingOut} onFadedOut={splash.onFadedOut} />
+    )
   }
 
   if (authRoute?.type === 'verify-email') {
@@ -162,5 +267,11 @@ export default function App() {
     )
   }
 
-  return <AppContent key={user.id} />
+  return (
+    <AppContent
+      key={user.id}
+      onboardingOpen={onboardingOpen}
+      onOnboardingClose={() => setOnboardingOpen(false)}
+    />
+  )
 }
