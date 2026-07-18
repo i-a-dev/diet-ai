@@ -83,13 +83,13 @@ final class AuthoritativeRecordContextBuilder
     }
 
     /**
-     * 今日詳細・直近7日・30日/6ヶ月サマリーの層付きコンテキストを組み立てる。
+     * 今日詳細・直近7日・8〜14日前・30日/6ヶ月サマリーの層付きコンテキストを組み立てる。
      *
      * @param list<array<string, mixed>> $mealRows6m
-     * @param array<string, array<string, mixed>> $nutritionByDate7
+     * @param array<string, array<string, mixed>> $nutritionByDate14 直近14日分の日次栄養サマリー
      * @param array<string, float|null> $weightByDate6m
-     * @param array<string, array{count: int, burnedCalories: int}> $stepsByDate7
-     * @param array<string, array{entries: list<array<string, mixed>>, burnedCalories: int}> $exercisesByDate7
+     * @param array<string, array{count: int, burnedCalories: int}> $stepsByDate14 直近14日分の歩数
+     * @param array<string, array{entries: list<array<string, mixed>>, burnedCalories: int}> $exercisesByDate14 直近14日分の運動
      * @param array<string, int> $stepsCountByDate6m date => step count
      * @param array<string, int> $exerciseKcalByDate6m date => burned kcal
      * @param array<string, mixed> $profileSnapshot
@@ -105,10 +105,10 @@ final class AuthoritativeRecordContextBuilder
         RecordQueryScope $scope,
         DateTimeImmutable $today,
         array $mealRows6m,
-        array $nutritionByDate7,
+        array $nutritionByDate14,
         array $weightByDate6m,
-        array $stepsByDate7,
-        array $exercisesByDate7,
+        array $stepsByDate14,
+        array $exercisesByDate14,
         array $stepsCountByDate6m,
         array $exerciseKcalByDate6m,
         array $profileSnapshot,
@@ -116,6 +116,8 @@ final class AuthoritativeRecordContextBuilder
     ): array {
         $today = $today->setTime(0, 0);
         $start7 = $today->modify('-6 days');
+        $start14 = $today->modify('-13 days');
+        $end8to14 = $today->modify('-7 days');
         $start30 = $today->modify('-29 days');
         $start6m = $today->modify('-6 months');
         $todayDate = $today->format('Y-m-d');
@@ -126,12 +128,24 @@ final class AuthoritativeRecordContextBuilder
             $start7,
             $today,
             $mealRows6m,
-            $nutritionByDate7,
+            $nutritionByDate14,
             $weightByDate6m,
-            $stepsByDate7,
-            $exercisesByDate7,
+            $stepsByDate14,
+            $exercisesByDate14,
         );
         $recent7d = $recent7['records'];
+
+        $prior8to14 = $this->buildDailyRecordsForRange(
+            $start14,
+            $end8to14,
+            $mealRows6m,
+            $nutritionByDate14,
+            $weightByDate6m,
+            $stepsByDate14,
+            $exercisesByDate14,
+        );
+        $recent8to14d = $prior8to14['records'];
+
         $todayDetail = null;
         foreach ($recent7d as $day) {
             if (($day['date'] ?? null) === $todayDate) {
@@ -186,8 +200,8 @@ final class AuthoritativeRecordContextBuilder
             : 'recent_7d_and_summary_30d';
 
         $layerGuidance = $primaryFocus === 'today_detail'
-            ? '主参照は today_detail。recent_7d / summary_30d / summary_6m は補助。recording_meta は記録開始時期の事実。'
-            : '主参照は recent_7d と summary_30d。summary_6m は中長期の補助。today_detail は当日状況の補足。recording_meta は記録開始時期の事実。';
+            ? '主参照は today_detail。recent_7d / recent_8_14d / summary_30d / summary_6m は補助。recording_meta は記録開始時期の事実。'
+            : '主参照は recent_7d と summary_30d。recent_8_14d は直近の前週比較用。summary_6m は中長期の補助。today_detail は当日状況の補足。recording_meta は記録開始時期の事実。';
 
         $payload = [
             'query_scope' => $scope->toArray(),
@@ -197,11 +211,13 @@ final class AuthoritativeRecordContextBuilder
             'profile' => $profileSnapshot,
             'today_detail' => $todayDetail,
             'recent_7d' => $recent7d,
+            'recent_8_14d' => $recent8to14d,
             'summary_30d' => $summary30d,
             'summary_6m' => $summary6m,
             'notes' => [
                 'record_status=no_record means no DB entry for that day; do not assert the user ate nothing',
-                'food names and kcal for specific meals must come from today_detail or recent_7d',
+                'food names and kcal for specific meals must come from today_detail, recent_7d, or recent_8_14d',
+                'recent_8_14d is days 8-14 ago (exclusive of recent_7d); use for week-over-week comparison',
                 'summary_30d and summary_6m have aggregates only (no meal food names)',
                 'summary weight_start_kg/weight_end_kg must be quoted with weight_start_recorded_on/weight_end_recorded_on',
                 'weight_end_kg is the latest (直近) recorded weight in the period; not necessarily period_end',
@@ -224,6 +240,7 @@ final class AuthoritativeRecordContextBuilder
             'profile' => $profileSnapshot,
             'today_detail' => $todayDetail,
             'recent_7d' => $recent7d,
+            'recent_8_14d' => $recent8to14d,
             'summary_30d' => $summary30d,
             'summary_6m' => $summary6m,
             'daily_records' => $recent7d,
@@ -236,6 +253,7 @@ final class AuthoritativeRecordContextBuilder
                 $recordingMeta,
                 $todayDetail,
                 $recent7d,
+                $recent8to14d,
                 $summary30d,
                 $summary6m,
                 $profileSnapshot,
@@ -607,6 +625,7 @@ final class AuthoritativeRecordContextBuilder
      * @param array<string, mixed> $recordingMeta
      * @param array<string, mixed> $todayDetail
      * @param list<array<string, mixed>> $recent7d
+     * @param list<array<string, mixed>> $recent8to14d
      * @param array<string, mixed> $summary30d
      * @param array<string, mixed> $summary6m
      * @param array<string, mixed> $profileSnapshot
@@ -618,6 +637,7 @@ final class AuthoritativeRecordContextBuilder
         array $recordingMeta,
         array $todayDetail,
         array $recent7d,
+        array $recent8to14d,
         array $summary30d,
         array $summary6m,
         array $profileSnapshot,
@@ -658,6 +678,16 @@ final class AuthoritativeRecordContextBuilder
         $lines[] = '';
         $lines[] = '■ recent_7d（' . count($recent7d) . '日・日次明細）';
         foreach ($recent7d as $day) {
+            $lines[] = sprintf(
+                '- %s: %s / %dkcal',
+                (string) ($day['date'] ?? ''),
+                (string) ($day['record_status'] ?? 'no_record'),
+                (int) ($day['total_calories'] ?? 0),
+            );
+        }
+        $lines[] = '';
+        $lines[] = '■ recent_8_14d（' . count($recent8to14d) . '日・8〜14日前の日次明細）';
+        foreach ($recent8to14d as $day) {
             $lines[] = sprintf(
                 '- %s: %s / %dkcal',
                 (string) ($day['date'] ?? ''),

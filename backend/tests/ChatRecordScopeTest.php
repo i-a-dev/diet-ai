@@ -350,6 +350,12 @@ $mealRows6m = [
         'calories' => 800,
     ],
     [
+        'recordedOn' => '2026-07-03',
+        'mealType' => 'lunch',
+        'foodName' => '前週のうどん',
+        'calories' => 450,
+    ],
+    [
         'recordedOn' => '2026-07-10',
         'mealType' => 'lunch',
         'foodName' => 'パスタ',
@@ -369,10 +375,11 @@ $weightByDate6m = [
     '2026-06-20' => 70.0,
     '2026-07-16' => 68.5,
 ];
-$stepsByDate7 = [
+$stepsByDate14 = [
     '2026-07-16' => ['count' => 5000, 'burnedCalories' => 150],
+    '2026-07-03' => ['count' => 4000, 'burnedCalories' => 120],
 ];
-$exercisesByDate7 = [];
+$exercisesByDate14 = [];
 $stepsCount6m = [
     '2026-07-16' => 5000,
     '2026-07-01' => 3000,
@@ -388,8 +395,8 @@ $layered = $builder->buildLayered(
     $mealRows6m,
     [],
     $weightByDate6m,
-    $stepsByDate7,
-    $exercisesByDate7,
+    $stepsByDate14,
+    $exercisesByDate14,
     $stepsCount6m,
     $exerciseKcal6m,
     ['daily_intake_goal_kcal' => 1200],
@@ -411,13 +418,20 @@ assertContains('recording_meta', $layered['json'], 'json has recording_meta');
 assertSame('2026-07-16', $layered['today_detail']['date'] ?? null, 'today_detail date');
 assertSame('白米 200g', $layered['today_detail']['meals'][0]['food_name'] ?? null, 'today_detail meal');
 assertSame(7, count($layered['recent_7d']), 'recent_7d has 7 days');
+assertSame('2026-07-10', $layered['recent_7d'][0]['date'] ?? null, 'recent_7d starts at today-6');
+assertSame('2026-07-16', $layered['recent_7d'][6]['date'] ?? null, 'recent_7d ends at today');
+assertSame(7, count($layered['recent_8_14d']), 'recent_8_14d has 7 days');
+assertSame('2026-07-03', $layered['recent_8_14d'][0]['date'] ?? null, 'recent_8_14d starts at today-13');
+assertSame('2026-07-09', $layered['recent_8_14d'][6]['date'] ?? null, 'recent_8_14d ends at today-7');
+assertSame('前週のうどん', $layered['recent_8_14d'][0]['meals'][0]['food_name'] ?? null, 'recent_8_14d meal');
 assertContains('today_detail', $layered['json'], 'json has today_detail');
 assertContains('recent_7d', $layered['json'], 'json has recent_7d');
+assertContains('recent_8_14d', $layered['json'], 'json has recent_8_14d');
 assertContains('summary_30d', $layered['json'], 'json has summary_30d');
 assertContains('summary_6m', $layered['json'], 'json has summary_6m');
 assertSame('2026-06-17', $layered['summary_30d']['period_start'] ?? null, 'summary 30d start');
 assertSame('2026-07-16', $layered['summary_30d']['period_end'] ?? null, 'summary 30d end');
-assertSame(3, $layered['summary_30d']['days_with_meals'] ?? null, 'summary 30d meal days');
+assertSame(4, $layered['summary_30d']['days_with_meals'] ?? null, 'summary 30d meal days');
 assertSame(-1.5, $layered['summary_30d']['weight_delta_kg'] ?? null, 'summary 30d weight delta');
 assertSame('2026-06-20', $layered['summary_30d']['weight_start_recorded_on'] ?? null, 'summary 30d weight start date');
 assertSame('2026-07-16', $layered['summary_30d']['weight_end_recorded_on'] ?? null, 'summary 30d weight end date');
@@ -431,7 +445,7 @@ assertSame('recorded', $layered['summary_30d']['weight_on_period_end']['status']
 assertSame(68.5, $layered['summary_30d']['weight_on_period_end']['kg'] ?? null, 'period_end kg');
 assertSame('2026-01-16', $layered['summary_6m']['period_start'] ?? null, 'summary 6m start');
 assertSame('2026-07-16', $layered['summary_6m']['period_end'] ?? null, 'summary 6m end');
-assertSame(4, $layered['summary_6m']['days_with_meals'] ?? null, 'summary 6m meal days');
+assertSame(5, $layered['summary_6m']['days_with_meals'] ?? null, 'summary 6m meal days');
 assertSame(-3.5, $layered['summary_6m']['weight_delta_kg'] ?? null, 'summary 6m weight delta');
 assertSame('2026-02-01', $layered['summary_6m']['weight_start_recorded_on'] ?? null, 'summary 6m weight start date');
 assertSame('no_record', $layered['summary_6m']['weight_on_period_start']['status'] ?? null, '6m no weight on period_start');
@@ -455,8 +469,8 @@ $layeredTodayScope = $builder->buildLayered(
     $mealRows6m,
     [],
     $weightByDate6m,
-    $stepsByDate7,
-    $exercisesByDate7,
+    $stepsByDate14,
+    $exercisesByDate14,
     $stepsCount6m,
     $exerciseKcal6m,
     [],
@@ -469,6 +483,7 @@ $finalLayered = $composer->composeFinalUserMessage(
     $layered,
 );
 assertContains('today_detail', $finalLayered, 'final message mentions today_detail layer');
+assertContains('recent_8_14d', $finalLayered, 'final message mentions recent_8_14d layer');
 assertContains('summary_30d', $finalLayered, 'final message mentions summary_30d layer');
 assertContains('summary_6m', $finalLayered, 'final message mentions summary_6m layer');
 assertContains('recording_meta', $finalLayered, 'final message mentions recording_meta');

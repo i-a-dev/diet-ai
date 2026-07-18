@@ -340,15 +340,15 @@ TEXT;
     {
         $today = $today->setTime(0, 0);
         $todayStr = $today->format('Y-m-d');
-        $start7 = $today->modify('-6 days');
-        $start7Str = $start7->format('Y-m-d');
+        $start14 = $today->modify('-13 days');
+        $start14Str = $start14->format('Y-m-d');
         $start6mStr = $today->modify('-6 months')->format('Y-m-d');
 
         $mealRows6m = $this->mealEntryRepository->findBetween($start6mStr, $todayStr);
-        $nutritionRows = $this->dailyNutritionSummaryRepository->getBetween($start7Str, $todayStr);
-        $nutritionByDate7 = [];
+        $nutritionRows = $this->dailyNutritionSummaryRepository->getBetween($start14Str, $todayStr);
+        $nutritionByDate14 = [];
         foreach ($nutritionRows as $row) {
-            $nutritionByDate7[(string) $row['recordedOn']] = $row;
+            $nutritionByDate14[(string) $row['recordedOn']] = $row;
         }
 
         $weightPoints = $this->weightRepository->getPointsBetween($start6mStr, $todayStr);
@@ -357,13 +357,13 @@ TEXT;
             $weightByDate6m[(string) $point['date']] = $point['value'];
         }
 
-        $stepsByDate7 = [];
-        $exercisesByDate7 = [];
-        $cursor = $start7;
+        $stepsByDate14 = [];
+        $exercisesByDate14 = [];
+        $cursor = $start14;
         while ($cursor <= $today) {
             $date = $cursor->format('Y-m-d');
-            $stepsByDate7[$date] = $this->activityRepository->getStepsForDate($date);
-            $exercisesByDate7[$date] = $this->activityRepository->getExercisesForDate($date);
+            $stepsByDate14[$date] = $this->activityRepository->getStepsForDate($date);
+            $exercisesByDate14[$date] = $this->activityRepository->getExercisesForDate($date);
             $cursor = $cursor->modify('+1 day');
         }
 
@@ -381,10 +381,10 @@ TEXT;
             $scope,
             $today,
             $mealRows6m,
-            $nutritionByDate7,
+            $nutritionByDate14,
             $weightByDate6m,
-            $stepsByDate7,
-            $exercisesByDate7,
+            $stepsByDate14,
+            $exercisesByDate14,
             $stepsCountByDate6m,
             $exerciseKcalByDate6m,
             $this->buildProfileSnapshot(),
