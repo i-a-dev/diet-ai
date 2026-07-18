@@ -326,13 +326,18 @@ export function ExerciseRegisterSheet({
                 <div style={chipWrapStyle}>
                   {history.map((item) => (
                     <button
-                      key={`${item.name}-${item.amount}-${item.unit}`}
+                      key={`${item.name}-${item.amount}-${item.unit}-${item.burnedCalories}`}
                       type="button"
                       onClick={() => handleHistorySelect(item)}
                       style={historyChipStyle}
                     >
-                      {item.name} {item.amount}
-                      {item.unit === "min" ? "分" : "回"}
+                      <span style={historyChipLabelStyle}>
+                        {item.name} {item.amount}
+                        {item.unit === "min" ? "分" : "回"}
+                      </span>
+                      <span style={historyChipKcalStyle}>
+                        {item.burnedCalories}kcal
+                      </span>
                     </button>
                   ))}
                   {history.length === 0 && (
@@ -567,13 +572,33 @@ const chipWrapStyle: CSSProperties = {
 };
 
 const historyChipStyle: CSSProperties = {
-  padding: "3px 12px",
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 8,
+  padding: "4px 12px",
   borderRadius: 999,
   border: "1px solid #BFE6D0",
   background: "#EDF9F3",
   fontSize: 13,
   color: "#2E7D5A",
   cursor: "pointer",
+  maxWidth: "100%",
+};
+
+const historyChipLabelStyle: CSSProperties = {
+  fontWeight: 500,
+  lineHeight: 1.3,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+};
+
+const historyChipKcalStyle: CSSProperties = {
+  flexShrink: 0,
+  fontSize: 12,
+  fontWeight: 500,
+  color: "#15803D",
+  lineHeight: 1.2,
 };
 
 const emptyHistoryStyle: CSSProperties = {
