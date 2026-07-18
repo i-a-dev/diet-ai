@@ -9,6 +9,7 @@ import { GraphScreen } from './components/screens/GraphScreen.tsx'
 import { LoginScreen } from './components/screens/LoginScreen.tsx'
 import { RecordScreen } from './components/screens/RecordScreen.tsx'
 import { ResetPasswordScreen } from './components/screens/ResetPasswordScreen.tsx'
+import { SettingsScreen } from './components/screens/SettingsScreen.tsx'
 import { VerifyEmailScreen } from './components/screens/VerifyEmailScreen.tsx'
 import { fetchUserProfile } from './api/client.ts'
 import { useAuth } from './contexts/AuthContext.tsx'
@@ -144,8 +145,17 @@ function AppContent({
   onOnboardingClose: () => void
 }) {
   const [tab, setTab] = useState<number>(1)
+  const [profileRefreshKey, setProfileRefreshKey] = useState(0)
   const isDesktopPreview = useMediaQuery('(min-width: 768px)')
-  const screens = [<ChatScreen key="chat" />, <RecordScreen key="record" />, <GraphScreen key="graph" />]
+  const screens = [
+    <ChatScreen key="chat" />,
+    <RecordScreen key="record" />,
+    <GraphScreen key="graph" profileRefreshKey={profileRefreshKey} />,
+    <SettingsScreen
+      key="settings"
+      onProfileUpdated={() => setProfileRefreshKey((key) => key + 1)}
+    />,
+  ]
 
   return (
     <PhoneMockFrame>

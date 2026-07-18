@@ -379,10 +379,13 @@ function formatFullDateLabel(date: string) {
   return `${year}/${Number(month)}/${Number(day)}`;
 }
 
-export function GraphScreen() {
+interface GraphScreenProps {
+  profileRefreshKey?: number;
+}
+
+export function GraphScreen({ profileRefreshKey = 0 }: GraphScreenProps) {
   const [metricTab, setMetricTab] = useState(0);
   const [periodTab, setPeriodTab] = useState(0);
-  const [profileRefreshKey, setProfileRefreshKey] = useState(0);
   const [displayedTimeline, setDisplayedTimeline] =
     useState<WeightTimelineBundle | null>(null);
   const [pendingTimeline, setPendingTimeline] =
@@ -432,10 +435,7 @@ export function GraphScreen() {
         minHeight: 0,
       }}
     >
-      <TopNav
-        title="記録を見る"
-        onProfileUpdated={() => setProfileRefreshKey((key) => key + 1)}
-      />
+      <TopNav title="記録を見る" />
 
       <div
         style={{
