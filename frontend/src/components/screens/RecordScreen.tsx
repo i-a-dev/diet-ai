@@ -53,15 +53,6 @@ interface MealSectionData {
   isLast?: boolean;
 }
 
-const MEAL_SUGGESTIONS: MealItemInput[] = [
-  { label: "白米 150g", kcal: "234kcal" },
-  { label: "味噌汁", kcal: "45kcal" },
-  { label: "焼き鮭", kcal: "180kcal" },
-  { label: "サラダ", kcal: "35kcal" },
-  { label: "豆腐ハンバーグ", kcal: "320kcal" },
-  { label: "野菜スープ", kcal: "85kcal" },
-];
-
 const BASE_MEALS: Record<MealKey, Omit<MealSectionData, "items">> = {
   breakfast: {
     title: "朝ごはん",
@@ -1007,7 +998,6 @@ export function RecordScreen() {
         open={mealSheetOpen}
         mealType={activeMealKey ?? "breakfast"}
         mealTitle={activeMealKey ? meals[activeMealKey].title : ""}
-        suggestions={MEAL_SUGGESTIONS}
         currentMealKcal={activeMealKey ? mealTotals[activeMealKey] : 0}
         currentTotalKcal={totalMealKcal}
         dailyGoalKcal={dailyIntakeGoalKcal}

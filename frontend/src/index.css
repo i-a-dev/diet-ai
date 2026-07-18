@@ -154,8 +154,22 @@ body {
   }
 }
 
+@keyframes diet-ai-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.diet-ai-spin {
+  animation: diet-ai-spin 0.8s linear infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .chat-markdown strong {
+    animation: none;
+  }
+
+  .diet-ai-spin {
     animation: none;
   }
 }

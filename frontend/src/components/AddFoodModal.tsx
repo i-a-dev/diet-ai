@@ -6,6 +6,7 @@ import {
   useState,
   type CSSProperties,
 } from "react";
+import { Loader2 } from "lucide-react";
 import { BottomSheet } from "./BottomSheet.tsx";
 import { ORANGE } from "../constants.ts";
 import { FoodSearchStatus } from "./FoodSearchStatus.tsx";
@@ -82,7 +83,6 @@ interface AddFoodModalProps {
   open: boolean;
   mealType: MealType;
   mealTitle: string;
-  suggestions: MealItemInput[];
   currentMealKcal: number;
   currentTotalKcal: number;
   dailyGoalKcal: number | null;
@@ -145,7 +145,6 @@ export function AddFoodModal({
   open,
   mealType,
   mealTitle,
-  suggestions,
   currentMealKcal,
   currentTotalKcal,
   dailyGoalKcal,
@@ -166,6 +165,7 @@ export function AddFoodModal({
   const [historyTab, setHistoryTab] = useState<"recent" | "meal">("recent");
   const [recentHistory, setRecentHistory] = useState<MealItemInput[]>([]);
   const [mealHistory, setMealHistory] = useState<MealItemInput[]>([]);
+  const [isHistoryLoading, setIsHistoryLoading] = useState(false);
   const [selectedHistoryItem, setSelectedHistoryItem] =
     useState<MealItemInput | null>(null);
   const activeSearchTokenRef = useRef(0);
@@ -183,6 +183,8 @@ export function AddFoodModal({
       activeSearchTokenRef.current = 0;
       return;
     }
+    // 初回描画前に loading を立て、サジェスト差し替えや空表示のちらつきを防ぐ
+    setIsHistoryLoading(true);
     setInputValue("");
     setManualKcal("");
     setProgress(makeInitialProgress());
@@ -201,6 +203,7 @@ export function AddFoodModal({
     if (!open) return;
     const token = Date.now();
     historyRequestTokenRef.current = token;
+    setIsHistoryLoading(true);
     void (async () => {
       try {
         const [recent, byMeal] = await Promise.all([
@@ -214,6 +217,10 @@ export function AddFoodModal({
         if (historyRequestTokenRef.current !== token) return;
         setRecentHistory([]);
         setMealHistory([]);
+      } finally {
+        if (historyRequestTokenRef.current === token) {
+          setIsHistoryLoading(false);
+        }
       }
     })();
   }, [open, mealType]);
@@ -768,7 +775,6 @@ export function AddFoodModal({
 
   function renderIdleSection() {
     const activeHistory = historyTab === "recent" ? recentHistory : mealHistory;
-    const chipItems = activeHistory.length > 0 ? activeHistory : suggestions;
     return (
       <>
         <div style={hintTitleStyle}>履歴から選ぶ</div>
@@ -801,26 +807,30 @@ export function AddFoodModal({
           </button>
         </div>
         <div style={historyScrollAreaStyle}>
-          <div style={chipWrapStyle}>
-            {chipItems.map((item) => (
-              <button
-                key={`${item.label}-${item.kcal}`}
-                type="button"
-                onClick={() => handleHistorySelect(item)}
-                style={chipStyle}
-              >
-                <span style={chipLabelStyle}>{item.label}</span>
-                <span style={chipKcalStyle}>{item.kcal}</span>
-              </button>
-            ))}
-            {chipItems.length === 0 && (
-              <span style={emptyHistoryStyle}>履歴がありません</span>
-            )}
-          </div>
+          {isHistoryLoading ? (
+            <div style={historyLoadingStyle} aria-busy="true" aria-live="polite">
+              <Loader2 size={20} color="#9CA3AF" className="diet-ai-spin" />
+              <span>読み込み中...</span>
+            </div>
+          ) : (
+            <div style={chipWrapStyle}>
+              {activeHistory.map((item) => (
+                <button
+                  key={`${item.label}-${item.kcal}`}
+                  type="button"
+                  onClick={() => handleHistorySelect(item)}
+                  style={chipStyle}
+                >
+                  <span style={chipLabelStyle}>{item.label}</span>
+                  <span style={chipKcalStyle}>{item.kcal}</span>
+                </button>
+              ))}
+              {activeHistory.length === 0 && (
+                <span style={emptyHistoryStyle}>履歴がありません</span>
+              )}
+            </div>
+          )}
         </div>
-        <button type="button" style={secondaryBtnStyle}>
-          バーコードで読み取る
-        </button>
         <button
           type="button"
           onClick={() => void handleSearch()}
@@ -1209,14 +1219,29 @@ const chipWrapStyle: CSSProperties = {
   gap: 8,
 };
 
+const HISTORY_AREA_HEIGHT = 180;
+
 const historyScrollAreaStyle: CSSProperties = {
-  maxHeight: 180,
+  height: HISTORY_AREA_HEIGHT,
+  maxHeight: HISTORY_AREA_HEIGHT,
+  boxSizing: "border-box",
   overflowY: "auto",
   border: "1px solid #F1F5F9",
   borderRadius: 10,
   padding: "10px 8px",
   marginBottom: 12,
   background: "#fff",
+};
+
+const historyLoadingStyle: CSSProperties = {
+  height: "100%",
+  minHeight: HISTORY_AREA_HEIGHT - 20,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  gap: 8,
+  fontSize: 13,
+  color: "#9CA3AF",
 };
 
 const tabWrapStyle: CSSProperties = {
@@ -1285,19 +1310,6 @@ const chipKcalStyle: CSSProperties = {
 const emptyHistoryStyle: CSSProperties = {
   fontSize: 12,
   color: "#9CA3AF",
-};
-
-const secondaryBtnStyle: CSSProperties = {
-  width: "100%",
-  padding: "12px 0",
-  borderRadius: 10,
-  border: "1px solid #E5E7EB",
-  background: "#fff",
-  fontSize: 14,
-  fontWeight: 600,
-  color: "#4B5563",
-  cursor: "pointer",
-  marginBottom: 8,
 };
 
 const primaryBtnStyle: CSSProperties = {
