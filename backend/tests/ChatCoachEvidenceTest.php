@@ -391,9 +391,11 @@ assertSame('below', $authBelowBmr['energy_evidence']['comparisons']['registered_
 
 $finalAbove = $composer->composeFinalUserMessage('最近の平均どう？', $scopeToday, $authAboveBmr);
 assertContains('registered_avg_vs_bmr":"above"', $finalAbove, 'composer exposes above comparison');
-assertContains('avg>BMR なのに下回ると言わない', $finalAbove, 'composer forbids inverted below wording');
+assertContains('BMR比較で「痩せる/太る」判定は禁止', $finalAbove, 'composer forbids BMR lose/gain labels');
 assertContains('数値比較の正確性', $systemPrompt, 'system prompt has numeric accuracy section');
-assertContains('registered_avg_vs_bmr=above のとき', $systemPrompt, 'system forbids saying below when above');
+assertContains('BMRを下回れば痩せる', $systemPrompt, 'system forbids BMR as lose/gain threshold');
+assertContains('推定消費カロリー(TDEE)', $systemPrompt, 'system points to TDEE for rough balance');
+assertContains('痩せる/太るの閾値ではない', (string) ($authAboveBmr['energy_evidence']['metric_roles']['bmr_kcal'] ?? ''), 'metric role forbids BMR threshold');
 echo "OK numeric comparisons\n";
 
 // --- Composer sections snapshot-ish ---

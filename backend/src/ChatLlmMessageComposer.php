@@ -98,7 +98,10 @@ final class ChatLlmMessageComposer
         if ($comparisons !== []) {
             $blocks[] = 'numeric_comparisons(PHP計算・大小の正): '
                 . (json_encode($comparisons, JSON_UNESCAPED_UNICODE) ?: '{}');
-            $blocks[] = '上記 comparisons と矛盾する「下回る／上回る」表現は禁止。avg>BMR なのに下回ると言わない。';
+            $blocks[] = '大小の取り違え禁止。加えて BMR比較で「痩せる/太る」判定は禁止。体重増減の参考はTDEE比較（推定）のみ。';
+        }
+        if (is_array($energy['metric_roles'] ?? null) && $energy['metric_roles'] !== []) {
+            $blocks[] = 'metric_roles: ' . (json_encode($energy['metric_roles'], JSON_UNESCAPED_UNICODE) ?: '{}');
         }
         $blocks[] = sprintf(
             'weight_record_count=%s / trend_status=%s / can_compute_remaining_to_target=%s',

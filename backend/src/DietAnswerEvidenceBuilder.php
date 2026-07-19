@@ -311,9 +311,15 @@ final class DietAnswerEvidenceBuilder
                 'equal' => 'ほぼ同じ',
                 'unavailable' => '比較不能',
             ],
+            'metric_roles' => [
+                'bmr_kcal' => '安静時の推定基礎代謝。痩せる/太るの閾値ではない',
+                'estimated_tdee_kcal' => '推定の1日総消費。摂取との比較はエネルギー収支の参考推定のみ',
+                'daily_intake_goal_kcal' => '目標摂取カロリー。順調さの主な比較対象',
+                'registered_avg_intake_kcal_on_days_with_meals' => '食事記録がある日の登録カロリー平均。実総摂取とは限らない',
+            ],
             'note' => '登録カロリーと目標/BMR/TDEEの大小は comparisons を正とする。'
-                . '平均値は「食事記録がある日の登録カロリー平均」であり、実摂取が基礎代謝未満とは断定しない。'
-                . '食事完了不明のため確定赤字・脂肪減少の断定は不可',
+                . 'BMR比較で痩せる/太ると言わない。体重増減の参考はTDEE比較（推定）を使う。'
+                . '平均値は「食事記録がある日の登録カロリー平均」であり、確定収支や脂肪増減の断定は不可',
         ];
     }
 
