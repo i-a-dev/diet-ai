@@ -8,7 +8,7 @@ declare(strict_types=1);
  * 変更後フロー:
  * 1. Claude Haiku で検索計画（1回）
  * 2. 固定テンプレートで Brave 検索（通常1〜2回、最大4回）
- * 3. 上位URLの HTML から複数バリアント抽出（最大3URL）
+ * 3. 上位URLの HTML から複数バリアント抽出（最大6URL）
  * 4. 十分な候補が取れたら早期終了
  * 5. 候補0件のみ Claude Web Search を最大1回
  *
@@ -166,6 +166,9 @@ final class AiWebSearchService
         $confirmation = [];
 
         foreach ($queries as $query) {
+            if (!$this->shouldContinueBraveSearch($accepted, $budget)) {
+                break;
+            }
             if (!$budget->shouldExecuteBraveQuery($query)) {
                 continue;
             }
@@ -192,7 +195,7 @@ final class AiWebSearchService
             $accepted = $this->mergeVerifiedCandidates($accepted, $extracted['accepted']);
             $confirmation = $this->mergeConfirmationCandidates($confirmation, $extracted['confirmation']);
 
-            if ($this->hasSufficientCandidates($accepted, $plan)) {
+            if ($this->hasUsableAcceptedCandidates($accepted)) {
                 $diagnostics->setStoppedReason('sufficient_variants');
 
                 return [
@@ -206,25 +209,27 @@ final class AiWebSearchService
             return ['accepted' => [], 'confirmation' => []];
         }
 
-        $extracted = $this->extractFromRankedUrls(
-            array_values($mergedResults),
-            $plan,
-            $budget,
-            $userInput,
-        );
-        $accepted = $this->mergeVerifiedCandidates($accepted, $extracted['accepted']);
-        $confirmation = $this->mergeConfirmationCandidates($confirmation, $extracted['confirmation']);
+        if (!$this->hasUsableAcceptedCandidates($accepted) && $budget->hasHtmlFetchBudgetRemaining()) {
+            $extracted = $this->extractFromRankedUrls(
+                array_values($mergedResults),
+                $plan,
+                $budget,
+                $userInput,
+            );
+            $accepted = $this->mergeVerifiedCandidates($accepted, $extracted['accepted']);
+            $confirmation = $this->mergeConfirmationCandidates($confirmation, $extracted['confirmation']);
 
-        if ($this->hasSufficientCandidates($accepted, $plan)) {
-            $diagnostics->setStoppedReason('sufficient_variants');
+            if ($this->hasUsableAcceptedCandidates($accepted)) {
+                $diagnostics->setStoppedReason('sufficient_variants');
 
-            return [
-                'accepted' => $accepted,
-                'confirmation' => $this->finalizeConfirmationCandidates($confirmation),
-            ];
+                return [
+                    'accepted' => $accepted,
+                    'confirmation' => $this->finalizeConfirmationCandidates($confirmation),
+                ];
+            }
         }
 
-        while ($budget->canAdditionalBraveSearch()) {
+        while ($this->shouldContinueBraveSearch($accepted, $budget)) {
             $extraQuery = $this->buildAdditionalQuery($plan, $userInput, $budget);
             if ($extraQuery === null || !$budget->shouldExecuteBraveQuery($extraQuery)) {
                 break;
@@ -252,7 +257,7 @@ final class AiWebSearchService
             $accepted = $this->mergeVerifiedCandidates($accepted, $extracted['accepted']);
             $confirmation = $this->mergeConfirmationCandidates($confirmation, $extracted['confirmation']);
 
-            if ($this->hasSufficientCandidates($accepted, $plan)) {
+            if ($this->hasUsableAcceptedCandidates($accepted)) {
                 $diagnostics->setStoppedReason('sufficient_variants');
 
                 return [
@@ -270,6 +275,38 @@ final class AiWebSearchService
             'accepted' => $accepted,
             'confirmation' => $this->finalizeConfirmationCandidates($confirmation),
         ];
+    }
+
+    /**
+     * 追加 Brave は「accepted がまだ無い」かつ「HTMLを開ける余地がある」ときだけ。
+     *
+     * @param list<array<string, mixed>> $accepted
+     */
+    private function shouldContinueBraveSearch(array $accepted, WebSearchBudget $budget): bool
+    {
+        if ($this->hasUsableAcceptedCandidates($accepted)) {
+            return false;
+        }
+
+        if (!$budget->hasHtmlFetchBudgetRemaining()) {
+            return false;
+        }
+
+        return $budget->canBraveSearch();
+    }
+
+    /**
+     * @param list<array<string, mixed>> $candidates
+     */
+    private function hasUsableAcceptedCandidates(array $candidates): bool
+    {
+        foreach ($candidates as $candidate) {
+            if ((int) ($candidate['kcal'] ?? 0) > 0) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -334,7 +371,12 @@ final class AiWebSearchService
         WebSearchBudget $budget,
         string $userInput,
     ): array {
-        $ranked = $this->urlRanker->rank($results, $plan->normalizedProductName, $plan->brandName);
+        $ranked = $this->urlRanker->rank(
+            $results,
+            $plan->normalizedProductName,
+            $plan->brandName,
+            $plan->searchMode,
+        );
         $accepted = [];
         $confirmation = [];
 
@@ -380,7 +422,13 @@ final class AiWebSearchService
                 $accepted[] = $candidate;
             }
 
-            if ($this->hasSufficientCandidates($accepted, $plan)) {
+            // 単品は accepted 1件で HTML 追加取得を止める。
+            // バリアントありは従来どおり十分なサイズ数が揃うまで続ける。
+            if ($plan->likelyHasVariants) {
+                if ($this->hasSufficientCandidates($accepted, $plan)) {
+                    break;
+                }
+            } elseif ($this->hasUsableAcceptedCandidates($accepted)) {
                 break;
             }
         }

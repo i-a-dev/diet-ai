@@ -20,7 +20,6 @@ export function SingleCandidateConfirmationCard({
 }: SingleCandidateConfirmationCardProps) {
   const webCandidate = candidate.webCandidate;
   const sourceUrl = webCandidate?.source_url?.trim() || null;
-  const sourceTitle = webCandidate?.source_title?.trim() || null;
 
   return (
     <div style={cardStyle} aria-labelledby="single-candidate-heading">
@@ -36,11 +35,6 @@ export function SingleCandidateConfirmationCard({
         source={webCandidate?.source ?? "brave_html"}
         sourceUrl={sourceUrl}
       />
-      {sourceTitle && (
-        <div style={sourceTitleStyle} title={sourceTitle}>
-          参照元: {sourceTitle}
-        </div>
-      )}
       <button
         type="button"
         onClick={onConfirm}
@@ -99,14 +93,6 @@ const kcalStyle: CSSProperties = {
   fontSize: 24,
   fontWeight: 800,
   color: "#111827",
-};
-
-const sourceTitleStyle: CSSProperties = {
-  marginTop: 6,
-  fontSize: 12,
-  color: "#6B7280",
-  lineHeight: 1.5,
-  wordBreak: "break-word",
 };
 
 const primaryButtonStyle: CSSProperties = {

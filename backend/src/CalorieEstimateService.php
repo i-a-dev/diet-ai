@@ -7,7 +7,7 @@ declare(strict_types=1);
  * mode=web のとき（変更後）:
  * 1. Claude Haiku で検索計画（1回）
  * 2. 固定テンプレートで Brave 検索（通常1〜2回、最大4回）
- * 3. 上位URL HTML から複数バリアント抽出（最大3URL）
+ * 3. 上位URL HTML から複数バリアント抽出（最大6URL）
  * 4. 候補0件のみ Claude Web Search フォールバック（最大1回）
  */
 final class CalorieEstimateService

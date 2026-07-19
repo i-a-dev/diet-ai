@@ -10,7 +10,7 @@ final class WebSearchBudget
     public const INITIAL_BRAVE_SEARCHES = 2;
     public const ADDITIONAL_BRAVE_SEARCHES = 2;
     public const MAX_TOTAL_BRAVE_SEARCHES = 4;
-    public const MAX_HTML_FETCHES = 3;
+    public const MAX_HTML_FETCHES = 6;
     public const MAX_CLAUDE_WEB_SEARCHES = 1;
 
     private int $haikuCalls = 0;
@@ -71,13 +71,18 @@ final class WebSearchBudget
 
     public function canFetchHtml(string $url): bool
     {
-        if ($this->htmlFetchCalls >= self::MAX_HTML_FETCHES) {
+        if (!$this->hasHtmlFetchBudgetRemaining()) {
             return false;
         }
 
         $normalized = $this->normalizeUrl($url);
 
         return $normalized !== '' && !in_array($normalized, $this->fetchedUrls, true);
+    }
+
+    public function hasHtmlFetchBudgetRemaining(): bool
+    {
+        return $this->htmlFetchCalls < self::MAX_HTML_FETCHES;
     }
 
     public function recordHtmlFetch(string $url): void
