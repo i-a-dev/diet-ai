@@ -10,7 +10,7 @@ final class WebSearchResultCache
     private const DEFAULT_TTL_SECONDS = 86400;
 
     /** 候補スキーマ変更時に上げて古いキャッシュを無効化する */
-    private const CACHE_SCHEMA_VERSION = 'v4';
+    private const CACHE_SCHEMA_VERSION = 'v5';
 
     public function __construct(
         private readonly string $cacheDir = '',
@@ -21,9 +21,13 @@ final class WebSearchResultCache
     /**
      * @return array{plan?: array<string, mixed>, candidates?: list<array<string, mixed>>}|null
      */
-    public function get(string $userInput, ?string $brandName = null, ?string $variantHint = null): ?array
-    {
-        $path = $this->pathForKey($this->buildKey($userInput, $brandName, $variantHint));
+    public function get(
+        string $userInput,
+        ?string $brandName = null,
+        ?string $variantHint = null,
+        string $provider = AiWebSearchProvider::AUTO,
+    ): ?array {
+        $path = $this->pathForKey($this->buildKey($userInput, $brandName, $variantHint, $provider));
         if (!is_file($path)) {
             return null;
         }
@@ -51,14 +55,19 @@ final class WebSearchResultCache
     /**
      * @param array{plan?: array<string, mixed>, candidates?: list<array<string, mixed>>} $payload
      */
-    public function put(string $userInput, array $payload, ?string $brandName = null, ?string $variantHint = null): void
-    {
+    public function put(
+        string $userInput,
+        array $payload,
+        ?string $brandName = null,
+        ?string $variantHint = null,
+        string $provider = AiWebSearchProvider::AUTO,
+    ): void {
         $dir = $this->resolveCacheDir();
         if (!is_dir($dir) && !mkdir($dir, 0775, true) && !is_dir($dir)) {
             return;
         }
 
-        $path = $this->pathForKey($this->buildKey($userInput, $brandName, $variantHint));
+        $path = $this->pathForKey($this->buildKey($userInput, $brandName, $variantHint, $provider));
         $encoded = json_encode([
             'savedAt' => time(),
             'payload' => $payload,
@@ -69,10 +78,15 @@ final class WebSearchResultCache
         }
     }
 
-    private function buildKey(string $userInput, ?string $brandName, ?string $variantHint): string
-    {
+    private function buildKey(
+        string $userInput,
+        ?string $brandName,
+        ?string $variantHint,
+        string $provider,
+    ): string {
         $parts = [
             self::CACHE_SCHEMA_VERSION,
+            AiWebSearchProvider::resolve($provider),
             mb_strtolower(trim($userInput)),
             mb_strtolower(trim((string) $brandName)),
             mb_strtolower(trim((string) $variantHint)),

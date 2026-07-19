@@ -121,18 +121,25 @@ final class CalorieEstimateService
         return $this->variantAnalyzer ?? new FoodVariantAnalyzer();
     }
 
-    private function resolveAiWebSearchService(): AiWebSearchService
+    private function resolveAiWebSearchService(?string $provider = null): AiWebSearchService
     {
         if ($this->aiWebSearchService !== null) {
             return $this->aiWebSearchService;
         }
 
-        return new AiWebSearchService(
-            claudeWebSearchFallback: function (string $trimmed, string $apiKey): ?array {
+        $resolvedProvider = AiWebSearchProvider::resolve($provider);
+        $claudeFallback = null;
+        if (AiWebSearchProvider::allowsClaudeFallback($resolvedProvider)) {
+            $claudeFallback = function (string $trimmed, string $apiKey): ?array {
                 $inputAnalysis = $this->resolveVariantAnalyzer()->analyzeInput($trimmed);
 
                 return $this->estimateWithClaudeWebSearchFallback($trimmed, $apiKey, $inputAnalysis);
-            },
+            };
+        }
+
+        return new AiWebSearchService(
+            claudeWebSearchFallback: $claudeFallback,
+            searchProvider: $resolvedProvider,
         );
     }
 
@@ -143,7 +150,13 @@ final class CalorieEstimateService
         //     throw new RuntimeException('商品検索ではなく通常のAI推定をご利用ください。');
         // }
 
-        $result = $this->resolveAiWebSearchService()->search($trimmed, $apiKey);
+        $provider = AiWebSearchProvider::resolve();
+
+        if ($provider === AiWebSearchProvider::CLAUDE_ONLY) {
+            return $this->estimateWithClaudeOnlyWebSearch($trimmed, $apiKey);
+        }
+
+        $result = $this->resolveAiWebSearchService($provider)->search($trimmed, $apiKey);
 
         if (($result['web_search_status'] ?? '') === 'no_web_search') {
             throw new RuntimeException('商品検索ではなく通常のAI推定をご利用ください。');
@@ -155,6 +168,37 @@ final class CalorieEstimateService
 
         if (($result['needs_confirmation'] ?? false) === true) {
             return $result;
+        }
+
+        return $result;
+    }
+
+    /**
+     * claude_only: Haiku 計画・Brave を使わず Claude Web Search 直。
+     *
+     * @return array<string, mixed>
+     */
+    private function estimateWithClaudeOnlyWebSearch(string $trimmed, string $apiKey): array
+    {
+        error_log('[ai_web_search] ' . json_encode([
+            'userInput' => $trimmed,
+            'searchProvider' => AiWebSearchProvider::CLAUDE_ONLY,
+            'stoppedReason' => 'claude_only_direct',
+        ], JSON_UNESCAPED_UNICODE));
+
+        try {
+            $inputAnalysis = $this->resolveVariantAnalyzer()->analyzeInput($trimmed);
+            $result = $this->estimateWithClaudeWebSearchFallback($trimmed, $apiKey, $inputAnalysis);
+        } catch (RuntimeException) {
+            throw new RuntimeException('正確な商品情報を確認できませんでした。');
+        }
+
+        if (($result['web_search_status'] ?? '') === 'estimated_fallback') {
+            throw new RuntimeException('正確な商品情報を確認できませんでした。');
+        }
+
+        if (($result['web_search_status'] ?? '') === 'no_web_search') {
+            throw new RuntimeException('商品検索ではなく通常のAI推定をご利用ください。');
         }
 
         return $result;

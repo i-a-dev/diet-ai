@@ -25,6 +25,7 @@ require_once __DIR__ . '/../src/BraveNutritionSearchService.php';
 require_once __DIR__ . '/../src/FoodWebSearchPlan.php';
 require_once __DIR__ . '/../src/FoodWebSearchPlanInputGuard.php';
 require_once __DIR__ . '/../src/WebSearchBudget.php';
+require_once __DIR__ . '/../src/AiWebSearchProvider.php';
 require_once __DIR__ . '/../src/WebSearchDiagnostics.php';
 require_once __DIR__ . '/../src/NutritionSearchQueryBuilder.php';
 require_once __DIR__ . '/../src/WebSearchUrlRanker.php';

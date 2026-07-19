@@ -10,7 +10,12 @@ declare(strict_types=1);
  * 2. 固定テンプレートで Brave 検索（通常1〜2回、最大4回）
  * 3. 上位URLの HTML から複数バリアント抽出（最大8URL）
  * 4. 十分な候補が取れたら早期終了
- * 5. 候補0件のみ Claude Web Search を最大1回
+ * 5. 候補0件のみ Claude Web Search を最大1回（AI_WEB_SEARCH_PROVIDER=auto 時）
+ *
+ * AI_WEB_SEARCH_PROVIDER:
+ * - auto: 上記フロー
+ * - brave_only: 5 をスキップ（0件は estimated_fallback）
+ * - claude_only: 本クラスは使わず CalorieEstimateService が Claude Web Search 直
  *
  * 変更前フロー（廃止）:
  * - 固定 L/M/S を6回 Brave 検索
@@ -32,6 +37,7 @@ final class AiWebSearchService
         private readonly WebSearchResultCache $cache = new WebSearchResultCache(),
         private readonly OfficialSiteBrandResolver $officialSiteBrandResolver = new OfficialSiteBrandResolver(),
         private $claudeWebSearchFallback = null,
+        private readonly string $searchProvider = AiWebSearchProvider::AUTO,
     ) {
     }
 
@@ -43,8 +49,9 @@ final class AiWebSearchService
         $trimmed = trim($userInput);
         $budget = new WebSearchBudget();
         $diagnostics = new WebSearchDiagnostics($trimmed, $budget);
+        $diagnostics->setSearchProvider($this->searchProvider);
 
-        $cached = $this->cache->get($trimmed);
+        $cached = $this->cache->get($trimmed, provider: $this->searchProvider);
         if ($cached !== null && isset($cached['response']) && is_array($cached['response'])) {
             $diagnostics->addFallbackReason('cache_hit');
             $diagnostics->setStoppedReason('single_candidate_confirmed');
@@ -102,6 +109,7 @@ final class AiWebSearchService
         if (
             $acceptedCandidates === []
             && $confirmationCandidates === []
+            && AiWebSearchProvider::allowsClaudeFallback($this->searchProvider)
             && $budget->canClaudeWebSearch()
             && $this->claudeWebSearchFallback !== null
         ) {
@@ -134,7 +142,7 @@ final class AiWebSearchService
             $this->cache->put($trimmed, [
                 'plan' => $plan->toArray(),
                 'response' => $response,
-            ]);
+            ], provider: $this->searchProvider);
             $diagnostics->log();
 
             return $response;
@@ -144,7 +152,7 @@ final class AiWebSearchService
         $this->cache->put($trimmed, [
             'plan' => $plan->toArray(),
             'response' => $response,
-        ]);
+        ], provider: $this->searchProvider);
         $diagnostics->log();
 
         return $response;

@@ -28,6 +28,7 @@ final class WebSearchDiagnostics
 
     /** @var 'sufficient_variants'|'single_candidate_confirmed'|'search_budget_exhausted'|'no_candidates'|'no_web_search'|'fallback'|'' */
     private string $stoppedReason = '';
+    private string $searchProvider = 'auto';
 
     public function setPlan(FoodWebSearchPlan $plan): void
     {
@@ -36,6 +37,11 @@ final class WebSearchDiagnostics
         $this->searchMode = $plan->searchMode;
         $this->variantDimension = $plan->variantDimension;
         $this->claudeExpectedLabelCount = count($plan->expectedLabels);
+    }
+
+    public function setSearchProvider(string $provider): void
+    {
+        $this->searchProvider = AiWebSearchProvider::resolve($provider);
     }
 
     public function setFinalCandidateCount(int $count): void
@@ -67,6 +73,7 @@ final class WebSearchDiagnostics
             'normalizedProductName' => $this->normalizedProductName,
             'brandName' => $this->brandName,
             'searchMode' => $this->searchMode,
+            'searchProvider' => $this->searchProvider,
             'variantDimension' => $this->variantDimension,
             'claudeExpectedLabelCount' => $this->claudeExpectedLabelCount,
             'haikuCalls' => $snapshot['haikuCalls'],
