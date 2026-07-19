@@ -343,6 +343,59 @@ assertSame(1050, $authPartial['registered_intake_kcal'] ?? null, 'registered int
 assertSame('unknown', $authPartial['meal_record_meta']['day_completion'] ?? null, 'completion unknown');
 echo "OK energy evidence\n";
 
+// --- Numeric comparisons: avg slightly above BMR must be "above", never inverted ---
+$authAboveBmr = $builder->build(
+    $scopeToday,
+    [
+        [
+            'recordedOn' => '2026-07-20',
+            'mealType' => 'lunch',
+            'foodName' => '定食',
+            'calories' => 1261,
+        ],
+    ],
+    [],
+    [],
+    [],
+    [],
+    [
+        'bmr_kcal' => 1257,
+        'tdee_kcal' => 1800,
+        'daily_intake_goal_kcal' => 1500,
+    ],
+);
+assertSame(1261, $authAboveBmr['energy_evidence']['registered_avg_intake_kcal_on_days_with_meals'] ?? null, 'avg equals single day');
+assertSame(1257, $authAboveBmr['energy_evidence']['bmr_kcal'] ?? null, 'bmr from profile snapshot');
+assertSame('above', $authAboveBmr['energy_evidence']['comparisons']['registered_avg_vs_bmr'] ?? null, '1261 > 1257 => above');
+assertSame('above', $authAboveBmr['numeric_comparisons']['registered_avg_vs_bmr'] ?? null, 'numeric_comparisons mirrors above');
+assertSame('below', $authAboveBmr['energy_evidence']['comparisons']['registered_avg_vs_goal'] ?? null, '1261 < 1500 => below goal');
+assertSame('below', $authAboveBmr['energy_evidence']['comparisons']['registered_avg_vs_tdee'] ?? null, '1261 < 1800 => below tdee');
+
+$authBelowBmr = $builder->build(
+    $scopeToday,
+    [
+        [
+            'recordedOn' => '2026-07-20',
+            'mealType' => 'lunch',
+            'foodName' => '軽い食事',
+            'calories' => 1000,
+        ],
+    ],
+    [],
+    [],
+    [],
+    [],
+    ['bmr_kcal' => 1257],
+);
+assertSame('below', $authBelowBmr['energy_evidence']['comparisons']['registered_avg_vs_bmr'] ?? null, '1000 < 1257 => below');
+
+$finalAbove = $composer->composeFinalUserMessage('最近の平均どう？', $scopeToday, $authAboveBmr);
+assertContains('registered_avg_vs_bmr":"above"', $finalAbove, 'composer exposes above comparison');
+assertContains('avg>BMR なのに下回ると言わない', $finalAbove, 'composer forbids inverted below wording');
+assertContains('数値比較の正確性', $systemPrompt, 'system prompt has numeric accuracy section');
+assertContains('registered_avg_vs_bmr=above のとき', $systemPrompt, 'system forbids saying below when above');
+echo "OK numeric comparisons\n";
+
 // --- Composer sections snapshot-ish ---
 $composed = $composer->composeFinalUserMessage(
     '今日のメニュー痩せる？',

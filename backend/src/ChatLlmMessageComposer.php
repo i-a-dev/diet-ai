@@ -73,22 +73,40 @@ final class ChatLlmMessageComposer
         $blocks[] = '【体重・エネルギーの証拠状態】';
         $energy = is_array($authoritative['energy_evidence'] ?? null) ? $authoritative['energy_evidence'] : [];
         $weight = is_array($authoritative['weight_evidence'] ?? null) ? $authoritative['weight_evidence'] : [];
+        $comparisons = is_array($authoritative['numeric_comparisons'] ?? null)
+            ? $authoritative['numeric_comparisons']
+            : (is_array($energy['comparisons'] ?? null) ? $energy['comparisons'] : []);
         $blocks[] = sprintf(
-            'registered_intake_kcal=%s / daily_intake_goal_kcal=%s / tdee_status=%s / may_estimate_energy_balance=%s',
+            'registered_intake_kcal=%s / days_with_meals=%s / registered_avg_intake_kcal_on_days_with_meals=%s',
             (string) ($energy['registered_intake_kcal'] ?? ($authoritative['registered_intake_kcal'] ?? 0)),
+            (string) ($energy['days_with_meals'] ?? 'null'),
+            $energy['registered_avg_intake_kcal_on_days_with_meals'] === null
+                ? 'null'
+                : (string) $energy['registered_avg_intake_kcal_on_days_with_meals'],
+        );
+        $blocks[] = sprintf(
+            'bmr_kcal=%s / daily_intake_goal_kcal=%s / estimated_tdee_kcal=%s / tdee_status=%s',
+            $energy['bmr_kcal'] === null ? 'null' : (string) $energy['bmr_kcal'],
             $energy['daily_intake_goal_kcal'] === null
                 ? 'null'
                 : (string) $energy['daily_intake_goal_kcal'],
+            $energy['estimated_tdee_kcal'] === null
+                ? 'null'
+                : (string) $energy['estimated_tdee_kcal'],
             (string) ($energy['tdee_status'] ?? 'unavailable'),
-            !empty($energy['may_estimate_energy_balance']) ? 'true' : 'false',
         );
+        if ($comparisons !== []) {
+            $blocks[] = 'numeric_comparisons(PHP計算・大小の正): '
+                . (json_encode($comparisons, JSON_UNESCAPED_UNICODE) ?: '{}');
+            $blocks[] = '上記 comparisons と矛盾する「下回る／上回る」表現は禁止。avg>BMR なのに下回ると言わない。';
+        }
         $blocks[] = sprintf(
             'weight_record_count=%s / trend_status=%s / can_compute_remaining_to_target=%s',
             (string) ($weight['record_count'] ?? 0),
             (string) ($weight['trend_status'] ?? 'insufficient_data'),
             !empty($weight['can_compute_remaining_to_target']) ? 'true' : 'false',
         );
-        $blocks[] = '確定カロリー赤字・脂肪減少・翌日体重予測は断定しないでください。';
+        $blocks[] = '確定カロリー赤字・脂肪減少・翌日体重予測は断定しないでください。数値の捏造も禁止です。';
         $blocks[] = '';
 
         $blocks[] = '【回答可能範囲】';

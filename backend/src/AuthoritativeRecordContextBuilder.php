@@ -79,6 +79,7 @@ final class AuthoritativeRecordContextBuilder
             'meal_record_meta' => $evidence['meal_record_meta'],
             'pfc_evidence' => $evidence['pfc_evidence'],
             'energy_evidence' => $evidence['energy_evidence'],
+            'numeric_comparisons' => $evidence['numeric_comparisons'] ?? ($evidence['energy_evidence']['comparisons'] ?? []),
             'weight_evidence' => $evidence['weight_evidence'],
             'answer_permissions' => $evidence['answer_permissions'],
             'registered_intake_kcal' => $evidence['registered_intake_kcal'],
@@ -87,6 +88,7 @@ final class AuthoritativeRecordContextBuilder
                 'food names and kcal must come only from scope_records / daily_records.meals',
                 'pfc_evidence.registered_totals are DB-registered values only; partial is not full-day PFC',
                 'day_completion=unknown: do not assert complete daily intake',
+                'numeric_comparisons / energy_evidence.comparisons are the source of truth for above/below wording',
                 'conversation history must not supply food facts',
             ],
         ];
@@ -105,6 +107,7 @@ final class AuthoritativeRecordContextBuilder
             'meal_record_meta' => $evidence['meal_record_meta'],
             'pfc_evidence' => $evidence['pfc_evidence'],
             'energy_evidence' => $evidence['energy_evidence'],
+            'numeric_comparisons' => $evidence['numeric_comparisons'] ?? ($evidence['energy_evidence']['comparisons'] ?? []),
             'weight_evidence' => $evidence['weight_evidence'],
             'answer_permissions' => $evidence['answer_permissions'],
             'registered_intake_kcal' => $evidence['registered_intake_kcal'],
@@ -267,6 +270,7 @@ final class AuthoritativeRecordContextBuilder
             'meal_record_meta' => $evidence['meal_record_meta'],
             'pfc_evidence' => $evidence['pfc_evidence'],
             'energy_evidence' => $evidence['energy_evidence'],
+            'numeric_comparisons' => $evidence['numeric_comparisons'] ?? ($evidence['energy_evidence']['comparisons'] ?? []),
             'weight_evidence' => $evidence['weight_evidence'],
             'answer_permissions' => $evidence['answer_permissions'],
             'registered_intake_kcal' => $evidence['registered_intake_kcal'],
@@ -288,6 +292,7 @@ final class AuthoritativeRecordContextBuilder
                 'recording_meta.first_any_recorded_on is when the user started recording; do not invent history before that date',
                 'pfc_evidence.status=partial means registered_totals are partial sums, not full-period PFC',
                 'day_completion=unknown: prefer「登録された範囲では」; never assert complete daily intake',
+                'numeric_comparisons / energy_evidence.comparisons are the source of truth for above/below wording; never invert',
                 'conversation history must not supply food facts',
             ],
         ];
@@ -311,6 +316,7 @@ final class AuthoritativeRecordContextBuilder
             'meal_record_meta' => $evidence['meal_record_meta'],
             'pfc_evidence' => $evidence['pfc_evidence'],
             'energy_evidence' => $evidence['energy_evidence'],
+            'numeric_comparisons' => $evidence['numeric_comparisons'] ?? ($evidence['energy_evidence']['comparisons'] ?? []),
             'weight_evidence' => $evidence['weight_evidence'],
             'answer_permissions' => $evidence['answer_permissions'],
             'registered_intake_kcal' => $evidence['registered_intake_kcal'],
@@ -787,6 +793,17 @@ final class AuthoritativeRecordContextBuilder
         $lines[] = 'weight_trend_status: '
             . (string) ($evidence['weight_evidence']['trend_status'] ?? 'insufficient_data');
         $lines[] = 'tdee_status: ' . (string) ($evidence['energy_evidence']['tdee_status'] ?? 'unavailable');
+        $avg = $evidence['energy_evidence']['registered_avg_intake_kcal_on_days_with_meals'] ?? null;
+        $bmr = $evidence['energy_evidence']['bmr_kcal'] ?? null;
+        $avgVsBmr = $evidence['energy_evidence']['comparisons']['registered_avg_vs_bmr']
+            ?? $evidence['numeric_comparisons']['registered_avg_vs_bmr']
+            ?? 'unavailable';
+        $lines[] = sprintf(
+            'registered_avg=%s / bmr=%s / registered_avg_vs_bmr=%s',
+            $avg === null ? 'null' : (string) $avg,
+            $bmr === null ? 'null' : (string) $bmr,
+            (string) $avgVsBmr,
+        );
         $lines[] = '';
         $lines[] = '■ scope_records（質問対象期間・主根拠 / ' . count($scopeRecords) . '日）';
         foreach ($scopeRecords as $day) {

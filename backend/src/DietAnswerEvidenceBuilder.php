@@ -59,6 +59,7 @@ final class DietAnswerEvidenceBuilder
         $weightEvidence = $this->buildWeightEvidence($weightByDate, $profileSnapshot);
         $energyEvidence = $this->buildEnergyEvidence(
             $registeredIntakeKcal,
+            $scopeDailyRecords,
             $profileSnapshot,
             $mealRecordMeta['day_completion'],
         );
@@ -73,6 +74,7 @@ final class DietAnswerEvidenceBuilder
             'meal_record_meta' => $mealRecordMeta,
             'pfc_evidence' => $pfcEvidence,
             'energy_evidence' => $energyEvidence,
+            'numeric_comparisons' => $energyEvidence['comparisons'] ?? [],
             'weight_evidence' => $weightEvidence,
             'answer_permissions' => $answerPermissions,
             'scope_meal_entries' => $mealEntries,
@@ -245,11 +247,13 @@ final class DietAnswerEvidenceBuilder
     }
 
     /**
+     * @param list<array<string, mixed>> $scopeDailyRecords
      * @param array<string, mixed> $profileSnapshot
      * @return array<string, mixed>
      */
     private function buildEnergyEvidence(
         int $registeredIntakeKcal,
+        array $scopeDailyRecords,
         array $profileSnapshot,
         string $dayCompletion,
     ): array {
@@ -259,13 +263,40 @@ final class DietAnswerEvidenceBuilder
         $tdee = is_numeric($profileSnapshot['tdee_kcal'] ?? null)
             ? (int) $profileSnapshot['tdee_kcal']
             : null;
+        $bmr = is_numeric($profileSnapshot['bmr_kcal'] ?? null)
+            ? (int) $profileSnapshot['bmr_kcal']
+            : null;
         $tdeeStatus = $tdee !== null ? 'available' : 'unavailable';
+
+        $daysWithMeals = 0;
+        foreach ($scopeDailyRecords as $day) {
+            if (($day['record_status'] ?? '') === 'recorded' || (($day['meals'] ?? []) !== [])) {
+                $daysWithMeals++;
+            }
+        }
+        $avgOnRecordedDays = $daysWithMeals > 0
+            ? (int) round($registeredIntakeKcal / $daysWithMeals)
+            : null;
+
+        $comparisons = [
+            'registered_avg_vs_bmr' => $this->compareNullableInts($avgOnRecordedDays, $bmr),
+            'registered_avg_vs_tdee' => $this->compareNullableInts($avgOnRecordedDays, $tdee),
+            'registered_avg_vs_goal' => $this->compareNullableInts($avgOnRecordedDays, $goal),
+            'registered_total_vs_goal' => $this->compareNullableInts(
+                $registeredIntakeKcal > 0 ? $registeredIntakeKcal : null,
+                $goal,
+            ),
+        ];
+
         $mayCompareWithGoal = $registeredIntakeKcal > 0 && $goal !== null;
         // 食事完了が不明なため、確定的なエネルギー収支判定は許可しない
         $mayEstimateEnergyBalance = false;
 
         return [
             'registered_intake_kcal' => $registeredIntakeKcal,
+            'days_with_meals' => $daysWithMeals,
+            'registered_avg_intake_kcal_on_days_with_meals' => $avgOnRecordedDays,
+            'bmr_kcal' => $bmr,
             'daily_intake_goal_kcal' => $goal,
             'estimated_tdee_kcal' => $tdee,
             'tdee_status' => $tdeeStatus,
@@ -273,8 +304,35 @@ final class DietAnswerEvidenceBuilder
             'may_compare_with_goal' => $mayCompareWithGoal,
             'may_estimate_energy_balance' => $mayEstimateEnergyBalance,
             'may_assert_fat_loss' => false,
-            'note' => '登録カロリーと目標の比較は可。食事完了不明のため確定赤字・脂肪減少の断定は不可',
+            'comparisons' => $comparisons,
+            'comparison_labels_ja' => [
+                'above' => '上回る',
+                'below' => '下回る',
+                'equal' => 'ほぼ同じ',
+                'unavailable' => '比較不能',
+            ],
+            'note' => '登録カロリーと目標/BMR/TDEEの大小は comparisons を正とする。'
+                . '平均値は「食事記録がある日の登録カロリー平均」であり、実摂取が基礎代謝未満とは断定しない。'
+                . '食事完了不明のため確定赤字・脂肪減少の断定は不可',
         ];
+    }
+
+    /**
+     * @return 'above'|'below'|'equal'|'unavailable'
+     */
+    private function compareNullableInts(?int $left, ?int $right): string
+    {
+        if ($left === null || $right === null) {
+            return 'unavailable';
+        }
+        if ($left > $right) {
+            return 'above';
+        }
+        if ($left < $right) {
+            return 'below';
+        }
+
+        return 'equal';
     }
 
     /**

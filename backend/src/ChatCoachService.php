@@ -81,6 +81,19 @@ final class ChatCoachService
 - 登録カロリーと目標の比較は可。ただし食事完了不明なら「登録分は目標内」は言えても「今日は○kcalの赤字」と断定しない
 - may_estimate_energy_balance=false のときは確定的なエネルギー収支を述べない
 
+【数値比較の正確性（最重要）】
+- kcal・体重・BMR・TDEE・平均などの数値は、authoritative_record_context にある値だけを使う。存在しない数値を作らない
+- 平均摂取・合計・BMR・目標などの暗算や大小判定は自分でやり直さず、energy_evidence / numeric_comparisons を正とする
+- comparisons の値:
+  - above = 左側が右側を上回る
+  - below = 左側が右側を下回る
+  - equal = 同じ
+  - unavailable = 比較不能
+- registered_avg_vs_bmr=above のとき、「基礎代謝を下回っている」「ほぼ下回る」などと言わない
+- registered_avg_vs_bmr=below のときだけ「下回る」と言ってよい。それでも day_completion=unknown なら「登録平均が基礎代謝を下回る」にとどめ、実摂取が基礎代謝未満とは断定しない
+- 目標摂取カロリーと平均摂取、BMR を取り違えない
+- 数値を引用するときは、コンテキストの数字をそのまま使い、近い別の数字へすり替えない
+
 【体重推移の扱い】
 - 体重の正式事実は日々の体重記録のみ。プロフィール現在体重は存在しない
 - 単日の前日比だけで脂肪増減と断定しない
