@@ -6,9 +6,11 @@ require_once __DIR__ . '/../src/RecordScopeType.php';
 require_once __DIR__ . '/../src/RecordQueryScope.php';
 require_once __DIR__ . '/../src/RecordQueryScopeResolver.php';
 require_once __DIR__ . '/../src/ChatHistorySanitizer.php';
+require_once __DIR__ . '/../src/DietAnswerEvidenceBuilder.php';
 require_once __DIR__ . '/../src/AuthoritativeRecordContextBuilder.php';
 require_once __DIR__ . '/../src/ChatLlmMessageComposer.php';
 require_once __DIR__ . '/../src/ChatCoachService.php';
+require_once __DIR__ . '/../src/CalorieGoalCalculator.php';
 
 function assertTrue(bool $condition, string $message): void
 {
@@ -408,13 +410,16 @@ $layered = $builder->buildLayered(
     ],
 );
 
-assertSame('recent_7d_and_summary_30d', $layered['primary_focus'], 'progress primary focus');
+assertSame('scope_records', $layered['primary_focus'], 'progress primary focus');
 assertSame('2026-07-04', $layered['recording_meta']['first_any_recorded_on'] ?? null, 'recording start date');
 assertSame('2026-07-04', $layered['recording_meta']['first_meal_recorded_on'] ?? null, 'first meal date');
 assertSame('2026-07-04', $layered['recording_meta']['first_weight_recorded_on'] ?? null, 'first weight date');
 assertSame(12, $layered['recording_meta']['days_since_first_record'] ?? null, 'days since first record');
 assertTrue(($layered['recording_meta']['has_any_record'] ?? false) === true, 'has any record');
 assertContains('recording_meta', $layered['json'], 'json has recording_meta');
+assertContains('scope_records', $layered['json'], 'json has scope_records');
+assertContains('pfc_evidence', $layered['json'], 'json has pfc_evidence');
+assertContains('answer_permissions', $layered['json'], 'json has answer_permissions');
 assertSame('2026-07-16', $layered['today_detail']['date'] ?? null, 'today_detail date');
 assertSame('白米 200g', $layered['today_detail']['meals'][0]['food_name'] ?? null, 'today_detail meal');
 assertSame(7, count($layered['recent_7d']), 'recent_7d has 7 days');
@@ -475,13 +480,17 @@ $layeredTodayScope = $builder->buildLayered(
     $exerciseKcal6m,
     [],
 );
-assertSame('today_detail', $layeredTodayScope['primary_focus'], 'today scope primary focus');
+assertSame('scope_records', $layeredTodayScope['primary_focus'], 'today scope primary focus');
+assertSame(1, $layeredTodayScope['meal_count'], 'today scope meal_count is scope-only');
 
 $finalLayered = $composer->composeFinalUserMessage(
     'ダイエットの進捗を教えて',
     $scopeUnspecified,
     $layered,
 );
+assertContains('【質問対象期間】', $finalLayered, 'final message has scope section');
+assertContains('【PFCの証拠状態】', $finalLayered, 'final message has pfc evidence section');
+assertContains('【回答可能範囲】', $finalLayered, 'final message has answer permissions');
 assertContains('today_detail', $finalLayered, 'final message mentions today_detail layer');
 assertContains('recent_8_14d', $finalLayered, 'final message mentions recent_8_14d layer');
 assertContains('summary_30d', $finalLayered, 'final message mentions summary_30d layer');
@@ -489,7 +498,7 @@ assertContains('summary_6m', $finalLayered, 'final message mentions summary_6m l
 assertContains('recording_meta', $finalLayered, 'final message mentions recording_meta');
 assertContains('first_any_recorded_on', $finalLayered, 'final message mentions first_any_recorded_on');
 assertContains('weight_start_recorded_on', $finalLayered, 'final message mentions weight date fields');
-assertContains('primary_focus: recent_7d_and_summary_30d', $finalLayered, 'final message has primary_focus');
+assertContains('primary_focus: scope_records', $finalLayered, 'final message has primary_focus');
 echo "OK layered authoritative context\n";
 
 echo str_repeat('=', 48) . "\n";

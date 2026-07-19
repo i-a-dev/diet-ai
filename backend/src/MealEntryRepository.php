@@ -483,6 +483,8 @@ final class MealEntryRepository
      *   calories: int,
      *   amount: float|null,
      *   unit: string|null,
+     *   servingLabel: string|null,
+     *   servingWeightG: float|null,
      *   proteinG: float|null,
      *   fatG: float|null,
      *   carbsG: float|null,
@@ -502,7 +504,8 @@ final class MealEntryRepository
 
         $statement = $this->db->prepare(
             'SELECT id, recorded_on, meal_type, food_name, calories_kcal, amount, unit,
-                    protein_g, fat_g, carbs_g, calorie_source, confidence, raw_input
+                    serving_label, serving_weight_g, protein_g, fat_g, carbs_g,
+                    calorie_source, confidence, raw_input
              FROM meal_entries
              WHERE user_id = :user_id AND recorded_on BETWEEN :start AND :end
              ORDER BY recorded_on ASC, id ASC'
@@ -523,6 +526,12 @@ final class MealEntryRepository
                 'calories' => (int) $row['calories_kcal'],
                 'amount' => isset($row['amount']) && $row['amount'] !== null ? (float) $row['amount'] : null,
                 'unit' => isset($row['unit']) && $row['unit'] !== null ? (string) $row['unit'] : null,
+                'servingLabel' => isset($row['serving_label']) && $row['serving_label'] !== null
+                    ? (string) $row['serving_label']
+                    : null,
+                'servingWeightG' => isset($row['serving_weight_g']) && $row['serving_weight_g'] !== null
+                    ? (float) $row['serving_weight_g']
+                    : null,
                 'proteinG' => isset($row['protein_g']) && $row['protein_g'] !== null ? (float) $row['protein_g'] : null,
                 'fatG' => isset($row['fat_g']) && $row['fat_g'] !== null ? (float) $row['fat_g'] : null,
                 'carbsG' => isset($row['carbs_g']) && $row['carbs_g'] !== null ? (float) $row['carbs_g'] : null,

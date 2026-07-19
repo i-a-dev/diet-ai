@@ -43,6 +43,7 @@ require_once __DIR__ . '/../src/RecordScopeType.php';
 require_once __DIR__ . '/../src/RecordQueryScope.php';
 require_once __DIR__ . '/../src/RecordQueryScopeResolver.php';
 require_once __DIR__ . '/../src/ChatHistorySanitizer.php';
+require_once __DIR__ . '/../src/DietAnswerEvidenceBuilder.php';
 require_once __DIR__ . '/../src/AuthoritativeRecordContextBuilder.php';
 require_once __DIR__ . '/../src/ChatLlmMessageComposer.php';
 require_once __DIR__ . '/../src/ChatCoachService.php';
