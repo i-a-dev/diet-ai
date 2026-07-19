@@ -492,18 +492,21 @@ final class CalorieEstimateService
 
         $productName = $claudeResult['product_name'];
         $brand = $claudeResult['brand'] ?? null;
-        $htmlResult = $this->probeClaudeSourceUrls(
+        $brandName = is_string($brand) ? $brand : null;
+        $rankedSourceUrls = $this->rankClaudeSourceUrlsLikeBrave(
             $claudeResult['source_urls'],
             $productName,
+            $brandName,
             [$trimmed, $productName],
         );
+        $htmlResult = $this->probeClaudeSourceUrls($rankedSourceUrls, $productName);
 
         $extractor = $this->resolveNutritionPageExtractor();
         $identityConfidence = $extractor->assessProductIdentity($trimmed, $productName, $brand);
 
         $variant = $variantAnalyzer->analyzeProduct($productName);
 
-        $fallbackSourceUrl = $claudeResult['source_urls'][0] ?? null;
+        $fallbackSourceUrl = $rankedSourceUrls[0]['url'] ?? null;
 
         if ($htmlResult !== null) {
             $confidence = $identityConfidence === 'high' ? 'high' : 'medium';
@@ -870,23 +873,71 @@ PROMPT;
     }
 
     /**
+     * Claude が返した URL を、Brave 単品検索と同じ WebSearchUrlRanker で並べ替える。
+     * Brave 経路のコードは変更しない（このメソッドは Claude フォールバック専用）。
+     *
      * @param list<string> $sourceUrls
      * @param list<string> $storeContextTexts
-     * @return array{kcal: int, url: string, score: int}|null
+     * @return list<array{url: string, score: int}>
      */
-    private function probeClaudeSourceUrls(
+    private function rankClaudeSourceUrlsLikeBrave(
         array $sourceUrls,
         string $productName,
+        ?string $brandName = null,
         array $storeContextTexts = [],
-    ): ?array {
+    ): array {
         if ($sourceUrls === []) {
+            return [];
+        }
+
+        // コンビニ公式ホスト寄せは従来どおり Claude 側のみで先行適用する。
+        $sourceUrls = $this->prioritizeOfficialStoreUrls($sourceUrls, $storeContextTexts);
+
+        $results = [];
+        foreach ($sourceUrls as $url) {
+            $url = trim((string) $url);
+            if ($url === '') {
+                continue;
+            }
+
+            $results[] = [
+                'url' => $url,
+                'title' => '',
+                'description' => '',
+            ];
+        }
+
+        if ($results === []) {
+            return [];
+        }
+
+        $ranked = (new WebSearchUrlRanker($this->resolveNutritionPageExtractor()))->rank(
+            $results,
+            $productName,
+            $brandName,
+            'single_product',
+        );
+
+        return array_values(array_map(
+            static fn (array $entry): array => [
+                'url' => (string) $entry['url'],
+                'score' => (int) $entry['score'],
+            ],
+            $ranked,
+        ));
+    }
+
+    /**
+     * @param list<array{url: string, score: int}> $rankedUrls
+     * @return array{kcal: int, url: string, score: int}|null
+     */
+    private function probeClaudeSourceUrls(array $rankedUrls, string $productName): ?array
+    {
+        if ($rankedUrls === []) {
             return null;
         }
 
-        $sourceUrls = $this->prioritizeOfficialStoreUrls($sourceUrls, $storeContextTexts);
-
         $extractor = $this->resolveNutritionPageExtractor();
-        $rankedUrls = $extractor->rankUrls($sourceUrls, ['query' => $productName]);
         $probeResult = $extractor->probeUrls(
             $rankedUrls,
             ['query' => $productName],
