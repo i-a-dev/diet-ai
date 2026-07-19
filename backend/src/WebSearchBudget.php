@@ -10,7 +10,7 @@ final class WebSearchBudget
     public const INITIAL_BRAVE_SEARCHES = 2;
     public const ADDITIONAL_BRAVE_SEARCHES = 2;
     public const MAX_TOTAL_BRAVE_SEARCHES = 4;
-    public const MAX_HTML_FETCHES = 6;
+    public const MAX_HTML_FETCHES = 8;
     public const MAX_CLAUDE_WEB_SEARCHES = 1;
 
     private int $haikuCalls = 0;

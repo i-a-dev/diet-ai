@@ -8,7 +8,7 @@ declare(strict_types=1);
  * 変更後フロー:
  * 1. Claude Haiku で検索計画（1回）
  * 2. 固定テンプレートで Brave 検索（通常1〜2回、最大4回）
- * 3. 上位URLの HTML から複数バリアント抽出（最大6URL）
+ * 3. 上位URLの HTML から複数バリアント抽出（最大8URL）
  * 4. 十分な候補が取れたら早期終了
  * 5. 候補0件のみ Claude Web Search を最大1回
  *
