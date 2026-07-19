@@ -143,25 +143,6 @@ foreach (array_keys($touchedDates) as $dateStr) {
     $summaryRepo->recalculateForDate($dateStr);
 }
 
-// プロフィールの現在体重を直近体重に合わせる
-$latestWeight = $pdo->prepare(
-    'SELECT weight_kg FROM weight_entries
-     WHERE user_id = :user_id
-     ORDER BY recorded_on DESC
-     LIMIT 1'
-);
-$latestWeight->execute(['user_id' => $userId]);
-$latest = $latestWeight->fetchColumn();
-if ($latest !== false) {
-    $pdo->prepare(
-        'UPDATE user_profile SET current_weight_kg = :w, updated_at = :updated_at WHERE user_id = :user_id'
-    )->execute([
-        'w' => (float) $latest,
-        'updated_at' => $now,
-        'user_id' => $userId,
-    ]);
-}
-
 $mealTotal = (int) $pdo->query(
     "SELECT COUNT(*) FROM meal_entries WHERE user_id = {$userId}"
 )->fetchColumn();

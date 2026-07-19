@@ -403,14 +403,13 @@ TEXT;
     private function buildProfileSnapshot(): array
     {
         $profile = $this->userProfileRepository->get();
-        $calorieGoal = CalorieGoalCalculator::calculate($profile);
+        $calorieGoal = $this->calculateCalorieGoal($profile);
 
         return [
             'gender' => $this->formatGender($profile['gender'] ?? null),
             'birth_date' => $profile['birthDate'] ?? null,
             'age_years' => $calorieGoal['ageYears'],
             'height_cm' => $profile['heightCm'] ?? null,
-            'current_weight_kg' => $profile['currentWeightKg'] ?? null,
             'target_weight_kg' => $profile['targetWeightKg'] ?? null,
             'target_pace_kg_per_month' => $profile['targetPaceKgPerMonth'] ?? null,
             'diet_goal' => $this->formatDietGoal($profile['dietGoal'] ?? null),
@@ -428,7 +427,7 @@ TEXT;
     private function buildProfileActionSummary(): string
     {
         $profile = $this->userProfileRepository->get();
-        $calorieGoal = CalorieGoalCalculator::calculate($profile);
+        $calorieGoal = $this->calculateCalorieGoal($profile);
         $desiredDietMethod = $this->nullableProfileText($profile['desiredDietMethod'] ?? null);
 
         $lines = [];
@@ -449,6 +448,39 @@ TEXT;
         $lines[] = '目標ペース: ' . $this->formatNullableNumber($profile['targetPaceKgPerMonth'] ?? null, 'kg/月');
 
         return implode("\n", $lines);
+    }
+
+    /**
+     * @param array<string, mixed> $profile
+     * @return array{
+     *   ageYears: int|null,
+     *   bmrKcal: int|null,
+     *   tdeeKcal: int|null,
+     *   dailyDeficitKcal: int|null,
+     *   dailyIntakeGoalKcal: int|null,
+     *   isComplete: bool
+     * }
+     */
+    private function calculateCalorieGoal(array $profile): array
+    {
+        return CalorieGoalCalculator::calculate([
+            ...$profile,
+            'weightKg' => $this->resolveWeightKgForCalorieGoal(),
+        ]);
+    }
+
+    private function resolveWeightKgForCalorieGoal(): ?float
+    {
+        $today = (new DateTimeImmutable('now', new DateTimeZone(self::TIMEZONE)))->format('Y-m-d');
+        $summary = $this->weightRepository->getSummaryForDate($today);
+        if (is_numeric($summary['current'] ?? null)) {
+            return round((float) $summary['current'], 1);
+        }
+        if (is_numeric($summary['referenceWeight'] ?? null)) {
+            return round((float) $summary['referenceWeight'], 1);
+        }
+
+        return null;
     }
 
     /**

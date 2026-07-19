@@ -550,7 +550,6 @@ export interface UserProfile {
   gender: Gender | null;
   birthDate: string | null;
   heightCm: number | null;
-  currentWeightKg: number | null;
   targetWeightKg: number | null;
   activityLevel: ActivityLevel | null;
   targetPaceKgPerMonth: number | null;
@@ -567,7 +566,6 @@ export type UserProfileUpdate = {
   gender?: Gender | null;
   birthDate?: string | null;
   heightCm?: number | null;
-  currentWeightKg?: number | null;
   targetWeightKg?: number | null;
   activityLevel?: ActivityLevel | null;
   targetPaceKgPerMonth?: number | null;

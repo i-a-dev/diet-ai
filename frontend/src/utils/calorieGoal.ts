@@ -96,23 +96,29 @@ function calculateDailyDeficit(
   );
 }
 
-export function isCalorieGoalInputReady(profile: UserProfile): boolean {
+export function isCalorieGoalInputReady(
+  profile: UserProfile,
+  weightKg: number | null,
+): boolean {
   return (
     profile.gender !== null &&
     profile.birthDate !== null &&
     profile.heightCm !== null &&
-    profile.currentWeightKg !== null &&
+    weightKg !== null &&
     profile.targetPaceKgPerMonth !== null
   );
 }
 
-export function calculateCalorieGoal(profile: UserProfile): CalorieGoal {
+export function calculateCalorieGoal(
+  profile: UserProfile,
+  weightKg: number | null,
+): CalorieGoal {
   const ageYears = calculateAgeYears(profile.birthDate);
   const bmrKcal = calculateBmr(
     profile.gender,
     ageYears,
     profile.heightCm,
-    profile.currentWeightKg,
+    weightKg,
   );
   const tdeeKcal = calculateTdee(bmrKcal, profile.activityLevel ?? "sedentary");
   const dailyDeficitKcal = calculateDailyDeficit(

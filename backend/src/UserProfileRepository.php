@@ -21,7 +21,6 @@ final class UserProfileRepository
         'gender',
         'birthDate',
         'heightCm',
-        'currentWeightKg',
         'targetWeightKg',
     ];
 
@@ -39,7 +38,6 @@ final class UserProfileRepository
      *   gender: string|null,
      *   birthDate: string|null,
      *   heightCm: float|null,
-     *   currentWeightKg: float|null,
      *   targetWeightKg: float|null,
      *   activityLevel: string|null,
      *   targetPaceKgPerMonth: float|null,
@@ -55,7 +53,7 @@ final class UserProfileRepository
     public function get(): array
     {
         $statement = $this->db->prepare(
-            'SELECT gender, birth_date, height_cm, current_weight_kg, target_weight_kg,
+            'SELECT gender, birth_date, height_cm, target_weight_kg,
                     activity_level, target_pace_kg_per_month, diet_goal, desired_diet_method,
                     allergies_dislikes, past_diet_experience, coach_notes, updated_at
              FROM user_profile
@@ -80,7 +78,6 @@ final class UserProfileRepository
      *   gender: string|null,
      *   birthDate: string|null,
      *   heightCm: float|null,
-     *   currentWeightKg: float|null,
      *   targetWeightKg: float|null,
      *   activityLevel: string|null,
      *   targetPaceKgPerMonth: float|null,
@@ -103,12 +100,12 @@ final class UserProfileRepository
 
         $statement = $this->db->prepare(
             'INSERT INTO user_profile (
-                user_id, gender, birth_date, height_cm, current_weight_kg, target_weight_kg,
+                user_id, gender, birth_date, height_cm, target_weight_kg,
                 activity_level, target_pace_kg_per_month, diet_goal, desired_diet_method,
                 allergies_dislikes, past_diet_experience, coach_notes, updated_at
              )
              VALUES (
-                :user_id, :gender, :birth_date, :height_cm, :current_weight_kg, :target_weight_kg,
+                :user_id, :gender, :birth_date, :height_cm, :target_weight_kg,
                 :activity_level, :target_pace_kg_per_month, :diet_goal, :desired_diet_method,
                 :allergies_dislikes, :past_diet_experience, :coach_notes, :updated_at
              )
@@ -116,7 +113,6 @@ final class UserProfileRepository
                  gender = VALUES(gender),
                  birth_date = VALUES(birth_date),
                  height_cm = VALUES(height_cm),
-                 current_weight_kg = VALUES(current_weight_kg),
                  target_weight_kg = VALUES(target_weight_kg),
                  activity_level = VALUES(activity_level),
                  target_pace_kg_per_month = VALUES(target_pace_kg_per_month),
@@ -132,7 +128,6 @@ final class UserProfileRepository
             'gender' => $merged['gender'],
             'birth_date' => $merged['birthDate'],
             'height_cm' => $merged['heightCm'],
-            'current_weight_kg' => $merged['currentWeightKg'],
             'target_weight_kg' => $merged['targetWeightKg'],
             'activity_level' => $merged['activityLevel'],
             'target_pace_kg_per_month' => $merged['targetPaceKgPerMonth'],
@@ -153,7 +148,6 @@ final class UserProfileRepository
      *   gender: string|null,
      *   birthDate: string|null,
      *   heightCm: float|null,
-     *   currentWeightKg: float|null,
      *   targetWeightKg: float|null,
      *   activityLevel: string|null,
      *   targetPaceKgPerMonth: float|null,
@@ -172,7 +166,6 @@ final class UserProfileRepository
             'gender' => $this->nullableString($row['gender'] ?? null),
             'birthDate' => $this->nullableString($row['birth_date'] ?? null),
             'heightCm' => $this->nullableFloat($row['height_cm'] ?? null),
-            'currentWeightKg' => $this->nullableFloat($row['current_weight_kg'] ?? null),
             'targetWeightKg' => $this->nullableFloat($row['target_weight_kg'] ?? null),
             'activityLevel' => $this->nullableString($row['activity_level'] ?? null),
             'targetPaceKgPerMonth' => $this->nullableFloat($row['target_pace_kg_per_month'] ?? null),
@@ -193,7 +186,6 @@ final class UserProfileRepository
      *   gender: string|null,
      *   birthDate: string|null,
      *   heightCm: float|null,
-     *   currentWeightKg: float|null,
      *   targetWeightKg: float|null,
      *   activityLevel: string|null,
      *   targetPaceKgPerMonth: float|null,
@@ -212,7 +204,6 @@ final class UserProfileRepository
             'gender' => null,
             'birthDate' => null,
             'heightCm' => null,
-            'currentWeightKg' => null,
             'targetWeightKg' => null,
             'activityLevel' => null,
             'targetPaceKgPerMonth' => null,
@@ -239,9 +230,6 @@ final class UserProfileRepository
             'gender' => array_key_exists('gender', $fields) ? $fields['gender'] : $current['gender'],
             'birthDate' => array_key_exists('birthDate', $fields) ? $fields['birthDate'] : $current['birthDate'],
             'heightCm' => array_key_exists('heightCm', $fields) ? $fields['heightCm'] : $current['heightCm'],
-            'currentWeightKg' => array_key_exists('currentWeightKg', $fields)
-                ? $fields['currentWeightKg']
-                : $current['currentWeightKg'],
             'targetWeightKg' => array_key_exists('targetWeightKg', $fields)
                 ? $fields['targetWeightKg']
                 : $current['targetWeightKg'],
@@ -315,9 +303,8 @@ final class UserProfileRepository
             throw new InvalidArgumentException('dietGoal is invalid');
         }
 
-        $this->validateWeight('heightCm', $profile['heightCm']);
-        $this->validateWeight('currentWeightKg', $profile['currentWeightKg']);
-        $this->validateWeight('targetWeightKg', $profile['targetWeightKg']);
+        $this->validatePositiveNumber('heightCm', $profile['heightCm']);
+        $this->validatePositiveNumber('targetWeightKg', $profile['targetWeightKg']);
 
         if (
             $profile['targetPaceKgPerMonth'] !== null
@@ -332,7 +319,7 @@ final class UserProfileRepository
         $this->validateTextLength('coachNotes', $profile['coachNotes'], 100);
     }
 
-    private function validateWeight(string $field, mixed $value): void
+    private function validatePositiveNumber(string $field, mixed $value): void
     {
         if ($value === null) {
             return;

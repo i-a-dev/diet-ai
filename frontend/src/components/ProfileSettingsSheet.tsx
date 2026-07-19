@@ -10,12 +10,12 @@ import {
   ChevronLeft,
   Flame,
   Heart,
-  Scale,
   Target,
   User,
   X,
 } from "lucide-react";
 import {
+  fetchDailyRecord,
   fetchUserProfile,
   updateUserProfile,
   type DietGoal,
@@ -63,7 +63,6 @@ const DEFAULT_PROFILE: UserProfile = {
   gender: null,
   birthDate: null,
   heightCm: null,
-  currentWeightKg: null,
   targetWeightKg: null,
   activityLevel: null,
   targetPaceKgPerMonth: null,
@@ -82,7 +81,6 @@ function roundOneDecimal(value: number) {
 
 const DEFAULT_NUMERIC = {
   heightCm: 160,
-  currentWeightKg: 60,
   targetWeightKg: 57,
   targetPaceKgPerMonth: 2,
 } as const;
@@ -91,7 +89,6 @@ function applyNumericDefaults(profile: UserProfile): UserProfile {
   return {
     ...profile,
     heightCm: profile.heightCm ?? DEFAULT_NUMERIC.heightCm,
-    currentWeightKg: profile.currentWeightKg ?? DEFAULT_NUMERIC.currentWeightKg,
     targetWeightKg: profile.targetWeightKg ?? DEFAULT_NUMERIC.targetWeightKg,
     targetPaceKgPerMonth:
       profile.targetPaceKgPerMonth ?? DEFAULT_NUMERIC.targetPaceKgPerMonth,
@@ -124,21 +121,38 @@ function isRequiredComplete(profile: UserProfile) {
     effective.gender !== null &&
     effective.birthDate !== null &&
     effective.heightCm !== null &&
-    effective.currentWeightKg !== null &&
     effective.targetWeightKg !== null
   );
 }
 
-function CalorieGoalCard({ profile }: { profile: UserProfile }) {
+function resolveRecordedWeightKg(weight: {
+  current: number | null;
+  referenceWeight?: number | null;
+}): number | null {
+  if (weight.current !== null) {
+    return weight.current;
+  }
+  if (weight.referenceWeight != null) {
+    return weight.referenceWeight;
+  }
+  return null;
+}
+
+function CalorieGoalCard({
+  profile,
+  weightKg,
+}: {
+  profile: UserProfile;
+  weightKg: number | null;
+}) {
   const effective = applyNumericDefaults(profile);
   const calorieInput: UserProfile = {
     ...profile,
     heightCm: effective.heightCm,
-    currentWeightKg: effective.currentWeightKg,
     targetPaceKgPerMonth: effective.targetPaceKgPerMonth,
   };
-  const ready = isCalorieGoalInputReady(calorieInput);
-  const calorieGoal = calculateCalorieGoal(calorieInput);
+  const ready = isCalorieGoalInputReady(calorieInput, weightKg);
+  const calorieGoal = calculateCalorieGoal(calorieInput, weightKg);
 
   return (
     <div
@@ -209,7 +223,7 @@ function CalorieGoalCard({ profile }: { profile: UserProfile }) {
                 lineHeight: 1.6,
               }}
             >
-              性別・生年月日・身長・現在の体重・目標ペースを入力すると表示されます
+              性別・生年月日・身長・目標ペースを入力し、体重記録があると表示されます
             </p>
           )}
         </div>
@@ -456,6 +470,7 @@ export function ProfileSettingsSheet({
 }: ProfileSettingsSheetProps) {
   const isOnboarding = mode === "onboarding";
   const [profile, setProfile] = useState<UserProfile>(DEFAULT_PROFILE);
+  const [recordedWeightKg, setRecordedWeightKg] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -469,12 +484,13 @@ export function ProfileSettingsSheet({
     setIsLoading(true);
     setError(null);
 
-    fetchUserProfile()
-      .then((response) => {
+    Promise.all([fetchUserProfile(), fetchDailyRecord()])
+      .then(([profileResponse, dailyRecord]) => {
         if (cancelled) {
           return;
         }
-        setProfile(applyNumericDefaults(response.profile));
+        setProfile(applyNumericDefaults(profileResponse.profile));
+        setRecordedWeightKg(resolveRecordedWeightKg(dailyRecord.weight));
       })
       .catch((fetchError: Error) => {
         if (!cancelled) {
@@ -514,7 +530,6 @@ export function ProfileSettingsSheet({
         gender: effective.gender,
         birthDate: effective.birthDate,
         heightCm: effective.heightCm,
-        currentWeightKg: effective.currentWeightKg,
         targetWeightKg: effective.targetWeightKg,
         activityLevel: null,
         targetPaceKgPerMonth: effective.targetPaceKgPerMonth,
@@ -541,8 +556,6 @@ export function ProfileSettingsSheet({
   }
 
   const heightCm = profile.heightCm ?? DEFAULT_NUMERIC.heightCm;
-  const currentWeightKg =
-    profile.currentWeightKg ?? DEFAULT_NUMERIC.currentWeightKg;
   const targetWeightKg =
     profile.targetWeightKg ?? DEFAULT_NUMERIC.targetWeightKg;
   const targetPaceKgPerMonth =
@@ -708,19 +721,6 @@ export function ProfileSettingsSheet({
             />
 
             <SettingCard
-              icon={<Scale size={18} color={BLUE} strokeWidth={2.2} />}
-              iconBg={BLUE_BG}
-              label="現在の体重"
-              hint="目標摂取カロリーの計算に使用"
-              value={currentWeightKg}
-              unit="kg"
-              min={20}
-              max={200}
-              step={0.1}
-              onChange={(value) => updateField("currentWeightKg", value)}
-            />
-
-            <SettingCard
               icon={<Target size={18} color={ORANGE} strokeWidth={2.2} />}
               iconBg={ORANGE_BG}
               label="目標体重"
@@ -733,7 +733,7 @@ export function ProfileSettingsSheet({
               onChange={(value) => updateField("targetWeightKg", value)}
             />
 
-            <CalorieGoalCard profile={profile} />
+            <CalorieGoalCard profile={profile} weightKg={recordedWeightKg} />
 
             <div style={{ height: 8 }} />
 

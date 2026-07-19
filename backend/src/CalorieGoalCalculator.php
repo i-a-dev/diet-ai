@@ -24,7 +24,7 @@ final class CalorieGoalCalculator
    *   gender?: string|null,
    *   birthDate?: string|null,
    *   heightCm?: float|null,
-   *   currentWeightKg?: float|null,
+   *   weightKg?: float|null,
    *   activityLevel?: string|null,
    *   targetPaceKgPerMonth?: float|null
    * } $profile
@@ -44,7 +44,7 @@ final class CalorieGoalCalculator
       $profile['gender'] ?? null,
       $ageYears,
       $profile['heightCm'] ?? null,
-      $profile['currentWeightKg'] ?? null,
+      $profile['weightKg'] ?? null,
     );
     $tdeeKcal = self::calculateTdee($bmrKcal, $profile['activityLevel'] ?? 'sedentary');
     $dailyDeficitKcal = self::calculateDailyDeficit($profile['targetPaceKgPerMonth'] ?? null);

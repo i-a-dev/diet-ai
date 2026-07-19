@@ -270,6 +270,40 @@ $resolveWeightContext = static function (array $weightSummary): array {
 };
 
 /**
+ * カロリー目標計算用: 当日または直近の体重記録を返す（未記録時は null）。
+ */
+$resolveWeightKgForCalorieGoal = static function () use ($weightRepository): ?float {
+    $today = (new DateTimeImmutable('now', new DateTimeZone('Asia/Tokyo')))->format('Y-m-d');
+    $summary = $weightRepository->getSummaryForDate($today);
+    if (is_numeric($summary['current'] ?? null)) {
+        return round((float) $summary['current'], 1);
+    }
+    if (is_numeric($summary['referenceWeight'] ?? null)) {
+        return round((float) $summary['referenceWeight'], 1);
+    }
+
+    return null;
+};
+
+/**
+ * @param array<string, mixed> $profile
+ * @return array{
+ *   ageYears: int|null,
+ *   bmrKcal: int|null,
+ *   tdeeKcal: int|null,
+ *   dailyDeficitKcal: int|null,
+ *   dailyIntakeGoalKcal: int|null,
+ *   isComplete: bool
+ * }
+ */
+$calculateCalorieGoal = static function (array $profile) use ($resolveWeightKgForCalorieGoal): array {
+    return CalorieGoalCalculator::calculate([
+        ...$profile,
+        'weightKg' => $resolveWeightKgForCalorieGoal(),
+    ]);
+};
+
+/**
  * 変更: AI推定時に「何相当で計算したか」が分かるノート文言を生成する。
  */
 function composeExerciseEstimateNote(string $source, string $inputExercise, string $estimatedExercise, string $rawNote): string
@@ -293,7 +327,7 @@ if ($requestMethod === 'GET' && $requestPath === '/api/user/profile') {
     $profile = $userProfileRepository->get();
     json_response([
         'profile' => $profile,
-        'calorieGoal' => CalorieGoalCalculator::calculate($profile),
+        'calorieGoal' => $calculateCalorieGoal($profile),
     ]);
 }
 
@@ -307,7 +341,6 @@ if ($requestMethod === 'PUT' && $requestPath === '/api/user/profile') {
     $fields = [];
     $numericFields = [
         'heightCm',
-        'currentWeightKg',
         'targetWeightKg',
         'targetPaceKgPerMonth',
     ];
@@ -359,7 +392,7 @@ if ($requestMethod === 'PUT' && $requestPath === '/api/user/profile') {
 
     json_response([
         'profile' => $profile,
-        'calorieGoal' => CalorieGoalCalculator::calculate($profile),
+        'calorieGoal' => $calculateCalorieGoal($profile),
     ]);
 }
 
