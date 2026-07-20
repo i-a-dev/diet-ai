@@ -232,6 +232,25 @@ assertSame('available', $authTrend['weight_evidence']['trend_status'] ?? null, '
 assertSame('decreasing', $authTrend['weight_evidence']['trend_direction'] ?? null, 'decreasing direction');
 assertSame(true, $authTrend['answer_permissions']['may_evaluate_weight_trend'] ?? null, 'may evaluate trend');
 assertSame(false, $authTrend['answer_permissions']['may_assert_fat_loss'] ?? null, 'trend does not allow fat-loss assert');
+assertSame(false, $authTrend['weight_evidence']['may_assert_fat_change'] ?? null, 'may_assert_fat_change always false');
+
+$authShort = $builder->build(
+    $scopeToday,
+    [],
+    [],
+    [
+        '2026-07-14' => 59.9,
+        '2026-07-19' => 59.6,
+    ],
+    [],
+    [],
+    ['target_weight_kg' => 55.0],
+);
+assertSame('short_period', $authShort['weight_evidence']['trend_status'] ?? null, '6-day span is short_period');
+assertSame(-0.3, $authShort['weight_evidence']['change_kg'] ?? null, 'objective weight change');
+assertSame(false, $authShort['answer_permissions']['may_evaluate_weight_trend'] ?? null, 'short period restricts trend evaluation');
+assertSame(false, $authShort['answer_permissions']['may_assert_fat_loss'] ?? null, 'short drop not fat loss');
+assertSame(false, $authShort['answer_permissions']['may_assert_fat_gain'] ?? null, 'fat gain always false');
 
 $authNoLatest = $builder->build($scopeToday, [], [], [], [], [], ['target_weight_kg' => 60.0]);
 assertSame(false, $authNoLatest['weight_evidence']['can_compute_remaining_to_target'] ?? null, 'no weight → cannot compute remaining');
@@ -340,18 +359,21 @@ echo "OK scope isolation\n";
 assertSame(true, $authPartial['energy_evidence']['may_compare_with_goal'] ?? null, 'may compare with goal');
 assertSame(false, $authPartial['energy_evidence']['may_assert_fat_loss'] ?? null, 'may not assert fat loss');
 assertSame(1050, $authPartial['registered_intake_kcal'] ?? null, 'registered intake sum');
+assertSame(1050, $authPartial['energy_evidence']['registered_intake_total_kcal'] ?? null, 'registered intake total');
 assertSame('unknown', $authPartial['meal_record_meta']['day_completion'] ?? null, 'completion unknown');
+assertSame(false, $authPartial['answer_permissions']['may_assert_energy_deficit'] ?? null, 'unknown completion → no deficit assert');
+assertSame(false, $authPartial['answer_permissions']['may_assert_energy_surplus'] ?? null, 'unknown completion → no surplus assert');
 echo "OK energy evidence\n";
 
-// --- Numeric comparisons: avg slightly above BMR must be "above", never inverted ---
-$authAboveBmr = $builder->build(
+// --- BMR comparisons removed; TDEE/goal comparisons added ---
+$authEnergy = $builder->build(
     $scopeToday,
     [
         [
             'recordedOn' => '2026-07-20',
             'mealType' => 'lunch',
             'foodName' => '定食',
-            'calories' => 1261,
+            'calories' => 1391,
         ],
     ],
     [],
@@ -359,44 +381,152 @@ $authAboveBmr = $builder->build(
     [],
     [],
     [
-        'bmr_kcal' => 1257,
-        'tdee_kcal' => 1800,
+        'bmr_kcal' => 1259,
+        'tdee_kcal' => 1900,
         'daily_intake_goal_kcal' => 1500,
     ],
 );
-assertSame(1261, $authAboveBmr['energy_evidence']['registered_avg_intake_kcal_on_days_with_meals'] ?? null, 'avg equals single day');
-assertSame(1257, $authAboveBmr['energy_evidence']['bmr_kcal'] ?? null, 'bmr from profile snapshot');
-assertSame('above', $authAboveBmr['energy_evidence']['comparisons']['registered_avg_vs_bmr'] ?? null, '1261 > 1257 => above');
-assertSame('above', $authAboveBmr['numeric_comparisons']['registered_avg_vs_bmr'] ?? null, 'numeric_comparisons mirrors above');
-assertSame('below', $authAboveBmr['energy_evidence']['comparisons']['registered_avg_vs_goal'] ?? null, '1261 < 1500 => below goal');
-assertSame('below', $authAboveBmr['energy_evidence']['comparisons']['registered_avg_vs_tdee'] ?? null, '1261 < 1800 => below tdee');
+$jsonEnergy = (string) ($authEnergy['json'] ?? '');
+$decodedEnergy = json_decode($jsonEnergy, true);
+assertTrue(is_array($decodedEnergy), 'json decodes');
+assertTrue(!isset($decodedEnergy['numeric_comparisons']['registered_avg_vs_bmr']), 'no registered_avg_vs_bmr key');
+assertTrue(!isset($decodedEnergy['energy_evidence']['comparisons']['registered_avg_vs_bmr']), 'no comparisons.registered_avg_vs_bmr');
+assertTrue(!isset($decodedEnergy['energy_evidence']['bmr_kcal']), 'bmr not in energy_evidence top-level');
+assertTrue(!array_key_exists('difference_vs_bmr', $decodedEnergy['energy_evidence'] ?? []), 'no difference_vs_bmr');
+assertTrue(!array_key_exists('intake_vs_bmr', $decodedEnergy['energy_evidence'] ?? []), 'no intake_vs_bmr');
+$dailyJson = json_encode($decodedEnergy['daily_energy_evidence'] ?? [], JSON_UNESCAPED_UNICODE) ?: '';
+assertNotContains('difference_vs_bmr', $dailyJson, 'daily has no difference_vs_bmr');
+assertNotContains('intake_vs_bmr', $dailyJson, 'daily has no intake_vs_bmr');
+assertNotContains('"lose_weight"', $jsonEnergy, 'PHP does not emit lose_weight');
+assertNotContains('"gain_weight"', $jsonEnergy, 'PHP does not emit gain_weight');
+assertNotContains('"fat_loss"', $jsonEnergy, 'PHP does not emit fat_loss');
+assertSame(false, $authEnergy['answer_permissions']['may_use_bmr_for_gain_loss'] ?? null, 'may_use_bmr_for_gain_loss false');
+assertSame(false, $authEnergy['answer_permissions']['may_label_daily_intake_as_gain_or_loss'] ?? null, 'no daily gain/loss labels');
+assertSame(1259, $authEnergy['bmr_reference']['bmr_kcal'] ?? null, 'bmr kept in bmr_reference');
+assertTrue(
+    in_array('gain_loss_classification', $authEnergy['bmr_reference']['prohibited_uses'] ?? [], true),
+    'bmr prohibits gain_loss_classification',
+);
 
-$authBelowBmr = $builder->build(
+assertSame(1391, $authEnergy['energy_evidence']['registered_intake_average_kcal'] ?? null, 'period avg');
+assertSame(-109, $authEnergy['energy_evidence']['registered_average_vs_goal']['difference_kcal'] ?? null, 'avg vs goal diff');
+assertSame('below', $authEnergy['energy_evidence']['registered_average_vs_goal']['status'] ?? null, 'avg below goal');
+assertSame(-509, $authEnergy['energy_evidence']['registered_average_vs_estimated_tdee']['difference_kcal'] ?? null, 'avg vs tdee diff');
+assertSame('below', $authEnergy['energy_evidence']['registered_average_vs_estimated_tdee']['status'] ?? null, 'avg below tdee');
+assertSame('below', $authEnergy['numeric_comparisons']['registered_average_vs_estimated_tdee'] ?? null, 'numeric_comparisons uses tdee');
+assertTrue(!isset($authEnergy['numeric_comparisons']['registered_avg_vs_bmr']), 'numeric_comparisons has no bmr key');
+
+$daily = $authEnergy['daily_energy_evidence'][0] ?? [];
+assertSame('2026-07-20', $daily['date'] ?? null, 'daily date');
+assertSame(1391, $daily['registered_intake_kcal'] ?? null, 'daily intake');
+assertSame(-109, $daily['difference_vs_goal_kcal'] ?? null, 'daily vs goal');
+assertSame('below', $daily['intake_vs_goal'] ?? null, 'daily intake_vs_goal');
+assertSame(-509, $daily['difference_vs_estimated_tdee_kcal'] ?? null, 'daily vs tdee');
+assertSame('below', $daily['intake_vs_estimated_tdee'] ?? null, 'daily intake_vs_tdee');
+assertTrue(!isset($daily['result']), 'daily has no result gain/loss field');
+assertTrue(!isset($daily['weight_result']), 'daily has no weight_result');
+
+$authNoTdee = $builder->build(
     $scopeToday,
     [
         [
             'recordedOn' => '2026-07-20',
             'mealType' => 'lunch',
-            'foodName' => '軽い食事',
-            'calories' => 1000,
+            'foodName' => '定食',
+            'calories' => 1391,
         ],
     ],
     [],
     [],
     [],
     [],
-    ['bmr_kcal' => 1257],
+    ['daily_intake_goal_kcal' => 1500],
 );
-assertSame('below', $authBelowBmr['energy_evidence']['comparisons']['registered_avg_vs_bmr'] ?? null, '1000 < 1257 => below');
+assertSame('unavailable', $authNoTdee['daily_energy_evidence'][0]['intake_vs_estimated_tdee'] ?? null, 'no tdee → unavailable');
+assertTrue(
+    array_key_exists('difference_vs_estimated_tdee_kcal', $authNoTdee['daily_energy_evidence'][0] ?? [])
+    && ($authNoTdee['daily_energy_evidence'][0]['difference_vs_estimated_tdee_kcal'] === null),
+    'no tdee → null diff',
+);
+assertSame(false, $authNoTdee['answer_permissions']['may_compare_registered_intake_with_estimated_tdee'] ?? null, 'no tdee → no compare perm');
 
-$finalAbove = $composer->composeFinalUserMessage('最近の平均どう？', $scopeToday, $authAboveBmr);
-assertContains('registered_avg_vs_bmr":"above"', $finalAbove, 'composer exposes above comparison');
-assertContains('BMR比較で「痩せる/太る」判定は禁止', $finalAbove, 'composer forbids BMR lose/gain labels');
-assertContains('数値比較の正確性', $systemPrompt, 'system prompt has numeric accuracy section');
-assertContains('BMRを下回れば痩せる', $systemPrompt, 'system forbids BMR as lose/gain threshold');
-assertContains('推定消費カロリー(TDEE)', $systemPrompt, 'system points to TDEE for rough balance');
-assertContains('痩せる/太るの閾値ではない', (string) ($authAboveBmr['energy_evidence']['metric_roles']['bmr_kcal'] ?? ''), 'metric role forbids BMR threshold');
-echo "OK numeric comparisons\n";
+$authNoGoal = $builder->build(
+    $scopeToday,
+    [
+        [
+            'recordedOn' => '2026-07-20',
+            'mealType' => 'lunch',
+            'foodName' => '定食',
+            'calories' => 1391,
+        ],
+    ],
+    [],
+    [],
+    [],
+    [],
+    ['tdee_kcal' => 1900],
+);
+assertSame('unavailable', $authNoGoal['daily_energy_evidence'][0]['intake_vs_goal'] ?? null, 'no goal → unavailable');
+assertSame(false, $authNoGoal['answer_permissions']['may_compare_registered_intake_with_goal'] ?? null, 'no goal → no compare perm');
+
+$authAbove = $builder->build(
+    $scopeToday,
+    [
+        [
+            'recordedOn' => '2026-07-20',
+            'mealType' => 'dinner',
+            'foodName' => '焼肉',
+            'calories' => 2200,
+        ],
+    ],
+    [],
+    [],
+    [],
+    [],
+    ['tdee_kcal' => 1900, 'daily_intake_goal_kcal' => 1500],
+);
+assertSame('above', $authAbove['daily_energy_evidence'][0]['intake_vs_estimated_tdee'] ?? null, '2200 > 1900 above');
+assertSame(300, $authAbove['daily_energy_evidence'][0]['difference_vs_estimated_tdee_kcal'] ?? null, 'diff +300');
+assertSame('above', $authAbove['daily_energy_evidence'][0]['intake_vs_goal'] ?? null, 'above goal');
+
+$authEqual = $builder->build(
+    $scopeToday,
+    [
+        [
+            'recordedOn' => '2026-07-20',
+            'mealType' => 'lunch',
+            'foodName' => 'きっちり',
+            'calories' => 1900,
+        ],
+    ],
+    [],
+    [],
+    [],
+    [],
+    ['tdee_kcal' => 1900],
+);
+assertSame('equal', $authEqual['daily_energy_evidence'][0]['intake_vs_estimated_tdee'] ?? null, 'equal tdee');
+assertSame(0, $authEqual['daily_energy_evidence'][0]['difference_vs_estimated_tdee_kcal'] ?? null, 'diff 0');
+echo "OK TDEE/goal comparisons without BMR\n";
+
+// --- System prompt BMR rules ---
+assertContains('BMRは安静時に生命維持のために使う推定エネルギー', $systemPrompt, 'BMR definition');
+assertContains('摂取カロリーとBMRを比較して「太る」「痩せる」', $systemPrompt, 'BMR not for gain/loss');
+assertContains('日付 | 摂取kcal | BMRとの差 | 太る／痩せる', $systemPrompt, 'forbidden BMR table example');
+assertContains('日付 | 登録摂取kcal | 推定TDEEとの差', $systemPrompt, 'allowed TDEE table');
+assertContains('may_use_bmr_for_gain_loss は常に false', $systemPrompt, 'permission in prompt');
+assertContains('may_label_daily_intake_as_gain_or_loss は常に false', $systemPrompt, 'label ban in prompt');
+assertNotContains('registered_avg_vs_bmr の大小を述べることはできる', $systemPrompt, 'old allow-bmr-compare wording removed');
+echo "OK system prompt BMR rules\n";
+
+$finalEnergy = $composer->composeFinalUserMessage('なんで太ってないって言えるの？', $scopeToday, $authEnergy);
+assertContains('【目標摂取カロリーとの比較】', $finalEnergy, 'composer goal section');
+assertContains('【推定TDEEとの比較】', $finalEnergy, 'composer tdee section');
+assertContains('【BMRの用途制限】', $finalEnergy, 'composer bmr restriction section');
+assertContains('太る／痩せる判定、エネルギー収支判定、日別の増減ラベルには使用禁止', $finalEnergy, 'bmr ban near value');
+assertNotContains('registered_avg_vs_bmr', $finalEnergy, 'composer has no bmr comparison field');
+assertContains('"may_use_bmr_for_gain_loss":false', $finalEnergy, 'composer has bmr permission false');
+echo "OK composer energy sections\n";
 
 // --- Composer sections snapshot-ish ---
 $composed = $composer->composeFinalUserMessage(
@@ -409,10 +539,12 @@ $composed = $composer->composeFinalUserMessage(
 );
 foreach ([
     '【質問対象期間】',
-    '【正式な記録】',
-    '【記録状態】',
-    '【PFCの証拠状態】',
-    '【体重・エネルギーの証拠状態】',
+    '【正式な食事記録】',
+    '【食事記録の完全性】',
+    '【目標摂取カロリーとの比較】',
+    '【推定TDEEとの比較】',
+    '【BMRの用途制限】',
+    '【体重推移】',
     '【回答可能範囲】',
     '【時間帯による未記録言及ルール】',
     '【ユーザーの質問】',
@@ -422,6 +554,8 @@ foreach ([
     assertContains($section, $composed, 'composer section: ' . $section);
 }
 assertContains('"may_assert_fat_loss":false', $composed, 'permissions in composer');
+assertContains('"may_assert_fat_gain":false', $composed, 'fat gain false in composer');
+assertContains('"may_predict_next_day_weight":false', $composed, 'next day weight false');
 echo "OK composer sections\n";
 
 echo str_repeat('=', 48) . "\n";

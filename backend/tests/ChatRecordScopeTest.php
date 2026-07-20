@@ -489,7 +489,9 @@ $finalLayered = $composer->composeFinalUserMessage(
     $layered,
 );
 assertContains('【質問対象期間】', $finalLayered, 'final message has scope section');
-assertContains('【PFCの証拠状態】', $finalLayered, 'final message has pfc evidence section');
+assertContains('【正式な食事記録】', $finalLayered, 'final message has meal records section');
+assertContains('【推定TDEEとの比較】', $finalLayered, 'final message has tdee section');
+assertContains('【BMRの用途制限】', $finalLayered, 'final message has bmr restriction');
 assertContains('【回答可能範囲】', $finalLayered, 'final message has answer permissions');
 assertContains('today_detail', $finalLayered, 'final message mentions today_detail layer');
 assertContains('recent_8_14d', $finalLayered, 'final message mentions recent_8_14d layer');

@@ -21,6 +21,19 @@ final class ChatLlmMessageComposer
         ?bool $suppressTodayMissingRecordMention = null,
     ): string {
         $blocks = [];
+        $energy = is_array($authoritative['energy_evidence'] ?? null) ? $authoritative['energy_evidence'] : [];
+        $weight = is_array($authoritative['weight_evidence'] ?? null) ? $authoritative['weight_evidence'] : [];
+        $bmrRef = is_array($authoritative['bmr_reference'] ?? null) ? $authoritative['bmr_reference'] : [];
+        $dailyEnergy = is_array($authoritative['daily_energy_evidence'] ?? null)
+            ? $authoritative['daily_energy_evidence']
+            : [];
+        $mealMeta = is_array($authoritative['meal_record_meta'] ?? null)
+            ? $authoritative['meal_record_meta']
+            : [];
+        $perms = is_array($authoritative['answer_permissions'] ?? null)
+            ? $authoritative['answer_permissions']
+            : [];
+
         $blocks[] = '【質問対象期間】';
         $blocks[] = sprintf(
             'scope_start_date=%s / scope_end_date=%s / scope_type=%s / scope_original_expression=%s',
@@ -32,7 +45,7 @@ final class ChatLlmMessageComposer
         $blocks[] = '回答の中心根拠は、この期間の scope_records 内の食事明細のみです。today_detail があっても対象期間外なら主根拠にしないでください。';
         $blocks[] = '';
 
-        $blocks[] = '【正式な記録】';
+        $blocks[] = '【正式な食事記録】';
         $blocks[] = '以下の JSON のみが食事・体重・kcal・登録PFCなどの正式事実です。会話履歴の食品名や過去assistantの要約は使わないでください。';
         $blocks[] = '食品明細（food_name / amount / unit / serving_* / calories / registered PFC）はPFC参考推定に必要なので必ず参照してください。';
         if (isset($authoritative['primary_focus'], $authoritative['layer_guidance'])) {
@@ -42,86 +55,86 @@ final class ChatLlmMessageComposer
         $blocks[] = (string) ($authoritative['json'] ?? '{}');
         $blocks[] = '';
 
-        $blocks[] = '【記録状態】';
-        $mealMeta = is_array($authoritative['meal_record_meta'] ?? null)
-            ? $authoritative['meal_record_meta']
-            : [];
+        $blocks[] = '【食事記録の完全性】';
         $blocks[] = sprintf(
             'has_entries=%s / entry_count=%s / day_completion=%s',
             !empty($mealMeta['has_entries']) ? 'true' : 'false',
             (string) ($mealMeta['entry_count'] ?? ($authoritative['meal_count'] ?? 0)),
             (string) ($mealMeta['day_completion'] ?? 'unknown'),
         );
-        $blocks[] = 'day_completion=unknown のときは「登録された範囲では」「記録から確認できる範囲では」を使い、今日の総摂取量として断定しないでください。';
+        $blocks[] = 'day_completion=unknown のときは「登録された範囲では」「記録分は」を使い、確定的な赤字・余剰・総摂取量として断定しないでください。';
+        $blocks[] = '日別差分を合計して「6日間で○kcalオーバー」などと確定説明しないでください。';
         $blocks[] = '';
 
-        $blocks[] = '【PFCの証拠状態】';
-        $pfc = is_array($authoritative['pfc_evidence'] ?? null) ? $authoritative['pfc_evidence'] : [];
+        $blocks[] = '【目標摂取カロリーとの比較】';
+        $vsGoal = is_array($energy['registered_average_vs_goal'] ?? null)
+            ? $energy['registered_average_vs_goal']
+            : [];
         $blocks[] = sprintf(
-            'status=%s / meal_entry_count=%s / registered_pfc_entry_count=%s / may_estimate_missing_from_foods=%s',
-            (string) ($pfc['status'] ?? 'none'),
-            (string) ($pfc['meal_entry_count'] ?? 0),
-            (string) ($pfc['registered_pfc_entry_count'] ?? 0),
-            !empty($pfc['may_estimate_missing_from_foods']) ? 'true' : 'false',
-        );
-        if (($pfc['status'] ?? '') === 'partial') {
-            $blocks[] = 'registered_totals は部分合計です。1日または期間全体のPFC総量として扱わないでください。';
-        }
-        $blocks[] = '登録PFCは正式値、不足分の推定は参考推定（範囲表示）として区別してください。';
-        $blocks[] = '';
-
-        $blocks[] = '【体重・エネルギーの証拠状態】';
-        $energy = is_array($authoritative['energy_evidence'] ?? null) ? $authoritative['energy_evidence'] : [];
-        $weight = is_array($authoritative['weight_evidence'] ?? null) ? $authoritative['weight_evidence'] : [];
-        $comparisons = is_array($authoritative['numeric_comparisons'] ?? null)
-            ? $authoritative['numeric_comparisons']
-            : (is_array($energy['comparisons'] ?? null) ? $energy['comparisons'] : []);
-        $blocks[] = sprintf(
-            'registered_intake_kcal=%s / days_with_meals=%s / registered_avg_intake_kcal_on_days_with_meals=%s',
-            (string) ($energy['registered_intake_kcal'] ?? ($authoritative['registered_intake_kcal'] ?? 0)),
-            (string) ($energy['days_with_meals'] ?? 'null'),
-            $energy['registered_avg_intake_kcal_on_days_with_meals'] === null
+            'registered_intake_average_kcal=%s / daily_intake_goal_kcal=%s / status=%s / difference_kcal=%s',
+            $energy['registered_intake_average_kcal'] === null
                 ? 'null'
-                : (string) $energy['registered_avg_intake_kcal_on_days_with_meals'],
-        );
-        $blocks[] = sprintf(
-            'bmr_kcal=%s / daily_intake_goal_kcal=%s / estimated_tdee_kcal=%s / tdee_status=%s',
-            $energy['bmr_kcal'] === null ? 'null' : (string) $energy['bmr_kcal'],
+                : (string) $energy['registered_intake_average_kcal'],
             $energy['daily_intake_goal_kcal'] === null
                 ? 'null'
                 : (string) $energy['daily_intake_goal_kcal'],
+            (string) ($vsGoal['status'] ?? 'unavailable'),
+            $vsGoal['difference_kcal'] === null ? 'null' : (string) $vsGoal['difference_kcal'],
+        );
+        $blocks[] = '目標内かどうかの参考。実際のカロリー赤字・余剰の断定ではない。';
+        $blocks[] = '';
+
+        $blocks[] = '【推定TDEEとの比較】';
+        $vsTdee = is_array($energy['registered_average_vs_estimated_tdee'] ?? null)
+            ? $energy['registered_average_vs_estimated_tdee']
+            : [];
+        $blocks[] = sprintf(
+            'estimated_tdee_kcal=%s / tdee_is_estimated=%s / status=%s / difference_kcal=%s',
             $energy['estimated_tdee_kcal'] === null
                 ? 'null'
                 : (string) $energy['estimated_tdee_kcal'],
-            (string) ($energy['tdee_status'] ?? 'unavailable'),
+            !empty($energy['tdee_is_estimated']) ? 'true' : 'false',
+            (string) ($vsTdee['status'] ?? 'unavailable'),
+            $vsTdee['difference_kcal'] === null ? 'null' : (string) $vsTdee['difference_kcal'],
         );
-        if ($comparisons !== []) {
-            $blocks[] = 'numeric_comparisons(PHP計算・大小の正): '
-                . (json_encode($comparisons, JSON_UNESCAPED_UNICODE) ?: '{}');
-            $blocks[] = '大小の取り違え禁止。加えて BMR比較で「痩せる/太る」判定は禁止。体重増減の参考はTDEE比較（推定）のみ。';
+        if ($dailyEnergy !== []) {
+            $blocks[] = 'daily_energy_evidence(日別・goal/TDEEのみ): '
+                . (json_encode($dailyEnergy, JSON_UNESCAPED_UNICODE) ?: '[]');
         }
-        if (is_array($energy['metric_roles'] ?? null) && $energy['metric_roles'] !== []) {
-            $blocks[] = 'metric_roles: ' . (json_encode($energy['metric_roles'], JSON_UNESCAPED_UNICODE) ?: '{}');
-        }
+        $blocks[] = 'エネルギー収支の参考はTDEE比較のみ。日別に「太る」「痩せる」ラベルを付けない。';
+        $blocks[] = '';
+
+        $blocks[] = '【BMRの用途制限】';
         $blocks[] = sprintf(
-            'weight_record_count=%s / trend_status=%s / can_compute_remaining_to_target=%s',
+            'bmr_kcal=%s',
+            ($bmrRef['bmr_kcal'] ?? null) === null ? 'null' : (string) $bmrRef['bmr_kcal'],
+        );
+        $blocks[] = 'このBMRは太る／痩せる判定、エネルギー収支判定、日別の増減ラベルには使用禁止です。';
+        $blocks[] = '許可用途: 摂取が極端に低すぎる注意、カロリー目標計算の過程。';
+        if (isset($bmrRef['prohibited_uses']) && is_array($bmrRef['prohibited_uses'])) {
+            $blocks[] = 'prohibited_uses: '
+                . (json_encode($bmrRef['prohibited_uses'], JSON_UNESCAPED_UNICODE) ?: '[]');
+        }
+        $blocks[] = '禁止表: 日付 | 摂取kcal | BMRとの差 | 太る／痩せる';
+        $blocks[] = '許可表: 日付 | 登録摂取kcal | 目標との差 / 推定TDEEとの差（太る・痩せるラベルなし）';
+        $blocks[] = '';
+
+        $blocks[] = '【体重推移】';
+        $blocks[] = sprintf(
+            'record_count=%s / trend_status=%s / change_kg=%s / may_assert_fat_change=%s',
             (string) ($weight['record_count'] ?? 0),
             (string) ($weight['trend_status'] ?? 'insufficient_data'),
-            !empty($weight['can_compute_remaining_to_target']) ? 'true' : 'false',
+            $weight['change_kg'] === null ? 'null' : (string) $weight['change_kg'],
+            !empty($weight['may_assert_fat_change']) ? 'true' : 'false',
         );
-        $blocks[] = '確定カロリー赤字・脂肪減少・翌日体重予測は断定しないでください。数値の捏造も禁止です。';
+        $blocks[] = '実際に痩せたか太ったかは体重推移を主な根拠にする。短期間の変化を脂肪増減と断定しない。';
         $blocks[] = '';
 
         $blocks[] = '【回答可能範囲】';
-        $perms = is_array($authoritative['answer_permissions'] ?? null)
-            ? $authoritative['answer_permissions']
-            : [];
-        if ($perms !== []) {
-            $blocks[] = json_encode($perms, JSON_UNESCAPED_UNICODE) ?: '{}';
-        } else {
-            $blocks[] = '{}';
-        }
-        $blocks[] = 'answer_permissions が false の項目は断定・推定しないでください。';
+        $blocks[] = $perms !== []
+            ? (json_encode($perms, JSON_UNESCAPED_UNICODE) ?: '{}')
+            : '{}';
+        $blocks[] = 'answer_permissions が false の項目は断定・ラベル付けしないでください。';
         $blocks[] = '';
 
         if ($desiredDietMethod !== null && trim($desiredDietMethod) !== '') {

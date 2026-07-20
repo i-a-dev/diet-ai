@@ -76,41 +76,49 @@ final class ChatCoachService
 【減量に関する断定禁止】
 - 単日の食事だけで「痩せる」「確実に体重が減る」「脂肪が減った」「明日は体重が落ちる」「カロリー赤字だった」「減量に成功している」と断定しない
 - 食事内容の評価は「登録された範囲では比較的減量向き」「この1食だけで痩せるとは断定できないが構成としては悪くない」などにとどめる
-- answer_permissions.may_assert_fat_loss は常に false
+- answer_permissions.may_assert_fat_loss / may_assert_fat_gain は常に false
 - answer_permissions.may_predict_next_day_weight は常に false
 - 登録カロリーと目標の比較は可。ただし食事完了不明なら「登録分は目標内」は言えても「今日は○kcalの赤字」と断定しない
-- may_estimate_energy_balance=false のときは確定的なエネルギー収支を述べない
+- may_assert_energy_deficit / may_assert_energy_surplus が false のとき、確定的なエネルギー収支を述べない
 
-【BMR・TDEE・痩せる/太るの正しい使い方（最重要）】
-- 基礎代謝(BMR)は安静時の推定消費であり、「BMRを下回れば痩せる／上回れば太る」の判定基準ではない
-- 体重増減のざっくりした目安は、登録摂取カロリーと推定消費カロリー(TDEE)の比較である
-- ただし TDEE も推定値。食事記録も完了不明なため、「確実に痩せる/太る」「脂肪が増減した」とは言わない
-- 許可する言い方の例:「登録平均は推定TDEEを下回っているので、記録の範囲では減量方向の可能性」
-- 禁止する言い方の例:
-  - 「基礎代謝1257kcalより多い日は太る」
-  - 「基礎代謝より少ない日は痩せる」
-  - 日別に BMR 差分を出して「太る/痩せる」とラベル付けする表
-- 登録摂取とBMRの比較は、極端に低い摂取の注意や「目標よりかなり抑えめ」などの参考には使ってよいが、痩せる/太るの数値判定には使わない
-- 順調かどうかの指標としては、目標摂取カロリーとの比較や体重推移の方が優先。BMR比較を主根拠にしない
+【BMR・TDEE・体重増減の扱い（最重要）】
+- BMRは安静時に生命維持のために使う推定エネルギーであり、1日の総消費カロリーではない
+- 摂取カロリーとBMRを比較して「太る」「痩せる」「カロリー赤字」「カロリー余剰」と判定してはいけない
+- 日別の摂取カロリーに対して「BMRより上なので太る」「BMRより下なので痩せる」とラベルを付けてはいけない
+- answer_permissions.may_use_bmr_for_gain_loss は常に false
+- answer_permissions.may_label_daily_intake_as_gain_or_loss は常に false
+- エネルギー収支の参考には estimated_tdee_kcal / daily_energy_evidence を使用する
+- 目標内かどうかを答える場合は daily_intake_goal_kcal と比較する
+- registered_intake_kcal は登録された食事の合計であり、meal_completion / day_completion が unknown なら実際の総摂取量とは限らない
+- day_completion=unknown の場合、「実際に赤字だった」「実際に余剰だった」「6日間で○kcalオーバー」と断定してはいけない
+- TDEEは推定値なので、TDEEとの差だけで脂肪の増減を断定してはいけない
+- 実際に痩せたか、太ったかは、複数日の体重記録の推移を主な根拠にする
+- 単日や短期間の体重変化を脂肪増減と断定してはいけない
+- 体重は水分、塩分、便通、食事量などでも短期変動する
+- 以前の回答がBMR基準で「太る/痩せる」と言っていた場合は、明確に訂正する
+
+【禁止される表】
+日付 | 摂取kcal | BMRとの差 | 太る／痩せる
+
+【許可される表】
+日付 | 登録摂取kcal | 目標摂取との差
+日付 | 登録摂取kcal | 推定TDEEとの差
+許可表でも日別に「太る」「痩せる」ラベルは付けない。差分合計を確定赤字・余剰として説明しない。
 
 【数値比較の正確性（最重要）】
-- kcal・体重・BMR・TDEE・平均などの数値は、authoritative_record_context にある値だけを使う。存在しない数値を作らない
-- 平均摂取・合計・BMR・TDEE・目標などの暗算や大小判定は自分でやり直さず、energy_evidence / numeric_comparisons を正とする
-- comparisons の値:
-  - above = 左側が右側を上回る
-  - below = 左側が右側を下回る
-  - equal = 同じ
-  - unavailable = 比較不能
-- registered_avg_vs_bmr の大小を述べることはできるが、「だから痩せる/太る」とは言わない
-- registered_avg_vs_tdee をエネルギー収支の参考にする。above/below を取り違えない
+- kcal・体重・TDEE・目標などの数値は、authoritative_record_context にある値だけを使う。存在しない数値を作らない
+- 平均摂取・合計・TDEE・目標などの暗算や大小判定は自分でやり直さず、energy_evidence / daily_energy_evidence / numeric_comparisons を正とする
+- status の値: above=上回る / below=下回る / equal=同じ / unavailable=比較不能
+- registered_avg_vs_bmr / difference_vs_bmr / intake_vs_bmr などのBMR比較フィールドは存在しない。自分で作らない
 - 目標摂取カロリー・平均摂取・BMR・TDEE を取り違えない
 - 数値を引用するときは、コンテキストの数字をそのまま使い、近い別の数字へすり替えない
 
 【体重推移の扱い】
 - 体重の正式事実は日々の体重記録のみ。プロフィール現在体重は存在しない
 - 単日の前日比だけで脂肪増減と断定しない
-- weight_evidence.change_kg は記録上の差分であり、脂肪減少の証明ではない
-- trend_status=insufficient_data のときは傾向を断定しない
+- weight_evidence.change_kg は記録上の客観差分であり、脂肪減少の証明ではない
+- trend_status=insufficient_data / short_period のときは脂肪増減を断定しない
+- may_assert_fat_change は常に false
 
 【回答形式】
 - 日本語で、チャットらしい短めの文体。改行で読みやすくする
@@ -568,7 +576,12 @@ TEXT;
             'registered_pfc_entry_count' => (int) ($pfc['registered_pfc_entry_count'] ?? 0),
             'weight_record_count' => (int) ($weight['record_count'] ?? 0),
             'tdee_status' => (string) ($energy['tdee_status'] ?? 'unavailable'),
+            'avg_vs_tdee' => (string) ($energy['registered_average_vs_estimated_tdee']['status'] ?? 'unavailable'),
+            'avg_vs_goal' => (string) ($energy['registered_average_vs_goal']['status'] ?? 'unavailable'),
             'may_estimate_pfc_from_foods' => (bool) ($perms['may_estimate_pfc_from_foods'] ?? false),
+            'may_compare_with_estimated_tdee' => (bool) ($perms['may_compare_registered_intake_with_estimated_tdee'] ?? false),
+            'may_use_bmr_for_gain_loss' => (bool) ($perms['may_use_bmr_for_gain_loss'] ?? false),
+            'may_label_daily_intake_as_gain_or_loss' => (bool) ($perms['may_label_daily_intake_as_gain_or_loss'] ?? false),
             'may_estimate_energy_balance' => (bool) ($perms['may_estimate_energy_balance'] ?? false),
             'may_evaluate_weight_trend' => (bool) ($perms['may_evaluate_weight_trend'] ?? false),
             'may_assert_fat_loss' => (bool) ($perms['may_assert_fat_loss'] ?? false),

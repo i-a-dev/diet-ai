@@ -71,26 +71,14 @@ final class AuthoritativeRecordContextBuilder
             $profileSnapshot,
         );
 
+        $evidenceFields = $this->evidenceFieldsForPayload($evidence);
         $payload = [
             'query_scope' => $scope->toArray(),
             'profile' => $profileSnapshot,
             'scope_records' => $dailyRecords,
             'daily_records' => $dailyRecords,
-            'meal_record_meta' => $evidence['meal_record_meta'],
-            'pfc_evidence' => $evidence['pfc_evidence'],
-            'energy_evidence' => $evidence['energy_evidence'],
-            'numeric_comparisons' => $evidence['numeric_comparisons'] ?? ($evidence['energy_evidence']['comparisons'] ?? []),
-            'weight_evidence' => $evidence['weight_evidence'],
-            'answer_permissions' => $evidence['answer_permissions'],
-            'registered_intake_kcal' => $evidence['registered_intake_kcal'],
-            'notes' => [
-                'record_status=no_record means no DB entry for that day; do not assert the user ate nothing',
-                'food names and kcal must come only from scope_records / daily_records.meals',
-                'pfc_evidence.registered_totals are DB-registered values only; partial is not full-day PFC',
-                'day_completion=unknown: do not assert complete daily intake',
-                'numeric_comparisons / energy_evidence.comparisons are the source of truth for above/below wording',
-                'conversation history must not supply food facts',
-            ],
+            ...$evidenceFields,
+            'notes' => $this->evidenceNotes(false),
         ];
 
         $json = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
@@ -104,13 +92,7 @@ final class AuthoritativeRecordContextBuilder
             'scope_records' => $dailyRecords,
             'daily_records' => $dailyRecords,
             'meal_count' => $mealCount,
-            'meal_record_meta' => $evidence['meal_record_meta'],
-            'pfc_evidence' => $evidence['pfc_evidence'],
-            'energy_evidence' => $evidence['energy_evidence'],
-            'numeric_comparisons' => $evidence['numeric_comparisons'] ?? ($evidence['energy_evidence']['comparisons'] ?? []),
-            'weight_evidence' => $evidence['weight_evidence'],
-            'answer_permissions' => $evidence['answer_permissions'],
-            'registered_intake_kcal' => $evidence['registered_intake_kcal'],
+            ...$evidenceFields,
             'json' => $json,
             'text' => $this->formatText($scope, $dailyRecords, $profileSnapshot, $evidence),
         ];
@@ -256,6 +238,7 @@ final class AuthoritativeRecordContextBuilder
             ? '主参照は scope_records（＝今日）。today_detail は同一日の補助。recent_7d / recent_8_14d / summary は対象外の補助であり、回答の中心にしない。'
             : '主参照は scope_records（query_scope の start_date〜end_date）。today_detail があっても対象期間外なら回答の主根拠にしない。recent_7d / summary は補助。';
 
+        $evidenceFields = $this->evidenceFieldsForPayload($evidence);
         $payload = [
             'query_scope' => $scope->toArray(),
             'scope_start_date' => $scope->startDateString(),
@@ -267,34 +250,13 @@ final class AuthoritativeRecordContextBuilder
             'recording_meta' => $recordingMeta,
             'profile' => $profileSnapshot,
             'scope_records' => $scopeRecords,
-            'meal_record_meta' => $evidence['meal_record_meta'],
-            'pfc_evidence' => $evidence['pfc_evidence'],
-            'energy_evidence' => $evidence['energy_evidence'],
-            'numeric_comparisons' => $evidence['numeric_comparisons'] ?? ($evidence['energy_evidence']['comparisons'] ?? []),
-            'weight_evidence' => $evidence['weight_evidence'],
-            'answer_permissions' => $evidence['answer_permissions'],
-            'registered_intake_kcal' => $evidence['registered_intake_kcal'],
+            ...$evidenceFields,
             'today_detail' => $todayDetail,
             'recent_7d' => $recent7d,
             'recent_8_14d' => $recent8to14d,
             'summary_30d' => $summary30d,
             'summary_6m' => $summary6m,
-            'notes' => [
-                'Answers must center on scope_records for query_scope dates only',
-                'record_status=no_record means no DB entry for that day; do not assert the user ate nothing',
-                'food names and kcal for the question must come from scope_records meals',
-                'today_detail is supplemental; ignore it as primary evidence when outside query_scope',
-                'recent_8_14d is days 8-14 ago (exclusive of recent_7d); use for week-over-week comparison',
-                'summary_30d and summary_6m have aggregates only (no meal food names)',
-                'summary weight_start_kg/weight_end_kg must be quoted with weight_start_recorded_on/weight_end_recorded_on',
-                'weight_end_kg is the latest (直近) recorded weight in the period; not necessarily period_end',
-                'if weight_on_period_start.status=no_record, there was no weight on period_start',
-                'recording_meta.first_any_recorded_on is when the user started recording; do not invent history before that date',
-                'pfc_evidence.status=partial means registered_totals are partial sums, not full-period PFC',
-                'day_completion=unknown: prefer「登録された範囲では」; never assert complete daily intake',
-                'numeric_comparisons / energy_evidence.comparisons are the source of truth for above/below wording; never invert',
-                'conversation history must not supply food facts',
-            ],
+            'notes' => $this->evidenceNotes(true),
         ];
 
         $json = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
@@ -313,13 +275,7 @@ final class AuthoritativeRecordContextBuilder
             'recording_meta' => $recordingMeta,
             'profile' => $profileSnapshot,
             'scope_records' => $scopeRecords,
-            'meal_record_meta' => $evidence['meal_record_meta'],
-            'pfc_evidence' => $evidence['pfc_evidence'],
-            'energy_evidence' => $evidence['energy_evidence'],
-            'numeric_comparisons' => $evidence['numeric_comparisons'] ?? ($evidence['energy_evidence']['comparisons'] ?? []),
-            'weight_evidence' => $evidence['weight_evidence'],
-            'answer_permissions' => $evidence['answer_permissions'],
-            'registered_intake_kcal' => $evidence['registered_intake_kcal'],
+            ...$evidenceFields,
             'today_detail' => $todayDetail,
             'recent_7d' => $recent7d,
             'recent_8_14d' => $recent8to14d,
@@ -343,6 +299,51 @@ final class AuthoritativeRecordContextBuilder
                 $scopeRecords,
             ),
         ];
+    }
+
+    /**
+     * @param array<string, mixed> $evidence
+     * @return array<string, mixed>
+     */
+    private function evidenceFieldsForPayload(array $evidence): array
+    {
+        return [
+            'meal_record_meta' => $evidence['meal_record_meta'] ?? [],
+            'pfc_evidence' => $evidence['pfc_evidence'] ?? [],
+            'energy_evidence' => $evidence['energy_evidence'] ?? [],
+            'daily_energy_evidence' => $evidence['daily_energy_evidence'] ?? [],
+            'bmr_reference' => $evidence['bmr_reference'] ?? [],
+            'numeric_comparisons' => $evidence['numeric_comparisons'] ?? [],
+            'weight_evidence' => $evidence['weight_evidence'] ?? [],
+            'answer_permissions' => $evidence['answer_permissions'] ?? [],
+            'registered_intake_kcal' => $evidence['registered_intake_kcal'] ?? 0,
+        ];
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function evidenceNotes(bool $layered): array
+    {
+        $notes = [];
+        if ($layered) {
+            $notes[] = 'Answers must center on scope_records for query_scope dates only';
+            $notes[] = 'today_detail is supplemental; ignore it as primary evidence when outside query_scope';
+            $notes[] = 'recent_8_14d is days 8-14 ago (exclusive of recent_7d); use for week-over-week comparison';
+            $notes[] = 'summary_30d and summary_6m have aggregates only (no meal food names)';
+            $notes[] = 'recording_meta.first_any_recorded_on is when the user started recording; do not invent history before that date';
+        }
+        $notes[] = 'record_status=no_record means no DB entry for that day; do not assert the user ate nothing';
+        $notes[] = 'food names and kcal for the question must come from scope_records meals';
+        $notes[] = 'pfc_evidence.registered_totals are DB-registered values only; partial is not full-day PFC';
+        $notes[] = 'day_completion=unknown: prefer「登録された範囲では」; never assert complete daily intake or definite deficit/surplus';
+        $notes[] = 'Compare registered intake to daily_intake_goal_kcal and estimated_tdee_kcal only; never to BMR for gain/loss';
+        $notes[] = 'Do not invent BMR-based comparison fields or daily gain/loss labels';
+        $notes[] = 'Do not label daily rows as 太る/痩せる; PHP does not emit gain/loss/fat labels';
+        $notes[] = 'bmr_reference is for low-intake safety and calorie-goal context only';
+        $notes[] = 'conversation history must not supply food facts';
+
+        return $notes;
     }
 
     /**
@@ -793,17 +794,27 @@ final class AuthoritativeRecordContextBuilder
         $lines[] = 'weight_trend_status: '
             . (string) ($evidence['weight_evidence']['trend_status'] ?? 'insufficient_data');
         $lines[] = 'tdee_status: ' . (string) ($evidence['energy_evidence']['tdee_status'] ?? 'unavailable');
-        $avg = $evidence['energy_evidence']['registered_avg_intake_kcal_on_days_with_meals'] ?? null;
-        $bmr = $evidence['energy_evidence']['bmr_kcal'] ?? null;
-        $avgVsBmr = $evidence['energy_evidence']['comparisons']['registered_avg_vs_bmr']
-            ?? $evidence['numeric_comparisons']['registered_avg_vs_bmr']
+        $avg = $evidence['energy_evidence']['registered_intake_average_kcal']
+            ?? $evidence['energy_evidence']['registered_avg_intake_kcal_on_days_with_meals']
+            ?? null;
+        $tdee = $evidence['energy_evidence']['estimated_tdee_kcal'] ?? null;
+        $avgVsTdee = $evidence['energy_evidence']['registered_average_vs_estimated_tdee']['status']
+            ?? $evidence['numeric_comparisons']['registered_average_vs_estimated_tdee']
+            ?? 'unavailable';
+        $avgVsGoal = $evidence['energy_evidence']['registered_average_vs_goal']['status']
+            ?? $evidence['numeric_comparisons']['registered_average_vs_goal']
             ?? 'unavailable';
         $lines[] = sprintf(
-            'registered_avg=%s / bmr=%s / registered_avg_vs_bmr=%s',
+            'registered_avg=%s / estimated_tdee=%s / vs_tdee=%s / vs_goal=%s',
             $avg === null ? 'null' : (string) $avg,
-            $bmr === null ? 'null' : (string) $bmr,
-            (string) $avgVsBmr,
+            $tdee === null ? 'null' : (string) $tdee,
+            (string) $avgVsTdee,
+            (string) $avgVsGoal,
         );
+        $bmrRef = is_array($evidence['bmr_reference'] ?? null) ? $evidence['bmr_reference'] : [];
+        $lines[] = 'bmr_reference.bmr_kcal: '
+            . ($bmrRef['bmr_kcal'] === null ? 'null' : (string) $bmrRef['bmr_kcal'])
+            . '（太る/痩せる判定禁止）';
         $lines[] = '';
         $lines[] = '■ scope_records（質問対象期間・主根拠 / ' . count($scopeRecords) . '日）';
         foreach ($scopeRecords as $day) {
