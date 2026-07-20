@@ -50,6 +50,8 @@ require_once __DIR__ . '/../src/ChatCoachService.php';
 require_once __DIR__ . '/../src/ChatMessageRepository.php';
 require_once __DIR__ . '/../src/AuthService.php';
 require_once __DIR__ . '/../src/MailService.php';
+require_once __DIR__ . '/../src/AccountDeletionService.php';
+require_once __DIR__ . '/../src/ContactInquiryService.php';
 
 $authService = new AuthService();
 $requestMethod = $_SERVER['REQUEST_METHOD'] ?? 'GET';
@@ -216,6 +218,37 @@ if ($requestMethod === 'GET' && $requestPath === '/api/auth/me') {
     json_response(['user' => $authenticatedUser]);
 }
 
+// DELETE /api/auth/account — アカウント削除（認証必須・パスワード再確認）
+if ($requestMethod === 'DELETE' && $requestPath === '/api/auth/account') {
+    if ($authenticatedUser === null) {
+        json_response(['message' => 'Unauthorized'], 401);
+    }
+
+    $body = json_decode(file_get_contents('php://input') ?: '{}', true);
+    if (!is_array($body)) {
+        json_response(['message' => 'Invalid JSON body'], 422);
+    }
+
+    $password = (string) ($body['password'] ?? '');
+    $confirmation = trim((string) ($body['confirmation'] ?? ''));
+    // リクエストの userId は無視し、トークンから解決した ID のみ使う
+    $accountDeletionService = new AccountDeletionService();
+
+    try {
+        $result = $accountDeletionService->deleteAccount(
+            (int) $authenticatedUser['id'],
+            $password,
+            $confirmation
+        );
+    } catch (InvalidArgumentException $exception) {
+        json_response(['message' => $exception->getMessage()], 422);
+    } catch (RuntimeException $exception) {
+        json_response(['message' => 'アカウントの削除に失敗しました。しばらくしてから再度お試しください。'], 502);
+    }
+
+    json_response($result);
+}
+
 if ($authenticatedUser === null) {
     json_response(['message' => 'Unauthorized'], 401);
 }
@@ -230,6 +263,25 @@ $foodRegistrationEventRepository = new FoodRegistrationEventRepository($userId);
 $dailyNutritionSummaryRepository = new DailyNutritionSummaryRepository($userId);
 $activityRepository = new ActivityRepository($userId);
 $chatMessageRepository = new ChatMessageRepository($userId);
+$contactInquiryService = new ContactInquiryService();
+
+// POST /api/contact — お問い合わせ送信
+if ($requestMethod === 'POST' && $requestPath === '/api/contact') {
+    $body = json_decode(file_get_contents('php://input') ?: '{}', true);
+    if (!is_array($body)) {
+        json_response(['message' => 'Invalid JSON body'], 422);
+    }
+
+    try {
+        $result = $contactInquiryService->submit($userId, $body);
+    } catch (InvalidArgumentException $exception) {
+        json_response(['message' => $exception->getMessage()], 422);
+    } catch (RuntimeException $exception) {
+        json_response(['message' => $exception->getMessage()], 502);
+    }
+
+    json_response($result);
+}
 $calorieEstimateService = new CalorieEstimateService();
 $exerciseMetEstimateService = new ExerciseMetEstimateService();
 $chatCoachService = new ChatCoachService(

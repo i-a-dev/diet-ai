@@ -814,3 +814,39 @@ export function logout() {
 export function fetchCurrentUser() {
   return request<{ user: AuthUser }>("/auth/me");
 }
+
+export interface DeleteAccountPayload {
+  password: string;
+  confirmation: string;
+}
+
+export function deleteAccount(payload: DeleteAccountPayload) {
+  return request<{ ok: true; message: string }>("/auth/account", {
+    method: "DELETE",
+    body: JSON.stringify(payload),
+  });
+}
+
+export type ContactCategory =
+  | "app_usage"
+  | "bug"
+  | "billing"
+  | "account"
+  | "ai_coach"
+  | "other";
+
+export interface ContactInquiryPayload {
+  category: ContactCategory;
+  subject: string;
+  body: string;
+  replyEmail: string;
+  /** スパム対策 honeypot。人間は空のまま */
+  honeypot?: string;
+}
+
+export function submitContactInquiry(payload: ContactInquiryPayload) {
+  return request<{ ok: true; message: string }>("/contact", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}

@@ -53,6 +53,48 @@ TEXT;
         $this->send($to, self::SUBJECT_RESET, $body);
     }
 
+    /**
+     * お問い合わせ通知を運営宛てに送信する。
+     * 送信先は CONTACT_INQUIRY_TO（未設定時は MAIL_FROM へフォールバックしない。誤送信防止）。
+     */
+    public function sendContactInquiryNotification(
+        int $inquiryId,
+        int $userId,
+        string $category,
+        string $subject,
+        string $body,
+        string $replyEmail
+    ): void {
+        $to = trim((string) (getenv('CONTACT_INQUIRY_TO') ?: ''));
+        if ($to === '') {
+            $driver = strtolower(trim((string) (getenv('MAIL_DRIVER') ?: 'log')));
+            if ($driver === 'log') {
+                // 開発時は宛先未設定でもログへ残せるよう、ログ用の仮宛先を使う
+                $to = 'contact-inbox@localhost';
+            } else {
+                throw new RuntimeException(
+                    'CONTACT_INQUIRY_TO is required to deliver contact inquiries.'
+                );
+            }
+        }
+
+        $mailSubject = sprintf('[お問い合わせ #%d] %s', $inquiryId, $subject);
+        $mailBody = <<<TEXT
+お問い合わせを受信しました。
+
+Inquiry ID: {$inquiryId}
+User ID: {$userId}
+Category: {$category}
+Reply-To: {$replyEmail}
+Subject: {$subject}
+
+---
+{$body}
+TEXT;
+
+        $this->send($to, $mailSubject, $mailBody);
+    }
+
     private function send(string $to, string $subject, string $body): void
     {
         $driver = strtolower(trim((string) (getenv('MAIL_DRIVER') ?: 'log')));
