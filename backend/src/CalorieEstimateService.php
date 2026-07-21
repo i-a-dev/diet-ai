@@ -14,7 +14,7 @@ final class CalorieEstimateService
 {
     private const API_URL = 'https://api.anthropic.com/v1/messages';
     private const MODEL = 'claude-haiku-4-5-20251001';
-    private const SYSTEM_PROMPT = 'あなたは日本の食品・料理全般に詳しいカロリー推定の専門家です。口に入れて摂取するもの（料理・飲み物・お菓子・ゼリー・サプリ・機能性食品・市販品）は食品として扱ってください。明らかに食べないもの（洗剤・化粧品・金属など）だけ {"error":"not_food"} を返してください。商品名が不明確でも食べ物の可能性がある場合は not_food にせず推定してください。confidenceは「標準量を仮定できるか」ではなく「その仮定を置いても推定値がどれだけ安定するか」を表します。代表値を出せても、追加情報で数百kcal変わり得るなら low にしてください。食品の場合はJSONのみ返答し、前置きや説明は不要です。';
+    private const SYSTEM_PROMPT = 'あなたは日本の食品・料理全般に詳しいカロリー推定の専門家です。口に入れて摂取するもの（料理・飲み物・お菓子・ゼリー・サプリ・機能性食品・市販品）は食品として扱ってください。明らかに食べないもの（洗剤・化粧品・金属など）だけ {"error":"not_food"} を返してください。商品名が不明確でも食べ物の可能性がある場合は not_food にせず推定してください。confidenceは「標準量を仮定できるか」ではなく「その仮定を置いても推定値がどれだけ安定するか」を表します。代表値を出せても、追加情報で数百kcal変わり得るなら low にしてください。should_offer_web_searchはconfidenceとは別軸で、Web上に特定可能な商品・栄養成分情報がありそうかを判定してください。食品の場合はJSONのみ返答し、前置きや説明は不要です。';
     private const PRODUCT_CANDIDATE_SYSTEM_PROMPT = 'あなたは日本の市販食品に詳しい専門家です。Web検索はせず、カロリー推定もしません。入力が食べ物でない場合のみ {"error":"not_food"} を返してください。食品の場合は、日本国内で販売されている可能性が高い市販食品候補を最大3件返してください。JSONのみ返答し、前置きや説明は不要です。';
     private const WEB_SEARCH_SYSTEM_PROMPT = 'あなたは日本の食品・市販品に詳しい専門家です。口に入れて摂取するものは食品として扱ってください。明らかに食べないものだけ {"error":"not_food"} を返してください。食品の場合は web_search で商品を調べ、正式な商品名とその商品の栄養成分・カロリーが載っているページ URL を返してください。まとめ記事・ブログよりメーカー公式・商品詳細ページを優先してください。最終回答はJSONのみ。前置きや説明は不要です。';
     private const WEB_SEARCH_MAX_TOKENS = 1024;
@@ -42,6 +42,8 @@ final class CalorieEstimateService
      *   assumed_weight_g?: int,
      *   assumption?: string,
      *   confidence?: string,
+     *   should_offer_web_search?: bool,
+     *   web_search_reason?: string,
      *   product_name?: string,
      *   source_url?: string,
      *   source?: string,
@@ -743,13 +745,13 @@ PROMPT;
     /**
      * Claude API を1回呼び出し、推定結果を返す。
      *
-     * @return array{kcal: int, assumed_weight_g?: int, assumption?: string, confidence: string, product_name?: string, source_url?: string}|'not_food'|null
+     * @return array{kcal: int, assumed_weight_g?: int, assumption?: string, confidence: string, should_offer_web_search: bool, web_search_reason?: string, product_name?: string, source_url?: string}|'not_food'|null
      */
     private function requestEstimate(string $foodName, string $apiKey): array|string|null
     {
         $payload = [
             'model' => self::MODEL,
-            'max_tokens' => 256,
+            'max_tokens' => 320,
             'system' => self::SYSTEM_PROMPT,
             'messages' => [
                 [
@@ -1257,11 +1259,48 @@ PROMPT;
 - 「一人前を仮定できた」だけで medium 以上にしていないか
 - サイズ差程度の小さな誤差を過大評価して medium/low にしていないか
 
+【should_offer_web_search の意味】
+- confidence とは別軸。混同しない
+- confidence は AI推定値の安定性
+- should_offer_web_search は「Web上に特定可能な商品情報・栄養成分情報が存在しそうか」
+- medium/low であることだけを理由に true にしない
+- confidence=high でも、ブランド・店舗・具体的商品名があり公式ページで裏取りできそうなら true にしてよい
+- 逆に confidence=low でも、一般料理名だけで商品特定できなければ false
+
+【should_offer_web_search = true】
+Web検索で商品や栄養成分を特定できる可能性が高い場合:
+- 具体的な商品名が含まれている
+- ブランド名・メーカー名が含まれている
+- コンビニ・スーパー・飲食チェーン・店舗名が含まれている
+- パッケージ商品や市販品である可能性が高い
+- 商品ページや公式の栄養成分ページが存在しそう
+- Web検索によって、推定値より正確な情報を取得できる可能性が高い
+- 知名度の高い市販品・チェーン商品は、AIがカロリーを知っていても true（公式情報の確認に有用）
+
+【should_offer_web_search = false】
+Web検索しても特定商品へ到達しにくく、精度向上が期待できない場合:
+- 一般的な料理名だけ
+- 家庭料理や手作り料理
+- 内容が不明な弁当や定食
+- 店舗名・ブランド名・商品名がない
+- 材料や量の追加情報がなければ特定できない
+- Web検索しても一般レシピや幅の広い情報しか得られない
+- Web検索より、ユーザーが内容を編集した方が精度向上につながる
+- ゆで卵・白米など一般食品で、Web検索しても商品ページ特定の意味が薄い場合
+
+【組み合わせの許容】
+- high / false
+- medium / true または false
+- low / true または false
+いずれもあり得る。confidence から機械的に決めない
+
 【判定の目安（校准用・個別例外処理ではない）】
 - high になりやすい: ゆで卵2個、白米150g、牛乳200ml、バナナ1本（量が明確で、追加情報でも推定値が大きく変わらない）
 - medium になりやすい: おにぎり1個、食パン1枚、味噌汁1杯（多少の種類差はあるが代表値として使える）
 - low になりやすい: 日替わり定食、定食、弁当、ラーメン、カレー、サラダ、パスタ
   （主菜・レシピ・店舗・ソース・セット内容などでおおよそ200kcal以上変わり得る。一人前を仮定できても low）
+- should_offer_web_search=true の目安: カップヌードル シーフード、セブンイレブン 鮭おにぎり、ファミチキ、ザバス ミルクプロテイン、ほっともっと のり弁当、マクドナルド ビッグマック、ローソン のり弁当
+- should_offer_web_search=false の目安: お弁当、日替わり定食、手作り弁当、カレー、ラーメン、サラダ、ハンバーグ、パスタ、朝食セット
 TEXT;
 
         return <<<PROMPT
@@ -1307,13 +1346,15 @@ TEXT;
 最終回答はJSONのみ。前置きや説明は不要。
 
 食品の場合の形式:
-- 通常: {"kcal": 整数, "confidence": "high"|"medium"|"low"}
-- ページにカロリー表示がある場合: {"labeled_kcal": 整数, "kcal": 同じ整数, "confidence": "high"}
-- 重量(g)が公式または推定で分かる場合: {"kcal": 整数, "assumed_weight_g": 整数, "confidence": "high"|"medium"|"low"}
+- 通常: {"kcal": 整数, "confidence": "high"|"medium"|"low", "should_offer_web_search": trueまたはfalse, "web_search_reason": "短い理由"}
+- ページにカロリー表示がある場合: {"labeled_kcal": 整数, "kcal": 同じ整数, "confidence": "high", "should_offer_web_search": false, "web_search_reason": "短い理由"}
+- 重量(g)が公式または推定で分かる場合: 上記に "assumed_weight_g": 整数 を追加してよい
 - 標準量を仮定した場合は任意で "assumption": "短い説明" を追加してよい
 - 商品名が特定できた場合: 上記に "product_name": "正式な商品名" を追加
 - labeled_kcal がある場合は kcal も必ず同じ値にする
 - 公式ページに重量(g)が無い high の場合でも、標準量を仮定したなら assumed_weight_g を含めてよい
+- should_offer_web_search と web_search_reason は必ず含める
+- web_search_reason は短く（80文字以内）。ユーザー向け文言ではなく判定根拠
 非食品の場合の形式: {"error":"not_food"}
 
 食品名: {$foodName}
@@ -1418,7 +1459,7 @@ PROMPT;
      * Claude のテキスト応答を解析する。
      * 非食品は 'not_food'、食品推定成功は配列、パース失敗は null を返す。
      *
-     * @return array{kcal: int, assumed_weight_g?: int, assumption?: string, confidence: string, product_name?: string, source_url?: string}|'not_food'|null
+     * @return array{kcal: int, assumed_weight_g?: int, assumption?: string, confidence: string, should_offer_web_search: bool, web_search_reason?: string, product_name?: string, source_url?: string}|'not_food'|null
      */
     private function parseResponse(string $text): array|string|null
     {
@@ -1481,10 +1522,10 @@ PROMPT;
 
     /**
      * パース済み JSON を画面用の推定結果に正規化する。
-     * kcal・assumed_weight_g・assumption・confidence のバリデーションと型変換を行う。
+     * kcal・assumed_weight_g・assumption・confidence・should_offer_web_search のバリデーションと型変換を行う。
      *
      * @param array<string, mixed> $json
-     * @return array{kcal: int, assumed_weight_g?: int, assumption?: string, confidence: string, product_name?: string, source_url?: string}|null
+     * @return array{kcal: int, assumed_weight_g?: int, assumption?: string, confidence: string, should_offer_web_search: bool, web_search_reason?: string, product_name?: string, source_url?: string}|null
      */
     private function normalizeEstimate(array $json): ?array
     {
@@ -1510,9 +1551,14 @@ PROMPT;
             return null;
         }
 
+        $shouldOfferWebSearch = $this->normalizeShouldOfferWebSearch(
+            $json['should_offer_web_search'] ?? null,
+        );
+
         $normalized = [
             'kcal' => $kcal,
             'confidence' => $confidence,
+            'should_offer_web_search' => $shouldOfferWebSearch,
         ];
 
         if (isset($json['assumed_weight_g']) && is_numeric($json['assumed_weight_g'])) {
@@ -1527,11 +1573,43 @@ PROMPT;
             $normalized['assumption'] = mb_substr($assumption, 0, 120);
         }
 
+        $webSearchReason = trim((string) ($json['web_search_reason'] ?? ''));
+        if ($webSearchReason !== '') {
+            $normalized['web_search_reason'] = mb_substr($webSearchReason, 0, 120);
+        }
+
         $productName = trim((string) ($json['product_name'] ?? ''));
         if ($productName !== '') {
             $normalized['product_name'] = $productName;
         }
 
         return $normalized;
+    }
+
+    /**
+     * should_offer_web_search を bool に正規化する。
+     * 欠落時は false（confidence からは推断しない）。
+     */
+    private function normalizeShouldOfferWebSearch(mixed $raw): bool
+    {
+        if (is_bool($raw)) {
+            return $raw;
+        }
+
+        if (is_int($raw) || is_float($raw)) {
+            return ((int) $raw) === 1;
+        }
+
+        if (is_string($raw)) {
+            $normalized = strtolower(trim($raw));
+            if (in_array($normalized, ['true', '1', 'yes'], true)) {
+                return true;
+            }
+            if (in_array($normalized, ['false', '0', 'no'], true)) {
+                return false;
+            }
+        }
+
+        return false;
     }
 }

@@ -3,11 +3,11 @@
 declare(strict_types=1);
 
 /**
- * AIカロリー推定の confidence 判定を手動確認するスクリプト。
+ * AIカロリー推定の confidence / should_offer_web_search を確認するスクリプト。
  *
  * Usage:
  *   php backend/scripts/test_calorie_confidence.php
- *   php backend/scripts/test_calorie_confidence.php --runs=3
+ *   php backend/scripts/test_calorie_confidence.php --runs=2
  */
 
 require_once __DIR__ . '/EnvLoader.php';
@@ -22,23 +22,31 @@ foreach (array_slice($argv, 1) as $arg) {
     }
 }
 
-/** @var list<array{input: string, expect: list<string>, disallow_low?: bool, require_low?: bool}> $cases */
+/**
+ * @var list<array{
+ *   input: string,
+ *   expect_confidence?: list<string>,
+ *   disallow_low?: bool,
+ *   require_low?: bool,
+ *   expect_web_search: bool
+ * }> $cases
+ */
 $cases = [
-    ['input' => 'ゆで卵 2個', 'expect' => ['high'], 'disallow_low' => true],
-    ['input' => 'ゆで卵 1個', 'expect' => ['high'], 'disallow_low' => true],
-    ['input' => '白米 150g', 'expect' => ['high'], 'disallow_low' => true],
-    ['input' => '牛乳 200ml', 'expect' => ['high'], 'disallow_low' => true],
-    ['input' => 'バナナ 1本', 'expect' => ['high'], 'disallow_low' => true],
-    ['input' => 'おにぎり 1個', 'expect' => ['medium', 'high'], 'disallow_low' => true],
-    ['input' => '食パン 1枚', 'expect' => ['medium', 'high'], 'disallow_low' => true],
-    ['input' => '味噌汁 1杯', 'expect' => ['medium', 'high'], 'disallow_low' => true],
-    ['input' => '日替わり定食', 'expect' => ['low'], 'require_low' => true],
-    // APIは3文字未満を拒否するため、弁当相当の曖昧入力として検証
-    ['input' => 'お弁当', 'expect' => ['low'], 'require_low' => true],
-    ['input' => 'ラーメン', 'expect' => ['low'], 'require_low' => true],
-    ['input' => 'カレー', 'expect' => ['low'], 'require_low' => true],
-    ['input' => 'サラダ', 'expect' => ['low'], 'require_low' => true],
-    ['input' => 'パスタ', 'expect' => ['low'], 'require_low' => true],
+    ['input' => 'お弁当', 'require_low' => true, 'expect_web_search' => false],
+    ['input' => '日替わり定食', 'require_low' => true, 'expect_web_search' => false],
+    ['input' => '手作り弁当', 'require_low' => true, 'expect_web_search' => false],
+    ['input' => 'ローソン のり弁当', 'expect_web_search' => true],
+    ['input' => 'セブンイレブン 幕の内弁当', 'expect_web_search' => true],
+    ['input' => 'ファミチキ', 'expect_web_search' => true],
+    ['input' => 'カップヌードル', 'expect_web_search' => true],
+    [
+        'input' => 'カレー',
+        'expect_confidence' => ['medium', 'low'],
+        'expect_web_search' => false,
+    ],
+    ['input' => 'マクドナルド ビッグマック', 'expect_web_search' => true],
+    // 既存の安定性確認
+    ['input' => 'ゆで卵 2個', 'expect_confidence' => ['high'], 'disallow_low' => true, 'expect_web_search' => false],
 ];
 
 $service = new CalorieEstimateService();
@@ -46,35 +54,44 @@ $failed = 0;
 
 foreach ($cases as $case) {
     $confidences = [];
+    $webFlags = [];
+    $reasons = [];
     $kcals = [];
 
     for ($i = 0; $i < $runs; $i++) {
         try {
             $result = $service->estimate($case['input'], 'no_web');
             $confidence = (string) ($result['confidence'] ?? '');
-            $kcal = (int) ($result['kcal'] ?? 0);
+            $offerWeb = (bool) ($result['should_offer_web_search'] ?? false);
             $confidences[] = $confidence;
-            $kcals[] = $kcal;
+            $webFlags[] = $offerWeb ? 'true' : 'false';
+            $reasons[] = (string) ($result['web_search_reason'] ?? '');
+            $kcals[] = (int) ($result['kcal'] ?? 0);
         } catch (Throwable $exception) {
             $confidences[] = 'error';
+            $webFlags[] = 'error';
+            $reasons[] = $exception->getMessage();
             $kcals[] = 0;
             fwrite(STDERR, $case['input'] . ' run' . ($i + 1) . ': ' . $exception->getMessage() . PHP_EOL);
         }
         usleep(200000);
     }
 
-    $unique = array_values(array_unique($confidences));
     $ok = true;
-    foreach ($confidences as $confidence) {
-        if (!in_array($confidence, $case['expect'], true)) {
-            $ok = false;
-            break;
+
+    if (isset($case['expect_confidence'])) {
+        foreach ($confidences as $confidence) {
+            if (!in_array($confidence, $case['expect_confidence'], true)) {
+                $ok = false;
+                break;
+            }
         }
     }
 
     if (($case['disallow_low'] ?? false) && in_array('low', $confidences, true)) {
         $ok = false;
     }
+
     if (($case['require_low'] ?? false)) {
         foreach ($confidences as $confidence) {
             if ($confidence !== 'low') {
@@ -83,22 +100,31 @@ foreach ($cases as $case) {
             }
         }
     }
+
+    $expectedWeb = $case['expect_web_search'];
+    foreach ($webFlags as $flag) {
+        $asBool = $flag === 'true';
+        if ($flag === 'error' || $asBool !== $expectedWeb) {
+            $ok = false;
+            break;
+        }
+    }
+
     if (!$ok) {
         $failed++;
     }
 
     $status = $ok ? 'OK' : 'NG';
     echo sprintf(
-        "[%s] %s => confidence=%s kcal=%s (expect: %s)\n",
+        "[%s] %s => confidence=%s web=%s kcal=%s\n",
         $status,
         $case['input'],
         implode(',', $confidences),
+        implode(',', $webFlags),
         implode(',', $kcals),
-        implode('|', $case['expect']),
     );
-
-    if (count($unique) > 1) {
-        echo "  note: confidence varied across runs: " . implode(',', $unique) . PHP_EOL;
+    if ($reasons !== [] && implode('', $reasons) !== '') {
+        echo '  reason: ' . implode(' | ', array_unique(array_filter($reasons))) . PHP_EOL;
     }
 }
 

@@ -487,6 +487,8 @@ function resultFromEstimate(
     kcal: number;
     assumed_weight_g?: number;
     confidence: SearchConfidence;
+    should_offer_web_search?: boolean;
+    web_search_reason?: string;
     product_name?: string;
     source_url?: string;
   },
@@ -515,6 +517,8 @@ function resultFromEstimate(
     carbs: null,
     source,
     confidence: estimate.confidence,
+    shouldOfferWebSearch: estimate.should_offer_web_search === true,
+    webSearchReason: estimate.web_search_reason?.trim() || null,
     isEstimated: !isAiWebSearch,
     rawInput: input,
     sourceUrl,
@@ -909,6 +913,8 @@ async function estimateWithClaude(
       kcal: estimate.kcal,
       assumed_weight_g: estimate.assumed_weight_g,
       confidence: estimate.confidence,
+      should_offer_web_search: estimate.should_offer_web_search,
+      web_search_reason: estimate.web_search_reason,
       product_name: estimate.product_name,
       source_url: estimate.source_url,
     });
@@ -930,6 +936,8 @@ async function estimateWithClaude(
       carbs: null,
       source: "claude_estimate",
       confidence: "low",
+      shouldOfferWebSearch: false,
+      webSearchReason: "estimate_fallback",
       isEstimated: true,
       rawInput,
     };

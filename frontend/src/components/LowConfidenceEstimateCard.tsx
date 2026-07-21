@@ -5,7 +5,7 @@ import { CalorieSourceInfo } from "./CalorieSourceInfo.tsx";
 
 interface LowConfidenceEstimateCardProps {
   result: FoodSearchResult;
-  onSearchWeb: () => void;
+  onSearchWeb?: () => void;
   onUseAiEstimate: () => void;
   onEdit: () => void;
   showSearchButton?: boolean;
@@ -20,7 +20,7 @@ export function LowConfidenceEstimateCard({
   showSearchButton = true,
   warningMessage,
 }: LowConfidenceEstimateCardProps) {
-  const isWebFailure = !showSearchButton;
+  const isWebFailure = warningMessage != null && warningMessage !== "";
 
   return (
     <div style={cardStyle}>
@@ -39,8 +39,7 @@ export function LowConfidenceEstimateCard({
       <div style={noticeBoxStyle}>
         <div style={noticeMainStyle}>
           {isWebFailure
-            ? (warningMessage ??
-              "正確な商品情報を確認できませんでした")
+            ? warningMessage
             : "正確なカロリーを特定できませんでした"}
         </div>
         {!isWebFailure && (
@@ -53,7 +52,7 @@ export function LowConfidenceEstimateCard({
         <button type="button" onClick={onUseAiEstimate} style={primaryButtonStyle}>
           この内容で追加
         </button>
-        {showSearchButton && (
+        {showSearchButton && onSearchWeb && (
           <button
             type="button"
             onClick={onSearchWeb}

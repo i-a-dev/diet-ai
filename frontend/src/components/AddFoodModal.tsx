@@ -480,6 +480,8 @@ export function AddFoodModal({
         carbs: null,
         source: "claude_estimate",
         confidence: fallback.confidence ?? "low",
+        shouldOfferWebSearch: fallback.should_offer_web_search === true,
+        webSearchReason: fallback.web_search_reason?.trim() || null,
         isEstimated: true,
         rawInput: inputValue.trim(),
       };
@@ -946,7 +948,7 @@ export function AddFoodModal({
     }
 
     if (state === "estimated" && selectedResult) {
-      const canSearchWeb = selectedResult.confidence === "medium";
+      const canSearchWeb = selectedResult.shouldOfferWebSearch === true;
       return (
         <FoodResultPreview
           result={selectedResult}
@@ -984,6 +986,8 @@ export function AddFoodModal({
     }
 
     if (state === "low_confidence_estimate" && selectedResult) {
+      const canSearchWeb =
+        !isWebSearchFallback && selectedResult.shouldOfferWebSearch === true;
       return (
         <LowConfidenceEstimateCard
           result={selectedResult}
@@ -994,7 +998,7 @@ export function AddFoodModal({
               initialKcal: String(selectedResult.calories),
             })
           }
-          showSearchButton={!isWebSearchFallback}
+          showSearchButton={canSearchWeb}
           warningMessage={
             isWebSearchFallback
               ? (progress.message ??

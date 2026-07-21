@@ -313,6 +313,8 @@ export interface CalorieEstimateResponse {
   kcal?: number;
   assumed_weight_g?: number;
   confidence?: "high" | "medium" | "low";
+  should_offer_web_search?: boolean;
+  web_search_reason?: string;
   product_name?: string;
   source_url?: string;
   source?: "brave_html" | "claude_web_search";

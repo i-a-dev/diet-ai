@@ -130,6 +130,8 @@ export interface FoodSearchResult {
   sodium?: number | null;
   source: FoodSource;
   confidence: SearchConfidence;
+  shouldOfferWebSearch?: boolean;
+  webSearchReason?: string | null;
   isEstimated: boolean;
   barcode?: string | null;
   brandName?: string | null;
