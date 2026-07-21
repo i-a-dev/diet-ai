@@ -1346,7 +1346,7 @@ const fieldLabelStyle: CSSProperties = {
 const inputStyle: CSSProperties = {
   width: "100%",
   boxSizing: "border-box",
-  padding: "12px 14px",
+  padding: "10px 14px",
   borderRadius: 10,
   border: "1px solid #E8E8E8",
   fontSize: 15,
@@ -1355,8 +1355,8 @@ const inputStyle: CSSProperties = {
 };
 
 const hintTitleStyle: CSSProperties = {
-  marginTop: 14,
-  marginBottom: 8,
+  marginTop: 10,
+  marginBottom: 6,
   fontSize: 13,
   fontWeight: 700,
   color: "#6B7280",
@@ -1365,10 +1365,11 @@ const hintTitleStyle: CSSProperties = {
 const chipWrapStyle: CSSProperties = {
   display: "flex",
   flexWrap: "wrap",
-  gap: 8,
+  gap: 6,
 };
 
-const HISTORY_AREA_HEIGHT = 180;
+// シート全体を少し高くしつつ、履歴は枠内スクロールで多めに見せる
+const HISTORY_AREA_HEIGHT = 168;
 
 const historyScrollAreaStyle: CSSProperties = {
   height: HISTORY_AREA_HEIGHT,
@@ -1377,14 +1378,14 @@ const historyScrollAreaStyle: CSSProperties = {
   overflowY: "auto",
   border: "1px solid #F1F5F9",
   borderRadius: 10,
-  padding: "10px 8px",
-  marginBottom: 12,
+  padding: "8px",
+  marginBottom: 8,
   background: "#fff",
 };
 
 const historyLoadingStyle: CSSProperties = {
   height: "100%",
-  minHeight: HISTORY_AREA_HEIGHT - 20,
+  minHeight: HISTORY_AREA_HEIGHT - 16,
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
@@ -1396,9 +1397,9 @@ const historyLoadingStyle: CSSProperties = {
 const tabWrapStyle: CSSProperties = {
   display: "grid",
   gridTemplateColumns: "1fr 1fr",
-  gap: 8,
-  marginBottom: 10,
-  padding: 4,
+  gap: 6,
+  marginBottom: 8,
+  padding: 3,
   borderRadius: 12,
   background: "#F3F4F6",
 };
@@ -1408,7 +1409,7 @@ const tabButtonStyle: CSSProperties = {
   borderRadius: 8,
   fontSize: 13,
   fontWeight: 700,
-  padding: "9px 10px",
+  padding: "8px 10px",
   cursor: "pointer",
   transition: "all 160ms ease",
 };
@@ -1463,7 +1464,7 @@ const emptyHistoryStyle: CSSProperties = {
 
 const primaryBtnStyle: CSSProperties = {
   width: "100%",
-  padding: "12px 0",
+  padding: "11px 0",
   borderRadius: 10,
   border: "none",
   background: ORANGE,
@@ -1511,13 +1512,13 @@ const completedMetaStyle: CSSProperties = {
 
 const manualEntryLinkStyle: CSSProperties = {
   width: "100%",
-  marginTop: 8,
+  marginTop: 2,
   border: "none",
   background: "transparent",
   color: "#6B7280",
   fontSize: 13,
   fontWeight: 600,
-  padding: "8px 4px",
+  padding: "4px 4px 0",
   cursor: "pointer",
   textDecoration: "underline",
   textUnderlineOffset: 2,

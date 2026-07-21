@@ -38,8 +38,8 @@ export function BottomSheet({ open, title, onClose, children }: BottomSheetProps
         style={{
           background: '#fff',
           borderRadius: '16px 16px 0 0',
-          padding: '16px 16px 24px',
-          maxHeight: '85%',
+          padding: '14px 16px 16px',
+          maxHeight: '92%',
           overflowY: 'auto',
         }}
       >
@@ -48,7 +48,7 @@ export function BottomSheet({ open, title, onClose, children }: BottomSheetProps
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            marginBottom: 20,
+            marginBottom: 14,
           }}
         >
           <span style={{ fontSize: 17, fontWeight: 700, color: '#111' }}>{title}</span>
