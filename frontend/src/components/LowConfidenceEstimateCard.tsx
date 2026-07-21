@@ -27,15 +27,26 @@ export function LowConfidenceEstimateCard({
         <>
           <div style={subTitleStyle}>{result.displayName}</div>
           <div style={calorieStyle}>約{result.calories} kcal</div>
-          <div style={hintStyle}>
-            サイズや量が分かると
-            <br />
-            より正確に記録できます
+          <div style={noticeBoxStyle}>
+            <div style={noticeMainStyle}>
+              入力された食品名でAIでカロリーを推定しましたが、実際と大きく違う可能性があります。
+            </div>
+            <div style={noticeTipStyle}>
+              サイズや量が分かると、より正確に記録できます
+            </div>
           </div>
-          <button type="button" onClick={onSearchWeb} style={primaryButtonStyle}>
+          <button
+            type="button"
+            onClick={onSearchWeb}
+            style={primaryButtonStyle}
+          >
             AI web検索を行う
           </button>
-          <button type="button" onClick={onUseAiEstimate} style={secondaryButtonStyle}>
+          <button
+            type="button"
+            onClick={onUseAiEstimate}
+            style={secondaryButtonStyle}
+          >
             このまま記録
           </button>
           <button type="button" onClick={onEdit} style={secondaryButtonStyle}>
@@ -50,7 +61,11 @@ export function LowConfidenceEstimateCard({
             {warningMessage ??
               "サイズや量が分からないため、カロリーは目安として記録されます"}
           </div>
-          <button type="button" onClick={onUseAiEstimate} style={primaryButtonStyle}>
+          <button
+            type="button"
+            onClick={onUseAiEstimate}
+            style={primaryButtonStyle}
+          >
             このまま記録
           </button>
           <button type="button" onClick={onEdit} style={secondaryButtonStyle}>
@@ -90,11 +105,28 @@ const calorieStyle: CSSProperties = {
   color: "#111827",
 };
 
-const hintStyle: CSSProperties = {
-  marginTop: 8,
+const noticeBoxStyle: CSSProperties = {
+  marginTop: 10,
+  padding: "10px 12px",
+  borderRadius: 10,
+  background: "rgba(185, 28, 28, 0.06)",
+  border: "1px solid rgba(185, 28, 28, 0.14)",
+};
+
+const noticeMainStyle: CSSProperties = {
+  fontSize: 13,
+  fontWeight: 600,
+  color: "#991B1B",
+  lineHeight: 1.55,
+};
+
+const noticeTipStyle: CSSProperties = {
+  marginTop: 6,
   fontSize: 12,
-  color: "#7F1D1D",
+  fontWeight: 500,
+  color: "#9F1239",
   lineHeight: 1.5,
+  opacity: 0.85,
 };
 
 const warnStyle: CSSProperties = {
