@@ -286,6 +286,49 @@ function formatWebSearchOriginLabel(
   }
 }
 
+/** ヒット元を console で AI推定 / food DB / 自前DB と判別できるようにする */
+function formatFoodSearchOriginCategory(
+  source?: string | null,
+): "AI推定" | "food DB" | "自前DB" | "AI web検索" | "不明" {
+  switch (source) {
+    case "claude_estimate":
+      return "AI推定";
+    case "fatsecret":
+    case "open_food_facts":
+      return "food DB";
+    case "local_db":
+    case "alias_db":
+    case "user_registered":
+      return "自前DB";
+    case "ai_web_search":
+    case "brave_html":
+    case "claude_web_search":
+      return "AI web検索";
+    default:
+      return "不明";
+  }
+}
+
+function logFoodSearchHit(params: {
+  input: string;
+  source: string | null | undefined;
+  outcome: string;
+  name?: string | null;
+  calories?: number | null;
+  detail?: string | null;
+}): void {
+  const category = formatFoodSearchOriginCategory(params.source);
+  console.log(`[食品検索] ヒット元: ${category}`, {
+    input: params.input,
+    origin: category,
+    source: params.source ?? null,
+    outcome: params.outcome,
+    name: params.name ?? null,
+    calories: params.calories ?? null,
+    detail: params.detail ?? null,
+  });
+}
+
 /** ブラウザ console で Brave / Claude 由来を確認できるようにする */
 function logAiWebSearchOrigin(
   input: string,
@@ -297,26 +340,36 @@ function logAiWebSearchOrigin(
       product_name: candidate.product_name,
       kcal: candidate.kcal,
       origin: formatWebSearchOriginLabel(candidate.source),
+      category: formatFoodSearchOriginCategory(candidate.source),
       source: candidate.source,
     }));
     const uniqueOrigins = [...new Set(origins.map((item) => item.origin))];
-    console.log("[AI Web検索] 結果由来", {
-      input,
-      outcome: "needs_confirmation",
-      originSummary: uniqueOrigins.join(" / "),
-      web_search_status: estimate.web_search_status ?? null,
-      reason: estimate.reason ?? null,
-      variant_dimension: estimate.variant_dimension ?? null,
-      candidates: origins,
-    });
+    const uniqueCategories = [
+      ...new Set(origins.map((item) => item.category)),
+    ];
+    console.log(
+      `[食品検索] ヒット元: ${uniqueCategories.join(" / ")}`,
+      {
+        input,
+        outcome: "needs_confirmation",
+        originSummary: uniqueOrigins.join(" / "),
+        categorySummary: uniqueCategories.join(" / "),
+        web_search_status: estimate.web_search_status ?? null,
+        reason: estimate.reason ?? null,
+        variant_dimension: estimate.variant_dimension ?? null,
+        candidates: origins,
+      },
+    );
     return;
   }
 
   if (estimate.kcal != null) {
-    console.log("[AI Web検索] 結果由来", {
+    const category = formatFoodSearchOriginCategory(estimate.source);
+    console.log(`[食品検索] ヒット元: ${category}`, {
       input,
       outcome: "confirmed",
       origin: formatWebSearchOriginLabel(estimate.source),
+      category,
       source: estimate.source ?? null,
       product_name: estimate.product_name ?? null,
       kcal: estimate.kcal,
@@ -325,10 +378,11 @@ function logAiWebSearchOrigin(
     return;
   }
 
-  console.log("[AI Web検索] 結果由来", {
+  console.log("[食品検索] ヒット元: 不明", {
     input,
     outcome: "no_kcal",
     origin: formatWebSearchOriginLabel(estimate.source),
+    category: formatFoodSearchOriginCategory(estimate.source),
     source: estimate.source ?? null,
     web_search_status: estimate.web_search_status ?? null,
   });
@@ -936,6 +990,14 @@ export async function searchFoodByText(
     steps = updateStep(steps, "alias_db_searching", "done");
     if (aliasResult.result) {
       storeResult(aliasResult.result);
+      logFoodSearchHit({
+        input,
+        source: aliasResult.result.source,
+        outcome: "found",
+        name: aliasResult.result.displayName,
+        calories: aliasResult.result.calories,
+        detail: "alias_db",
+      });
       return emitProgress(
         onProgress,
         buildProgress(
@@ -951,6 +1013,12 @@ export async function searchFoodByText(
       aliasResult.aliasCandidates.length > 0
     ) {
       steps = updateStep(steps, "waiting_user_choice", "active");
+      logFoodSearchHit({
+        input,
+        source: "alias_db",
+        outcome: "needs_alias_confirmation",
+        detail: `${aliasResult.aliasCandidates.length}件の候補`,
+      });
       return emitProgress(
         onProgress,
         buildProgress(
@@ -978,6 +1046,14 @@ export async function searchFoodByText(
     steps = updateStep(steps, "local_db_searching", "done");
     if (localDbResult.result) {
       storeResult(localDbResult.result);
+      logFoodSearchHit({
+        input,
+        source: localDbResult.result.source,
+        outcome: "found",
+        name: localDbResult.result.displayName,
+        calories: localDbResult.result.calories,
+        detail: "local_db",
+      });
       return emitProgress(
         onProgress,
         buildProgress(
@@ -995,6 +1071,12 @@ export async function searchFoodByText(
       steps = updateStep(steps, "waiting_user_choice", "active");
       const isVariantAmbiguous =
         localDbResult.confirmationReason === "variant_ambiguous";
+      logFoodSearchHit({
+        input,
+        source: "local_db",
+        outcome: "needs_local_db_confirmation",
+        detail: `${localDbResult.localDbCandidates.length}件の候補`,
+      });
       return emitProgress(
         onProgress,
         buildProgress(
@@ -1026,6 +1108,14 @@ export async function searchFoodByText(
     steps = updateStep(steps, "fatsecret_searching", "done");
     if (fatSecretResult) {
       storeResult(fatSecretResult);
+      logFoodSearchHit({
+        input,
+        source: fatSecretResult.source,
+        outcome: "found",
+        name: fatSecretResult.displayName,
+        calories: fatSecretResult.calories,
+        detail: "fatsecret",
+      });
       return emitProgress(
         onProgress,
         buildProgress("found", steps, fatSecretResult, "候補が見つかりました"),
@@ -1046,6 +1136,14 @@ export async function searchFoodByText(
     steps = updateStep(steps, "open_food_facts_searching", "done");
     if (offResult) {
       storeResult(offResult);
+      logFoodSearchHit({
+        input,
+        source: offResult.source,
+        outcome: "found",
+        name: offResult.displayName,
+        calories: offResult.calories,
+        detail: "open_food_facts",
+      });
       return emitProgress(
         onProgress,
         buildProgress("found", steps, offResult, "候補が見つかりました"),
@@ -1067,6 +1165,13 @@ export async function searchFoodByText(
 
   if (claudeResult.confidence === "low") {
     steps = updateStep(steps, "waiting_user_choice", "active");
+    logFoodSearchHit({
+      input,
+      source: claudeResult.source,
+      outcome: "low_confidence_estimate",
+      name: claudeResult.displayName,
+      calories: claudeResult.calories,
+    });
     return emitProgress(
       onProgress,
       buildProgress(
@@ -1078,6 +1183,13 @@ export async function searchFoodByText(
     );
   }
 
+  logFoodSearchHit({
+    input,
+    source: claudeResult.source,
+    outcome: "estimated",
+    name: claudeResult.displayName,
+    calories: claudeResult.calories,
+  });
   return emitProgress(
     onProgress,
     buildProgress(
@@ -1114,6 +1226,14 @@ export async function runClaudeEstimate(
 
   if (claudeResult.confidence === "low") {
     steps = updateStep(steps, "waiting_user_choice", "active");
+    logFoodSearchHit({
+      input,
+      source: claudeResult.source,
+      outcome: "low_confidence_estimate",
+      name: claudeResult.displayName,
+      calories: claudeResult.calories,
+      detail: "runClaudeEstimate",
+    });
     return emitProgress(
       onProgress,
       buildProgress(
@@ -1125,6 +1245,14 @@ export async function runClaudeEstimate(
     );
   }
 
+  logFoodSearchHit({
+    input,
+    source: claudeResult.source,
+    outcome: "estimated",
+    name: claudeResult.displayName,
+    calories: claudeResult.calories,
+    detail: "runClaudeEstimate",
+  });
   return emitProgress(
     onProgress,
     buildProgress(
@@ -1237,16 +1365,24 @@ export async function runAiWebSearch(
       error instanceof Error ? error.message : "商品情報検索に失敗しました";
 
     if (message.includes("通常のAI推定")) {
-      console.log("[AI Web検索] 結果由来", {
+      console.log("[食品検索] ヒット元: AI推定", {
         input,
         outcome: "no_web_search_fallback",
         origin: "なし（通常のAI推定へ）",
+        category: "AI推定",
         error: message,
       });
       const fallbackEstimate = await estimateWithClaude(
         input,
         parseFoodInputByRegex(input),
       );
+      logFoodSearchHit({
+        input,
+        source: fallbackEstimate.source,
+        outcome: "web_search_fallback_estimate",
+        name: fallbackEstimate.displayName,
+        calories: fallbackEstimate.calories,
+      });
       return emitProgress(onProgress, {
         state: "low_confidence_estimate",
         steps: updateStep(steps, "ai_web_searching", "done"),
@@ -1261,15 +1397,23 @@ export async function runAiWebSearch(
     );
   }
 
-  console.log("[AI Web検索] 結果由来", {
+  console.log("[食品検索] ヒット元: AI推定", {
     input,
     outcome: "estimated_fallback",
     origin: "なし（AI推定フォールバック）",
+    category: "AI推定",
   });
   const fallbackEstimate = await estimateWithClaude(
     input,
     parseFoodInputByRegex(input),
   );
+  logFoodSearchHit({
+    input,
+    source: fallbackEstimate.source,
+    outcome: "web_search_estimated_fallback",
+    name: fallbackEstimate.displayName,
+    calories: fallbackEstimate.calories,
+  });
   return emitProgress(onProgress, {
     state: "low_confidence_estimate",
     steps: updateStep(steps, "ai_web_searching", "done"),

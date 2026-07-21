@@ -47,45 +47,11 @@ export function FoodSearchStatus({
         </div>
       )}
 
-      <div style={{ display: "grid", gap: 8 }}>
-        {visibleSteps.map((step) => (
-          <div key={step.key} style={{ ...stepStyle, color: statusColor(step.status) }}>
-            <span style={{ width: 20, textAlign: "center" }}>{statusIcon(step.status)}</span>
-            <span>{step.label}</span>
-          </div>
-        ))}
-      </div>
       <button type="button" onClick={onCancel} style={cancelButtonStyle}>
         キャンセル
       </button>
     </div>
   );
-}
-
-function statusIcon(status: FoodSearchStep["status"]): string {
-  switch (status) {
-    case "active":
-      return "●";
-    case "done":
-      return "✓";
-    case "skipped":
-      return "–";
-    default:
-      return "○";
-  }
-}
-
-function statusColor(status: FoodSearchStep["status"]): string {
-  switch (status) {
-    case "active":
-      return "#2E7D32";
-    case "done":
-      return "#4A5568";
-    case "skipped":
-      return "#A0AEC0";
-    default:
-      return "#94A3B8";
-  }
 }
 
 function calcProgressRatio(steps: FoodSearchStep[]): number {
@@ -200,14 +166,6 @@ const debugStyle: CSSProperties = {
   border: "1px solid #C7D2FE",
   borderRadius: 8,
   fontSize: 12,
-};
-
-const stepStyle: CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  gap: 8,
-  fontSize: 13,
-  minHeight: 20,
 };
 
 const cancelButtonStyle: CSSProperties = {

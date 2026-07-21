@@ -51,11 +51,9 @@ export function FoodEstimateCard({
       {!isDetail && databaseSourceLabel && isFound && (
         <div style={databaseSourceStyle}>{databaseSourceLabel}</div>
       )}
-      {!isDetail && (
+      {!isDetail && !isFound && (
         <div style={badgeRowStyle}>
-          <span style={badgeStyle}>
-            {isHistory ? "履歴" : isFound ? "候補" : "推定"}
-          </span>
+          <span style={badgeStyle}>{isHistory ? "履歴" : "推定"}</span>
         </div>
       )}
       {isDetail && databaseSourceLabel && (
@@ -205,15 +203,14 @@ const webSearchButtonStyle: CSSProperties = {
 };
 
 const reestimateButtonStyle: CSSProperties = {
-  display: "block",
   width: "100%",
   marginTop: 8,
   border: "none",
-  background: "transparent",
-  color: "#6B7280",
-  fontWeight: 500,
-  fontSize: 12,
-  padding: "4px 0 0",
+  borderRadius: 10,
+  background: ORANGE,
+  color: "#fff",
+  fontWeight: 700,
+  fontSize: 13,
+  padding: "10px 8px",
   cursor: "pointer",
-  textAlign: "center",
 };
