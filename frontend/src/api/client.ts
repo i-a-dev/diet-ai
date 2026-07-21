@@ -513,6 +513,7 @@ export interface MetricTimelineResponse {
   points: MetricTimelinePoint[];
   chartMax: number;
   average: number | null;
+  scrollFloor: string;
 }
 
 export function fetchMetricTimeline(

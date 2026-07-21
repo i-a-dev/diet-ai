@@ -183,11 +183,27 @@ final class WeightRepository
         int $visibleDays,
         string $scrollFloor = self::WEIGHT_TIMELINE_SCROLL_FLOOR,
     ): array {
+        return self::resolveTimelineRangeForEarliest(
+            $endDate,
+            $visibleDays,
+            $this->getEarliestRecordedDate(),
+            $scrollFloor,
+        );
+    }
+
+    /**
+     * @return array{fetchStart: string, scrollFloor: string}
+     */
+    public static function resolveTimelineRangeForEarliest(
+        string $endDate,
+        int $visibleDays,
+        ?string $earliestRecord,
+        string $scrollFloor = self::WEIGHT_TIMELINE_SCROLL_FLOOR,
+    ): array {
         $timezone = new DateTimeZone('Asia/Tokyo');
         $end = new DateTimeImmutable($endDate, $timezone);
         $displayStart = $end->modify(sprintf('-%d days', max(0, $visibleDays - 1)))->format('Y-m-d');
 
-        $earliestRecord = $this->getEarliestRecordedDate();
         $effectiveScrollFloor = $scrollFloor;
         if ($earliestRecord !== null && $earliestRecord < $scrollFloor) {
             $effectiveScrollFloor = $earliestRecord;

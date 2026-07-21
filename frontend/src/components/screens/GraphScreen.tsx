@@ -681,8 +681,8 @@ function BarGraphCard({
   label,
   points,
   chartMax,
-  average,
   visibleWindowDays,
+  scrollFloor = WEIGHT_SCROLL_FLOOR_YMD,
   formatAxisLabel,
   formatAverage,
   accent = ORANGE,
@@ -692,8 +692,8 @@ function BarGraphCard({
   label: string;
   points: { label: string; value: number; date: string }[];
   chartMax: number;
-  average: number | null;
   visibleWindowDays: number;
+  scrollFloor?: string;
   formatAxisLabel: (value: number) => string;
   formatAverage: (value: number | null) => string;
   accent?: string;
@@ -701,9 +701,13 @@ function BarGraphCard({
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const dateScrollRef = useRef<HTMLDivElement | null>(null);
+  const [viewport, setViewport] = useState({ startIndex: 0, endIndex: 0 });
   const [dateLabelPhase, setDateLabelPhase] = useState(0);
   const [viewportWidth, setViewportWidth] = useState(CHART_PLOT_WIDTH);
-  const scrollFloorIndex = 0;
+  const scrollFloorIndex = useMemo(() => {
+    const index = points.findIndex((point) => point.date >= scrollFloor);
+    return index >= 0 ? index : 0;
+  }, [points, scrollFloor]);
   const effectiveVisibleDays = Math.max(1, visibleWindowDays);
   const latestAlignment = useMemo(
     () =>
@@ -713,7 +717,7 @@ function BarGraphCard({
         points.length,
         scrollFloorIndex,
       ),
-    [effectiveVisibleDays, points.length, viewportWidth],
+    [effectiveVisibleDays, points.length, scrollFloorIndex, viewportWidth],
   );
   const { leftInset, slotWidth, leadingPadSlots, chartSlotCount } =
     latestAlignment;
@@ -750,6 +754,13 @@ function BarGraphCard({
     const preferredRightLabelIndex = Math.max(0, endIndex - rightLabelOffset);
     const nextDateLabelPhase = preferredRightLabelIndex % dateLabelStep;
     const nextScrollLeft = alignment.targetScrollLeft;
+    const startIndex = Math.min(
+      maxStart,
+      Math.max(
+        scrollFloorIndex,
+        Math.round(nextScrollLeft / alignment.slotWidth) - alignment.leadingPadSlots,
+      ),
+    );
 
     setViewportWidth(nextViewportWidth);
     setDateLabelPhase(nextDateLabelPhase);
@@ -757,11 +768,16 @@ function BarGraphCard({
     if (dateScrollRef.current) {
       dateScrollRef.current.scrollLeft = nextScrollLeft;
     }
+    setViewport({
+      startIndex,
+      endIndex: Math.min(points.length - 1, startIndex + visibleCount - 1),
+    });
   }, [
     dateLabelStep,
     effectiveVisibleDays,
     points,
     rightLabelOffset,
+    scrollFloorIndex,
     leadingPadSlots,
   ]);
 
@@ -774,12 +790,14 @@ function BarGraphCard({
     const updateViewport = () => {
       const nextViewportWidth = Math.max(1, element.clientWidth);
       setViewportWidth(nextViewportWidth);
+      const visibleCount = Math.max(1, effectiveVisibleDays);
       const alignment = getTimelineLatestAlignment(
         nextViewportWidth,
-        Math.max(1, effectiveVisibleDays),
+        visibleCount,
         points.length,
         scrollFloorIndex,
       );
+      const maxStart = Math.max(0, points.length - visibleCount);
       const clampedScrollLeft = clampTimelineScrollLeft(
         element.scrollLeft,
         alignment,
@@ -787,6 +805,18 @@ function BarGraphCard({
       if (clampedScrollLeft !== element.scrollLeft) {
         element.scrollLeft = clampedScrollLeft;
       }
+      const rawStart =
+        Math.round(clampedScrollLeft / alignment.slotWidth) -
+        alignment.leadingPadSlots;
+      const startIndex = Math.min(
+        maxStart,
+        Math.max(scrollFloorIndex, rawStart),
+      );
+      const endIndex = Math.min(
+        points.length - 1,
+        startIndex + visibleCount - 1,
+      );
+      setViewport({ startIndex, endIndex });
       if (dateScrollRef.current) {
         dateScrollRef.current.scrollLeft = element.scrollLeft;
       }
@@ -825,7 +855,21 @@ function BarGraphCard({
       element.removeEventListener("wheel", onWheel);
       window.removeEventListener("resize", updateViewport);
     };
-  }, [effectiveVisibleDays, points]);
+  }, [effectiveVisibleDays, points, scrollFloorIndex]);
+
+  const average = useMemo(() => {
+    if (points.length === 0) {
+      return null;
+    }
+
+    const visiblePoints = points.slice(viewport.startIndex, viewport.endIndex + 1);
+    if (visiblePoints.length === 0) {
+      return null;
+    }
+
+    const total = visiblePoints.reduce((sum, point) => sum + point.value, 0);
+    return Math.round(total / visiblePoints.length);
+  }, [points, viewport.endIndex, viewport.startIndex]);
 
   const shouldShowDateLabel = (index: number) =>
     shouldShowTimelineDateLabel(index, dateLabelPhase, dateLabelStep);
@@ -1656,7 +1700,7 @@ function MetricBarGraphCard({
 
   const points = data?.points ?? [];
   const chartMax = data?.chartMax ?? defaultChartMax;
-  const average = data?.average ?? null;
+  const scrollFloor = data?.scrollFloor ?? WEIGHT_SCROLL_FLOOR_YMD;
 
   if (!data) {
     return (
@@ -1685,8 +1729,8 @@ function MetricBarGraphCard({
       label={label}
       points={points}
       chartMax={chartMax}
-      average={average}
       visibleWindowDays={visibleWindowDays}
+      scrollFloor={scrollFloor}
       formatAxisLabel={formatAxisLabel}
       formatAverage={formatAverage}
       accent={accent}

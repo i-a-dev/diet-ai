@@ -1098,9 +1098,17 @@ if ($requestMethod === 'GET' && $requestPath === '/api/reports/metric-timeline')
         json_response(['message' => 'visibleDays must be between 1 and 3660'], 422);
     }
 
-    $timezone = new DateTimeZone('Asia/Tokyo');
-    $end = new DateTimeImmutable($endDate, $timezone);
-    $startDate = $end->modify(sprintf('-%d days', max(0, $visibleDays - 1)))->format('Y-m-d');
+    $earliestRecord = match ($metric) {
+        'meals' => $mealEntryRepository->getEarliestRecordedDate(),
+        'exercise' => $activityRepository->getEarliestExerciseRecordedDate(),
+        default => $activityRepository->getEarliestStepsRecordedDate(),
+    };
+    $timelineRange = WeightRepository::resolveTimelineRangeForEarliest(
+        $endDate,
+        $visibleDays,
+        $earliestRecord,
+    );
+    $startDate = $timelineRange['fetchStart'];
 
     if ($metric === 'meals') {
         $points = $mealEntryRepository->getDailyTotalsBetween($startDate, $endDate);
@@ -1124,6 +1132,7 @@ if ($requestMethod === 'GET' && $requestPath === '/api/reports/metric-timeline')
         'points' => $points,
         'chartMax' => $chartMax,
         'average' => $average,
+        'scrollFloor' => $timelineRange['scrollFloor'],
     ]);
 }
 
