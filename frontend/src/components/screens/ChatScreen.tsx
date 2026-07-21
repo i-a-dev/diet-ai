@@ -789,18 +789,30 @@ export function ChatScreen() {
             onClick={handleStop}
             aria-label="返信を停止"
             style={{
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
               background: "#5A5A5A",
               color: "#fff",
               border: "none",
               borderRadius: 14,
-              padding: "6px 14px",
-              fontSize: 12,
-              fontWeight: 600,
+              width: 36,
+              height: 36,
+              padding: 0,
               cursor: "pointer",
-              lineHeight: 1.4,
+              flexShrink: 0,
             }}
           >
-            停止
+            <span
+              aria-hidden
+              style={{
+                display: "block",
+                width: 12,
+                height: 12,
+                background: "#fff",
+                borderRadius: 2,
+              }}
+            />
           </button>
         ) : (
           <button
