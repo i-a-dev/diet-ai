@@ -19,7 +19,6 @@ import {
   buildResultFromSelectedCandidate,
   buildResultFromSelectedLocalDb,
   runAiWebSearch,
-  runClaudeEstimate,
   searchFoodByText,
 } from "../services/foodSearchService.ts";
 import { toWebConfirmationCandidates } from "../utils/webSearchConfirmationCandidates.ts";
@@ -55,7 +54,6 @@ import {
   parseCaloriesEdited,
   toPersistedCalorieSource,
 } from "../utils/calorieSource.ts";
-import { isExternalApiFoodSource } from "../utils/foodResultDisplay.ts";
 
 export interface MealItemInput {
   id?: number;
@@ -153,6 +151,11 @@ export function AddFoodModal({
 }: AddFoodModalProps) {
   const [inputValue, setInputValue] = useState("");
   const [manualKcal, setManualKcal] = useState("");
+  const [manualProtein, setManualProtein] = useState("");
+  const [manualFat, setManualFat] = useState("");
+  const [manualCarbs, setManualCarbs] = useState("");
+  const [showMacroDetails, setShowMacroDetails] = useState(false);
+  const [isPreSearchManual, setIsPreSearchManual] = useState(false);
   // 変更: 新しい検索フロー状態をモーダル内で一元管理。
   const [progress, setProgress] =
     useState<FoodSearchProgress>(makeInitialProgress);
@@ -187,6 +190,11 @@ export function AddFoodModal({
     setIsHistoryLoading(true);
     setInputValue("");
     setManualKcal("");
+    setManualProtein("");
+    setManualFat("");
+    setManualCarbs("");
+    setShowMacroDetails(false);
+    setIsPreSearchManual(false);
     setProgress(makeInitialProgress());
     setShowManualEdit(false);
     setIsSubmitting(false);
@@ -229,18 +237,21 @@ export function AddFoodModal({
   const selectedResult = progress.result;
   const isSearching =
     progress.state === "searching" || progress.state === "web_searching";
+  const isEditingManually = showManualEdit || progress.state === "error";
   const isFoodNameLocked =
-    isSearching ||
-    progress.state === "found" ||
-    progress.state === "estimated" ||
-    progress.state === "from_history" ||
-    progress.state === "low_confidence_estimate" ||
-    (progress.state === "needs_confirmation" && !isManualEditingFromConfirmation) ||
-    progress.state === "needs_alias_confirmation" ||
-    progress.state === "needs_local_db_confirmation" ||
-    progress.state === "web_searching" ||
-    progress.state === "web_found" ||
-    progress.state === "completed";
+    !isEditingManually &&
+    (isSearching ||
+      progress.state === "found" ||
+      progress.state === "estimated" ||
+      progress.state === "from_history" ||
+      progress.state === "low_confidence_estimate" ||
+      (progress.state === "needs_confirmation" &&
+        !isManualEditingFromConfirmation) ||
+      progress.state === "needs_alias_confirmation" ||
+      progress.state === "needs_local_db_confirmation" ||
+      progress.state === "web_searching" ||
+      progress.state === "web_found" ||
+      progress.state === "completed");
 
   const completedSummary = useMemo(() => {
     if (!completedResult) return null;
@@ -260,7 +271,14 @@ export function AddFoodModal({
     activeSearchTokenRef.current = 0;
     setInputValue(item.label);
     setManualKcal(item.kcal.replace(/kcal/i, ""));
+    setManualProtein(
+      item.proteinG != null ? String(item.proteinG) : "",
+    );
+    setManualFat(item.fatG != null ? String(item.fatG) : "");
+    setManualCarbs(item.carbsG != null ? String(item.carbsG) : "");
+    setShowMacroDetails(false);
     setShowManualEdit(false);
+    setIsPreSearchManual(false);
     setSelectedHistoryItem(item);
     const result = mealItemToSearchResult(item);
     setProgress({
@@ -296,6 +314,39 @@ export function AddFoodModal({
     };
   }
 
+  function openManualEntry(options?: {
+    fromIdle?: boolean;
+    fromConfirmation?: boolean;
+    initialKcal?: string;
+  }) {
+    setShowManualEdit(true);
+    setIsPreSearchManual(options?.fromIdle === true);
+    setIsManualEditingFromConfirmation(options?.fromConfirmation === true);
+    setShowMacroDetails(false);
+    if (options?.initialKcal != null) {
+      setManualKcal(options.initialKcal);
+    } else if (!manualKcal && selectedResult) {
+      setManualKcal(String(selectedResult.calories));
+    }
+    if (selectedResult) {
+      setManualProtein(
+        selectedResult.protein != null ? String(selectedResult.protein) : "",
+      );
+      setManualFat(selectedResult.fat != null ? String(selectedResult.fat) : "");
+      setManualCarbs(
+        selectedResult.carbs != null ? String(selectedResult.carbs) : "",
+      );
+    }
+  }
+
+  function parseOptionalMacro(value: string): number | null {
+    const trimmed = value.trim();
+    if (trimmed === "") return null;
+    const parsed = Number(trimmed);
+    if (!Number.isFinite(parsed) || parsed < 0) return null;
+    return Number(parsed.toFixed(1));
+  }
+
   async function handleSearch() {
     if (!canSearch || isSearching) return;
     const token = Date.now();
@@ -304,7 +355,12 @@ export function AddFoodModal({
     registrationContextRef.current = {};
     aliasCandidateRankRef.current = null;
     setShowManualEdit(false);
+    setIsPreSearchManual(false);
     setManualKcal("");
+    setManualProtein("");
+    setManualFat("");
+    setManualCarbs("");
+    setShowMacroDetails(false);
     setIsManualEditingFromConfirmation(false);
     try {
       // 変更: Regex → FatSecret → Open Food Facts → Claude 推定の順で検索。
@@ -321,32 +377,7 @@ export function AddFoodModal({
         state: "error",
         message: error instanceof Error ? error.message : "検索に失敗しました",
       });
-      setShowManualEdit(true);
-    }
-  }
-
-  async function handleReestimateWithAi() {
-    if (isSearching) return;
-    const token = Date.now();
-    activeSearchTokenRef.current = token;
-    setIsManualEditingFromConfirmation(false);
-    setShowManualEdit(false);
-    try {
-      const next = await runClaudeEstimate(inputValue, (nextProgress) => {
-        if (activeSearchTokenRef.current !== token) return;
-        setProgress(nextProgress);
-      });
-      if (activeSearchTokenRef.current !== token) return;
-      setProgress(next);
-    } catch (error) {
-      if (activeSearchTokenRef.current !== token) return;
-      setProgress({
-        ...progress,
-        state: "error",
-        message:
-          error instanceof Error ? error.message : "AI推定に失敗しました",
-      });
-      setShowManualEdit(true);
+      openManualEntry({ fromIdle: false });
     }
   }
 
@@ -356,6 +387,7 @@ export function AddFoodModal({
     activeSearchTokenRef.current = token;
     setIsManualEditingFromConfirmation(false);
     setShowManualEdit(false);
+    setIsPreSearchManual(false);
     try {
       // 変更: 低信頼度時のみ、ユーザー操作で AI Web検索を実行する。
       const next = await runAiWebSearch(inputValue, (nextProgress) => {
@@ -371,9 +403,9 @@ export function AddFoodModal({
         ...progress,
         state: "error",
         message:
-          error instanceof Error ? error.message : "商品情報検索に失敗しました",
+          error instanceof Error ? error.message : "調べ直すのに失敗しました",
       });
-      setShowManualEdit(true);
+      openManualEntry({ fromIdle: false });
     }
   }
 
@@ -391,14 +423,14 @@ export function AddFoodModal({
   }
 
   function handleEditSingleWebCandidate(candidate: FoodConfirmationCandidate) {
-    setShowManualEdit(true);
-    setManualKcal(
-      Number.isFinite(candidate.kcal) && candidate.kcal > 0
-        ? String(candidate.kcal)
-        : "",
-    );
+    openManualEntry({
+      fromConfirmation: true,
+      initialKcal:
+        Number.isFinite(candidate.kcal) && candidate.kcal > 0
+          ? String(candidate.kcal)
+          : "",
+    });
     setInputValue(candidate.label.trim() || inputValue.trim());
-    setIsManualEditingFromConfirmation(true);
   }
 
   function handleConfirmSelectedWebCandidate() {
@@ -456,11 +488,10 @@ export function AddFoodModal({
         state: "low_confidence_estimate",
         steps: progress.steps,
         result: estimateResult,
-        message:
-          "サイズが分からないため、カロリーは目安として記録されます",
+        message: "正確なカロリーを特定できませんでした",
       });
     } catch {
-      setShowManualEdit(true);
+      openManualEntry({ fromConfirmation: true });
     }
   }
 
@@ -584,9 +615,12 @@ export function AddFoodModal({
       result.unit?.toLowerCase() === "g" && result.amount != null
         ? result.amount
         : null;
+    const proteinG = parseOptionalMacro(manualProtein) ?? result.protein ?? null;
+    const fatG = parseOptionalMacro(manualFat) ?? result.fat ?? null;
+    const carbsG = parseOptionalMacro(manualCarbs) ?? result.carbs ?? null;
 
     return {
-      label: result.displayName,
+      label: inputValue.trim() || result.displayName,
       kcal: `${calories}kcal`,
       caloriesEdited,
       calorieSource: toPersistedCalorieSource(result.source),
@@ -598,9 +632,9 @@ export function AddFoodModal({
       unit: result.unit ?? null,
       servingLabel,
       servingWeightG,
-      proteinG: result.protein ?? null,
-      fatG: result.fat ?? null,
-      carbsG: result.carbs ?? null,
+      proteinG,
+      fatG,
+      carbsG,
       fiberG: result.fiber ?? null,
       sodiumMg: result.sodium ?? null,
       registrationMetrics,
@@ -640,11 +674,10 @@ export function AddFoodModal({
   }
 
   function handleCandidateManualInput() {
-    setShowManualEdit(true);
-    setIsManualEditingFromConfirmation(true);
+    openManualEntry({ fromConfirmation: true });
     setProgress({
       ...progress,
-      message: "候補に該当がない場合は、手入力で記録してください。",
+      message: "候補に該当がない場合は、編集して記録してください。",
     });
   }
 
@@ -656,6 +689,9 @@ export function AddFoodModal({
     try {
       if (result) {
         const { calories, caloriesEdited } = resolveEditedCalories(result);
+        const nameEdited =
+          inputValue.trim() !== "" &&
+          inputValue.trim() !== result.displayName.trim();
         const selectedSource = result.source;
         const registrationMetrics = buildRegistrationMetrics(
           result.calories,
@@ -664,7 +700,7 @@ export function AddFoodModal({
         const item = buildMealItemFromResult(
           result,
           calories,
-          caloriesEdited,
+          caloriesEdited || nameEdited,
           registrationMetrics,
         );
         await onSave(item);
@@ -739,6 +775,9 @@ export function AddFoodModal({
         amount: 1,
         unit: "食",
         servingLabel: "1食",
+        proteinG: parseOptionalMacro(manualProtein),
+        fatG: parseOptionalMacro(manualFat),
+        carbsG: parseOptionalMacro(manualCarbs),
         registrationMetrics,
       };
       await onSave(item);
@@ -749,9 +788,9 @@ export function AddFoodModal({
         amount: 1,
         unit: "食",
         calories: Math.round(parsedKcal),
-        protein: null,
-        fat: null,
-        carbs: null,
+        protein: parseOptionalMacro(manualProtein),
+        fat: parseOptionalMacro(manualFat),
+        carbs: parseOptionalMacro(manualCarbs),
         source: "user_registered",
         confidence: "low",
         isEstimated: true,
@@ -767,13 +806,17 @@ export function AddFoodModal({
         message:
           saveError instanceof Error ? saveError.message : "保存に失敗しました",
       });
-      setShowManualEdit(true);
+      openManualEntry({ fromIdle: isPreSearchManual });
     } finally {
       setIsSubmitting(false);
     }
   }
 
   function renderIdleSection() {
+    if (isPreSearchManual && showManualEdit) {
+      return null;
+    }
+
     const activeHistory = historyTab === "recent" ? recentHistory : mealHistory;
     return (
       <>
@@ -842,17 +885,36 @@ export function AddFoodModal({
         >
           検索する
         </button>
+        <button
+          type="button"
+          onClick={() => openManualEntry({ fromIdle: true })}
+          style={manualEntryLinkStyle}
+        >
+          手動で入力
+        </button>
       </>
     );
   }
 
   function renderSearchResult(state: SearchState) {
+    if (isEditingManually && (isPreSearchManual || state === "error")) {
+      return state === "error" ? (
+        <div style={errorTextStyle}>
+          {progress.message ?? "検索に失敗しました。手動で記録してください。"}
+        </div>
+      ) : null;
+    }
+
+    if (isEditingManually && !isPreSearchManual && state !== "error") {
+      return null;
+    }
+
     if (state === "searching" || state === "web_searching") {
       return (
         <FoodSearchStatus
           title={
             state === "web_searching"
-              ? "商品情報を確認しています"
+              ? "より正確な情報を確認しています"
               : "食品情報を探しています"
           }
           query={inputValue.trim()}
@@ -869,38 +931,35 @@ export function AddFoodModal({
     }
 
     if ((state === "found" || state === "web_found") && selectedResult) {
-      const showReestimateWithAi =
-        state === "found" && isExternalApiFoodSource(selectedResult.source);
-
       return (
         <FoodResultPreview
           result={selectedResult}
           mode="register"
-          onEdit={() => {
-            setShowManualEdit(true);
-            setManualKcal(String(selectedResult.calories));
-          }}
-          onAdd={() => void saveItem(selectedResult)}
-          onReestimateWithAi={
-            showReestimateWithAi
-              ? () => void handleReestimateWithAi()
-              : undefined
+          onEdit={() =>
+            openManualEntry({
+              initialKcal: String(selectedResult.calories),
+            })
           }
+          onAdd={() => void saveItem(selectedResult)}
         />
       );
     }
 
     if (state === "estimated" && selectedResult) {
+      const canSearchWeb = selectedResult.confidence === "medium";
       return (
         <FoodResultPreview
           result={selectedResult}
           mode="register"
-          onEdit={() => {
-            setShowManualEdit(true);
-            setManualKcal(String(selectedResult.calories));
-          }}
+          onEdit={() =>
+            openManualEntry({
+              initialKcal: String(selectedResult.calories),
+            })
+          }
           onAdd={() => void saveItem(selectedResult)}
-          onSearchWeb={() => void handleWebSearch()}
+          onSearchWeb={
+            canSearchWeb ? () => void handleWebSearch() : undefined
+          }
         />
       );
     }
@@ -914,28 +973,32 @@ export function AddFoodModal({
           result={selectedResult}
           mode="history"
           caloriesEdited={historyEdited}
-          onEdit={() => {
-            setShowManualEdit(true);
-            setManualKcal(String(selectedResult.calories));
-          }}
+          onEdit={() =>
+            openManualEntry({
+              initialKcal: String(selectedResult.calories),
+            })
+          }
           onAdd={() => void saveItem(selectedResult)}
         />
       );
     }
 
     if (state === "low_confidence_estimate" && selectedResult) {
-      // 変更: low信頼度は自動確定せず、Web検索 or 低信頼度のまま追加を選択させる。
       return (
         <LowConfidenceEstimateCard
           result={selectedResult}
           onSearchWeb={() => void handleWebSearch()}
           onUseAiEstimate={handleAiOnly}
-          onEdit={() => setShowManualEdit(true)}
+          onEdit={() =>
+            openManualEntry({
+              initialKcal: String(selectedResult.calories),
+            })
+          }
           showSearchButton={!isWebSearchFallback}
           warningMessage={
             isWebSearchFallback
               ? (progress.message ??
-                "Web検索しましたが、うまくヒットしませんでした。AI推定カロリーを表示しています。")
+                "正確な商品情報を確認できませんでした")
               : undefined
           }
         />
@@ -1056,12 +1119,120 @@ export function AddFoodModal({
     if (state === "error") {
       return (
         <div style={errorTextStyle}>
-          {progress.message ?? "検索に失敗しました。手入力で記録してください。"}
+          {progress.message ?? "検索に失敗しました。手動で記録してください。"}
         </div>
       );
     }
 
     return null;
+  }
+
+  function renderManualEntryForm() {
+    if (!isEditingManually) return null;
+
+    const canSubmit =
+      inputValue.trim() !== "" &&
+      manualKcal.trim() !== "" &&
+      !isSubmitting;
+
+    return (
+      <div style={manualFormStyle}>
+        {isPreSearchManual && (
+          <div style={manualFormTitleStyle}>手動で入力</div>
+        )}
+        {!isPreSearchManual && progress.state !== "error" && (
+          <div style={manualFormTitleStyle}>編集</div>
+        )}
+        <label style={{ ...fieldLabelStyle, marginTop: isPreSearchManual ? 0 : 4 }}>
+          カロリー
+        </label>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <input
+            type="number"
+            placeholder="例：234"
+            value={manualKcal}
+            onChange={(e) => setManualKcal(e.target.value)}
+            style={{ ...inputStyle, marginBottom: 0 }}
+          />
+          <span style={{ fontSize: 13, color: "#888" }}>kcal</span>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => setShowMacroDetails((prev) => !prev)}
+          style={macroToggleStyle}
+        >
+          {showMacroDetails
+            ? "詳細な栄養情報を閉じる"
+            : "詳細な栄養情報を入力（任意）"}
+        </button>
+
+        {showMacroDetails && (
+          <div style={macroFieldsStyle}>
+            <label style={fieldLabelStyle}>たんぱく質 (g)</label>
+            <input
+              type="number"
+              placeholder="任意"
+              value={manualProtein}
+              onChange={(e) => setManualProtein(e.target.value)}
+              style={inputStyle}
+            />
+            <label style={fieldLabelStyle}>脂質 (g)</label>
+            <input
+              type="number"
+              placeholder="任意"
+              value={manualFat}
+              onChange={(e) => setManualFat(e.target.value)}
+              style={inputStyle}
+            />
+            <label style={fieldLabelStyle}>炭水化物 (g)</label>
+            <input
+              type="number"
+              placeholder="任意"
+              value={manualCarbs}
+              onChange={(e) => setManualCarbs(e.target.value)}
+              style={inputStyle}
+            />
+          </div>
+        )}
+
+        <button
+          type="button"
+          disabled={!canSubmit}
+          onClick={() =>
+            void saveItem(
+              isPreSearchManual || progress.state === "error"
+                ? null
+                : selectedResult,
+            )
+          }
+          style={{
+            ...primaryBtnStyle,
+            marginTop: 10,
+            opacity: canSubmit ? 1 : 0.45,
+          }}
+        >
+          追加する
+        </button>
+        {isPreSearchManual && (
+          <button
+            type="button"
+            onClick={() => {
+              setShowManualEdit(false);
+              setIsPreSearchManual(false);
+              setManualKcal("");
+              setManualProtein("");
+              setManualFat("");
+              setManualCarbs("");
+              setShowMacroDetails(false);
+            }}
+            style={manualEntryLinkStyle}
+          >
+            検索に戻る
+          </button>
+        )}
+      </div>
+    );
   }
 
   return (
@@ -1084,37 +1255,7 @@ export function AddFoodModal({
 
       {renderSearchResult(progress.state)}
       {progress.state === "idle" && renderIdleSection()}
-
-      {(showManualEdit || progress.state === "error") && (
-        <>
-          {/* 変更: 失敗時フォールバックとして手入力欄を明示。 */}
-          <label style={{ ...fieldLabelStyle, marginTop: 14 }}>
-            カロリー（手入力）
-          </label>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <input
-              type="number"
-              placeholder="例：234"
-              value={manualKcal}
-              onChange={(e) => setManualKcal(e.target.value)}
-              style={{ ...inputStyle, marginBottom: 0 }}
-            />
-            <span style={{ fontSize: 13, color: "#888" }}>kcal</span>
-          </div>
-          <button
-            type="button"
-            disabled={!inputValue.trim() || !manualKcal.trim() || isSubmitting}
-            onClick={() => void saveItem(null)}
-            style={{
-              ...primaryBtnStyle,
-              marginTop: 10,
-              opacity: inputValue.trim() && manualKcal.trim() ? 1 : 0.45,
-            }}
-          >
-            手入力する
-          </button>
-        </>
-      )}
+      {renderManualEntryForm()}
     </BottomSheet>
   );
 }
@@ -1362,4 +1503,47 @@ const completedMetaStyle: CSSProperties = {
   marginTop: 4,
   fontSize: 13,
   color: "#065F46",
+};
+
+const manualEntryLinkStyle: CSSProperties = {
+  width: "100%",
+  marginTop: 8,
+  border: "none",
+  background: "transparent",
+  color: "#6B7280",
+  fontSize: 13,
+  fontWeight: 600,
+  padding: "8px 4px",
+  cursor: "pointer",
+  textDecoration: "underline",
+  textUnderlineOffset: 2,
+};
+
+const manualFormStyle: CSSProperties = {
+  marginTop: 12,
+};
+
+const manualFormTitleStyle: CSSProperties = {
+  fontSize: 14,
+  fontWeight: 700,
+  color: "#111827",
+  marginBottom: 10,
+};
+
+const macroToggleStyle: CSSProperties = {
+  width: "100%",
+  marginTop: 12,
+  marginBottom: 4,
+  border: "none",
+  background: "transparent",
+  color: "#6B7280",
+  fontSize: 12,
+  fontWeight: 600,
+  padding: "6px 0",
+  cursor: "pointer",
+  textAlign: "left",
+};
+
+const macroFieldsStyle: CSSProperties = {
+  marginTop: 8,
 };

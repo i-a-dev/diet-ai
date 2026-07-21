@@ -9,7 +9,6 @@ interface FoodEstimateCardProps {
   onEdit: () => void;
   onAdd: () => void;
   onSearchWeb?: () => void;
-  onReestimateWithAi?: () => void;
   variant?: "estimate" | "history" | "detail" | "found";
   caloriesEdited?: boolean;
 }
@@ -19,48 +18,35 @@ export function FoodEstimateCard({
   onEdit,
   onAdd,
   onSearchWeb,
-  onReestimateWithAi,
   variant = "estimate",
   caloriesEdited,
 }: FoodEstimateCardProps) {
   const isHistory = variant === "history";
   const isDetail = variant === "detail";
   const isFound = variant === "found";
+  const isEstimate = variant === "estimate";
   const isEdited = parseCaloriesEdited(caloriesEdited ?? result.caloriesEdited);
   const showActions = !isDetail;
-  const databaseSourceLabel =
-    result.source === "fatsecret"
-      ? "データ提供：FatSecret"
-      : result.source === "open_food_facts"
-        ? "データ提供：Open Food Facts"
-        : result.source === "alias_db"
-          ? "よく選ばれている候補"
-          : null;
+  const showApprox = isEstimate && !isEdited;
+  const title = isHistory
+    ? "過去の記録を選択しました"
+    : isFound
+      ? "候補が見つかりました"
+      : "AIでカロリーを推定しました";
 
   return (
     <div style={cardStyle}>
-      {!isDetail && (
-        <div style={titleStyle}>
-          {isHistory
-            ? "過去の記録を選択しました"
-            : isFound
-              ? "候補が見つかりました"
-              : "AIがカロリーを推定しました"}
-        </div>
-      )}
-      {!isDetail && databaseSourceLabel && isFound && (
-        <div style={databaseSourceStyle}>{databaseSourceLabel}</div>
-      )}
+      {!isDetail && <div style={titleStyle}>{title}</div>}
       {!isDetail && !isFound && (
         <div style={badgeRowStyle}>
           <span style={badgeStyle}>{isHistory ? "履歴" : "推定"}</span>
         </div>
       )}
-      {isDetail && databaseSourceLabel && (
-        <div style={databaseSourceStyle}>{databaseSourceLabel}</div>
-      )}
       <div style={nameStyle}>{result.displayName}</div>
-      <div style={calorieStyle}>{result.calories} kcal</div>
+      <div style={calorieStyle}>
+        {showApprox ? "約" : ""}
+        {result.calories} kcal
+      </div>
       {result.items && result.items.length > 0 && (
         <div style={metaStyle}>
           内訳: {result.items.map((item) => item.name).join(" + ")}
@@ -74,34 +60,19 @@ export function FoodEstimateCard({
         confidence={result.confidence}
       />
       {showActions && (
-        <>
-          <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-            <button type="button" onClick={onEdit} style={secondaryButtonStyle}>
-              手入力する
-            </button>
-            <button type="button" onClick={onAdd} style={primaryButtonStyle}>
-              {isHistory ? "登録する" : "この内容で追加する"}
-            </button>
-          </div>
-          {variant === "estimate" && onSearchWeb && (
-            <button
-              type="button"
-              onClick={onSearchWeb}
-              style={webSearchButtonStyle}
-            >
-              AI web検索を行う
+        <div style={actionsStyle}>
+          <button type="button" onClick={onAdd} style={primaryButtonStyle}>
+            追加する
+          </button>
+          <button type="button" onClick={onEdit} style={textButtonStyle}>
+            編集
+          </button>
+          {isEstimate && onSearchWeb && (
+            <button type="button" onClick={onSearchWeb} style={textButtonStyle}>
+              より正確に調べる
             </button>
           )}
-          {variant === "found" && onReestimateWithAi && (
-            <button
-              type="button"
-              onClick={onReestimateWithAi}
-              style={reestimateButtonStyle}
-            >
-              AI推定で検索し直す
-            </button>
-          )}
-        </>
+        </div>
       )}
     </div>
   );
@@ -158,59 +129,33 @@ const metaStyle: CSSProperties = {
   fontSize: 12,
 };
 
-const databaseSourceStyle: CSSProperties = {
-  marginBottom: 6,
-  fontSize: 12,
-  color: "#6B7280",
-  fontWeight: 600,
-};
-
-const secondaryButtonStyle: CSSProperties = {
-  flex: 1,
-  border: "1px solid #E5E7EB",
-  borderRadius: 10,
-  background: "#fff",
-  color: "#4B5563",
-  fontWeight: 600,
-  fontSize: 13,
-  padding: "10px 8px",
-  cursor: "pointer",
+const actionsStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 4,
+  marginTop: 12,
 };
 
 const primaryButtonStyle: CSSProperties = {
-  flex: 1,
+  width: "100%",
   border: "none",
   borderRadius: 10,
   background: ORANGE,
   color: "#fff",
   fontWeight: 700,
-  fontSize: 13,
-  padding: "10px 8px",
+  fontSize: 14,
+  padding: "11px 12px",
   cursor: "pointer",
 };
 
-const webSearchButtonStyle: CSSProperties = {
+const textButtonStyle: CSSProperties = {
   width: "100%",
-  marginTop: 8,
   border: "none",
   borderRadius: 10,
-  background: ORANGE,
-  color: "#fff",
-  fontWeight: 700,
+  background: "transparent",
+  color: "#6B7280",
+  fontWeight: 600,
   fontSize: 13,
-  padding: "10px 8px",
-  cursor: "pointer",
-};
-
-const reestimateButtonStyle: CSSProperties = {
-  width: "100%",
-  marginTop: 8,
-  border: "none",
-  borderRadius: 10,
-  background: ORANGE,
-  color: "#fff",
-  fontWeight: 700,
-  fontSize: 13,
-  padding: "10px 8px",
+  padding: "8px 12px",
   cursor: "pointer",
 };

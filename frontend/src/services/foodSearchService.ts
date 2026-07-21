@@ -1178,7 +1178,7 @@ export async function searchFoodByText(
         "low_confidence_estimate",
         steps,
         claudeResult,
-        "AI推定の精度が低い可能性があります",
+        "AIでカロリーを推定しました",
       ),
     );
   }
@@ -1196,7 +1196,7 @@ export async function searchFoodByText(
       "estimated",
       steps,
       claudeResult,
-      "AIがカロリーを推定しました",
+      "AIでカロリーを推定しました",
     ),
   );
 }
@@ -1240,7 +1240,7 @@ export async function runClaudeEstimate(
         "low_confidence_estimate",
         steps,
         claudeResult,
-        "AI推定の精度が低い可能性があります",
+        "AIでカロリーを推定しました",
       ),
     );
   }
@@ -1259,7 +1259,7 @@ export async function runClaudeEstimate(
       "estimated",
       steps,
       claudeResult,
-      "AIがカロリーを推定しました",
+      "AIでカロリーを推定しました",
     ),
   );
 }
@@ -1387,7 +1387,7 @@ export async function runAiWebSearch(
         state: "low_confidence_estimate",
         steps: updateStep(steps, "ai_web_searching", "done"),
         result: fallbackEstimate,
-        message: "商品検索ではなく、通常のAI推定結果を表示しています。",
+        message: "正確なカロリーを特定できませんでした",
       });
     }
 

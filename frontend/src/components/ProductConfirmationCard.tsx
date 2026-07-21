@@ -93,8 +93,8 @@ export function ProductConfirmationCard({
           );
         })}
       </div>
-      <button type="button" onClick={onManualInput} style={secondaryButtonStyle}>
-        手入力する
+      <button type="button" onClick={onManualInput} style={textButtonStyle}>
+        編集
       </button>
       {onUnknown && (
         <button type="button" onClick={onUnknown} style={secondaryButtonStyle}>
@@ -103,7 +103,7 @@ export function ProductConfirmationCard({
       )}
       {selectedKey && onConfirmSelected && (
         <button type="button" onClick={onConfirmSelected} style={primaryButtonStyle}>
-          記録する
+          追加する
         </button>
       )}
       {showWebSearchButton && onSearchWeb && (
@@ -112,12 +112,12 @@ export function ProductConfirmationCard({
           onClick={onSearchWeb}
           disabled={searchWebDisabled}
           style={{
-            ...primaryButtonStyle,
+            ...outlineButtonStyle,
             opacity: searchWebDisabled ? 0.45 : 1,
             cursor: searchWebDisabled ? "not-allowed" : "pointer",
           }}
         >
-          AI web検索を行う
+          より正確に調べる
         </button>
       )}
     </div>
@@ -231,6 +231,32 @@ const secondaryButtonStyle: CSSProperties = {
   fontWeight: 600,
   fontSize: 14,
   padding: "11px 12px",
+  cursor: "pointer",
+};
+
+const outlineButtonStyle: CSSProperties = {
+  width: "100%",
+  marginTop: 8,
+  border: "1px solid #FDBA74",
+  borderRadius: 10,
+  background: "#fff",
+  color: "#C2410C",
+  fontWeight: 700,
+  fontSize: 14,
+  padding: "11px 12px",
+  cursor: "pointer",
+};
+
+const textButtonStyle: CSSProperties = {
+  width: "100%",
+  marginTop: 4,
+  border: "none",
+  borderRadius: 10,
+  background: "transparent",
+  color: "#6B7280",
+  fontWeight: 600,
+  fontSize: 13,
+  padding: "8px 12px",
   cursor: "pointer",
 };
 

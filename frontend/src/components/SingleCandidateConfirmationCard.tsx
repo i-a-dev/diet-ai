@@ -44,15 +44,15 @@ export function SingleCandidateConfirmationCard({
           opacity: isSubmitting ? 0.6 : 1,
         }}
       >
-        これを記録
+        追加する
       </button>
       <button
         type="button"
         onClick={onEdit}
         disabled={isSubmitting}
-        style={secondaryButtonStyle}
+        style={textButtonStyle}
       >
-        手入力する
+        編集
       </button>
     </div>
   );
@@ -108,15 +108,15 @@ const primaryButtonStyle: CSSProperties = {
   cursor: "pointer",
 };
 
-const secondaryButtonStyle: CSSProperties = {
+const textButtonStyle: CSSProperties = {
   width: "100%",
-  marginTop: 8,
-  border: "1px solid #E5E7EB",
+  marginTop: 4,
+  border: "none",
   borderRadius: 10,
-  background: "#fff",
-  color: "#4B5563",
+  background: "transparent",
+  color: "#6B7280",
   fontWeight: 600,
-  fontSize: 14,
-  padding: "11px 12px",
+  fontSize: 13,
+  padding: "8px 12px",
   cursor: "pointer",
 };

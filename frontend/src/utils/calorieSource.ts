@@ -80,7 +80,7 @@ export function getCalorieSourceLabel(params: {
   }
 
   if (isWebSearchSource(source)) {
-    return "AI Web検索で取得したカロリー";
+    return "Webで調べたカロリー";
   }
 
   if (
@@ -92,7 +92,7 @@ export function getCalorieSourceLabel(params: {
       source !== "alias_db" &&
       !isWebSearchSource(source))
   ) {
-    return "AI推定で取得したカロリー";
+    return "AIで推定したカロリー";
   }
 
   return null;

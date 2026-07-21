@@ -1,6 +1,7 @@
 import type { CSSProperties } from "react";
 import type { FoodSearchResult } from "../types/foodSearch.ts";
 import { ORANGE } from "../constants.ts";
+import { CalorieSourceInfo } from "./CalorieSourceInfo.tsx";
 
 interface LowConfidenceEstimateCardProps {
   result: FoodSearchResult;
@@ -23,76 +24,85 @@ export function LowConfidenceEstimateCard({
 
   return (
     <div style={cardStyle}>
-      {!isWebFailure ? (
-        <>
-          <div style={subTitleStyle}>{result.displayName}</div>
-          <div style={calorieStyle}>約{result.calories} kcal</div>
-          <div style={noticeBoxStyle}>
-            <div style={noticeMainStyle}>
-              入力された食品名でAIでカロリーを推定しましたが、実際と大きく違う可能性があります。
-            </div>
-            <div style={noticeTipStyle}>
-              サイズや量が分かると、より正確に記録できます
-            </div>
+      <div style={titleStyle}>AIでカロリーを推定しました</div>
+      <div style={badgeRowStyle}>
+        <span style={badgeStyle}>推定</span>
+      </div>
+      <div style={subTitleStyle}>{result.displayName}</div>
+      <div style={calorieStyle}>約{result.calories} kcal</div>
+      <CalorieSourceInfo
+        source={result.source}
+        sourceUrl={result.sourceUrl}
+        isEstimated={result.isEstimated}
+        confidence={result.confidence}
+      />
+      <div style={noticeBoxStyle}>
+        <div style={noticeMainStyle}>
+          {isWebFailure
+            ? (warningMessage ??
+              "正確な商品情報を確認できませんでした")
+            : "正確なカロリーを特定できませんでした"}
+        </div>
+        {!isWebFailure && (
+          <div style={noticeTipStyle}>
+            サイズや量が分かると、より正確に記録できます
           </div>
+        )}
+      </div>
+      <div style={actionsStyle}>
+        <button type="button" onClick={onUseAiEstimate} style={primaryButtonStyle}>
+          この内容で追加
+        </button>
+        {showSearchButton && (
           <button
             type="button"
             onClick={onSearchWeb}
-            style={primaryButtonStyle}
-          >
-            AI web検索を行う
-          </button>
-          <button
-            type="button"
-            onClick={onUseAiEstimate}
             style={secondaryButtonStyle}
           >
-            このまま記録
+            より正確に調べる
           </button>
-          <button type="button" onClick={onEdit} style={secondaryButtonStyle}>
-            手入力する
-          </button>
-        </>
-      ) : (
-        <>
-          <div style={titleStyle}>正確な商品情報を確認できませんでした</div>
-          <div style={subTitleStyle}>推定：約{result.calories} kcal</div>
-          <div style={warnStyle}>
-            {warningMessage ??
-              "サイズや量が分からないため、カロリーは目安として記録されます"}
-          </div>
-          <button
-            type="button"
-            onClick={onUseAiEstimate}
-            style={primaryButtonStyle}
-          >
-            このまま記録
-          </button>
-          <button type="button" onClick={onEdit} style={secondaryButtonStyle}>
-            手入力する
-          </button>
-        </>
-      )}
+        )}
+        <button type="button" onClick={onEdit} style={textButtonStyle}>
+          編集
+        </button>
+      </div>
     </div>
   );
 }
 
 const cardStyle: CSSProperties = {
   borderRadius: 12,
-  border: "1px solid #FECACA",
-  background: "#FEF2F2",
+  border: "1px solid #E5E7EB",
+  background: "#FFFFFF",
   padding: "12px 14px",
   marginTop: 10,
 };
 
 const titleStyle: CSSProperties = {
-  color: "#B91C1C",
   fontSize: 14,
   fontWeight: 700,
+  color: "#111827",
+  marginBottom: 8,
+};
+
+const badgeRowStyle: CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  alignItems: "center",
+  gap: 6,
+  marginBottom: 8,
+};
+
+const badgeStyle: CSSProperties = {
+  display: "inline-block",
+  borderRadius: 999,
+  background: "#FEF3C7",
+  color: "#92400E",
+  fontSize: 11,
+  padding: "2px 8px",
 };
 
 const subTitleStyle: CSSProperties = {
-  marginTop: 8,
   fontSize: 14,
   color: "#111827",
   fontWeight: 600,
@@ -106,39 +116,36 @@ const calorieStyle: CSSProperties = {
 };
 
 const noticeBoxStyle: CSSProperties = {
-  marginTop: 10,
-  padding: "10px 12px",
+  marginTop: 12,
   borderRadius: 10,
-  background: "rgba(185, 28, 28, 0.06)",
-  border: "1px solid rgba(185, 28, 28, 0.14)",
+  background: "#FFF7ED",
+  border: "1px solid #FED7AA",
+  padding: "10px 12px",
 };
 
 const noticeMainStyle: CSSProperties = {
   fontSize: 13,
   fontWeight: 600,
-  color: "#991B1B",
-  lineHeight: 1.55,
+  color: "#9A3412",
+  lineHeight: 1.5,
 };
 
 const noticeTipStyle: CSSProperties = {
   marginTop: 6,
   fontSize: 12,
-  fontWeight: 500,
-  color: "#9F1239",
+  color: "#C2410C",
   lineHeight: 1.5,
-  opacity: 0.85,
 };
 
-const warnStyle: CSSProperties = {
-  marginTop: 6,
-  fontSize: 12,
-  color: "#7F1D1D",
-  lineHeight: 1.5,
+const actionsStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 8,
+  marginTop: 12,
 };
 
 const primaryButtonStyle: CSSProperties = {
   width: "100%",
-  marginTop: 12,
   border: "none",
   borderRadius: 10,
   background: ORANGE,
@@ -151,13 +158,24 @@ const primaryButtonStyle: CSSProperties = {
 
 const secondaryButtonStyle: CSSProperties = {
   width: "100%",
-  marginTop: 8,
-  border: "1px solid #E5E7EB",
+  border: "1px solid #FDBA74",
   borderRadius: 10,
   background: "#fff",
-  color: "#4B5563",
-  fontWeight: 600,
+  color: "#C2410C",
+  fontWeight: 700,
   fontSize: 14,
   padding: "11px 12px",
+  cursor: "pointer",
+};
+
+const textButtonStyle: CSSProperties = {
+  width: "100%",
+  border: "none",
+  borderRadius: 10,
+  background: "transparent",
+  color: "#6B7280",
+  fontWeight: 600,
+  fontSize: 13,
+  padding: "8px 12px",
   cursor: "pointer",
 };

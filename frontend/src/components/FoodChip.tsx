@@ -56,7 +56,7 @@ function AiWebSearchIcon({ size = 12 }: { size?: number }) {
 }
 
 function SourceIcon({ kind }: { kind: Exclude<ChipSourceKind, null> }) {
-  const label = kind === 'estimate' ? 'AI推定' : 'AI web検索'
+  const label = kind === 'estimate' ? 'AI推定' : 'Webで確認'
 
   return (
     <span
