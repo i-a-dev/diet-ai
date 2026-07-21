@@ -14,7 +14,7 @@ final class CalorieEstimateService
 {
     private const API_URL = 'https://api.anthropic.com/v1/messages';
     private const MODEL = 'claude-haiku-4-5-20251001';
-    private const SYSTEM_PROMPT = 'あなたは日本の食品・料理全般に詳しいカロリー推定の専門家です。口に入れて摂取するもの（料理・飲み物・お菓子・ゼリー・サプリ・機能性食品・市販品）は食品として扱ってください。明らかに食べないもの（洗剤・化粧品・金属など）だけ {"error":"not_food"} を返してください。商品名が不明確でも食べ物の可能性がある場合は not_food にせず推定してください。食品の場合はJSONのみ返答し、前置きや説明は不要です。';
+    private const SYSTEM_PROMPT = 'あなたは日本の食品・料理全般に詳しいカロリー推定の専門家です。口に入れて摂取するもの（料理・飲み物・お菓子・ゼリー・サプリ・機能性食品・市販品）は食品として扱ってください。明らかに食べないもの（洗剤・化粧品・金属など）だけ {"error":"not_food"} を返してください。商品名が不明確でも食べ物の可能性がある場合は not_food にせず推定してください。confidenceは「標準量を仮定できるか」ではなく「その仮定を置いても推定値がどれだけ安定するか」を表します。代表値を出せても、追加情報で数百kcal変わり得るなら low にしてください。食品の場合はJSONのみ返答し、前置きや説明は不要です。';
     private const PRODUCT_CANDIDATE_SYSTEM_PROMPT = 'あなたは日本の市販食品に詳しい専門家です。Web検索はせず、カロリー推定もしません。入力が食べ物でない場合のみ {"error":"not_food"} を返してください。食品の場合は、日本国内で販売されている可能性が高い市販食品候補を最大3件返してください。JSONのみ返答し、前置きや説明は不要です。';
     private const WEB_SEARCH_SYSTEM_PROMPT = 'あなたは日本の食品・市販品に詳しい専門家です。口に入れて摂取するものは食品として扱ってください。明らかに食べないものだけ {"error":"not_food"} を返してください。食品の場合は web_search で商品を調べ、正式な商品名とその商品の栄養成分・カロリーが載っているページ URL を返してください。まとめ記事・ブログよりメーカー公式・商品詳細ページを優先してください。最終回答はJSONのみ。前置きや説明は不要です。';
     private const WEB_SEARCH_MAX_TOKENS = 1024;
@@ -40,6 +40,7 @@ final class CalorieEstimateService
      * @return array{
      *   kcal?: int,
      *   assumed_weight_g?: int,
+     *   assumption?: string,
      *   confidence?: string,
      *   product_name?: string,
      *   source_url?: string,
@@ -742,13 +743,13 @@ PROMPT;
     /**
      * Claude API を1回呼び出し、推定結果を返す。
      *
-     * @return array{kcal: int, assumed_weight_g?: int, confidence: string, product_name?: string, source_url?: string}|'not_food'|null
+     * @return array{kcal: int, assumed_weight_g?: int, assumption?: string, confidence: string, product_name?: string, source_url?: string}|'not_food'|null
      */
     private function requestEstimate(string $foodName, string $apiKey): array|string|null
     {
         $payload = [
             'model' => self::MODEL,
-            'max_tokens' => 128,
+            'max_tokens' => 256,
             'system' => self::SYSTEM_PROMPT,
             'messages' => [
                 [
@@ -1191,12 +1192,76 @@ PROMPT;
     private function buildPrompt(string $foodName): string
     {
         $confidenceSection = <<<'TEXT'
+【confidenceの意味】
+- confidenceは「栄養成分を完全に正確に特定できるか」でも「標準量を仮定できるか」でもない
+- confidenceが表すのは「標準的な仮定を置いたときに、推定結果がどれだけ安定するか」
+- 「一般的な標準量を仮定できる」ことと「confidenceが高い」ことは同義ではない
+- 標準量を仮定できても、追加情報で推定値が大きく変わるなら confidence は低くする
+- サイズ違いなど小さな誤差しかない食品は high を優先する
+- AI推定である以上すべての結果に推定要素がある。完全性ではなく、仮定後の推定安定性で判定する
+
+【confidenceの判定手順】（この順で考える）
+1. 入力から食品または料理を特定できるか
+2. 入力から量を判断できるか、または標準量を仮定できるか
+3. その仮定を置いたとき、追加情報があっても推定値は安定するか
+4. 追加情報による変動幅はどの程度か（数十kcalか、数百kcalか）
+5. 代表値を提示しても、多くのケースで妥当と言えるか
+標準仮定後も推定値がほとんど変わらない（追加情報でもおおよそ数十kcal以内） → high
+標準仮定で代表値は出せるが、追加情報でおおよそ100kcal前後の幅がある → medium
+標準仮定を置いても、一般的な別形態同士でおおよそ200〜300kcal以上変わり得る → low（代表値を出せても low）
+
+特に注意:
+- 「一人前を仮定できる」だけでは high/medium にしない
+- 同じ料理名の一般的なバリエーション（種類・具材・ソース・店舗・セット内容）を思い浮かべ、その幅がおおよそ200kcal以上なら low
+- 量だけ仮定して特定の一形態に寄せた代表値を出せても、他の一般的な形態と大きくずれるなら low
+- ソースや調理法の違いだけで一般に数百kcal差が出る料理カテゴリ名のみの入力は low
+
 【confidenceの基準】
-- high: 料理名・重さ・カロリーすべて明確に特定できる場合のみ（量の表記がある、または一般的な単位で一意に決まる）
-- medium: 重さを仮定した、または調理法が不明な場合
-- low: 食品名が曖昧、市販品・外食・定食など公式確認が必要な場合
-- 揚げ物・中華料理など油の量が不明な場合は必ずmediumにする
-- コンビニ・外食チェーン・市販品・宅配弁当は公式カロリー確認が必要なためhighにしない
+- high: 標準的な仮定を置いても推定値がほとんど変わらない
+  - 追加情報があっても推定カロリーは大きく変動しない
+  - 日常の食事記録として十分安定した推定ができる
+  - サイズ違い・個体差程度の小さな誤差しかない
+  - 個数や重量が明確な一般食品は、小さなサイズ差だけでは下げない
+- medium: 標準的な仮定を置けば推定できるが、追加情報である程度カロリーが変わる
+  - ただし代表値として提示する価値はある
+  - 種類・サイズ・具材で無視できない幅があるが、一般的な別形態同士の差はおおよそ100kcal前後までに収まりやすい
+  - 日常記録には使えるが、追加情報があると明確に精度が上がる
+- low: 標準的な仮定を置いても、追加情報によって推定結果が大きく変わる
+  - 代表値を提示できたとしても confidence は low にする
+  - 次のような要因でおおよそ200〜300kcal以上の差が生じる可能性がある場合は low
+    - 主菜の種類、調理方法、店舗、レシピ、トッピング、セット内容、ご飯量、副菜構成、ソース・味の系統
+  - 料理カテゴリ名だけで、一般的なバリエーション同士の差がおおよそ200kcal以上ある場合は low
+  - 「代表値が出せるから medium」「一人前を仮定したから medium」にはしない。変動が大きいなら low
+
+【避ける判定】
+- 標準量を仮定できるから high/medium にする
+- 代表値を1つ提示できるから medium 以上にする
+- 正確な商品ラベルがないため low（それだけでは不可）
+- 厳密な重量がないため low（それだけでは不可）
+- 個体差・小さなサイズ違いがあるため low（それだけでは不可）
+- 少しでも推定を含むため medium/low
+- 完全な正解を保証できないため low
+
+【推定値とconfidenceの整合】
+- カロリー値の推定自体は、妥当な標準仮定で行う
+- ただし confidence は、その代表値がどれだけ安定するかを別軸で判定する
+- 推定値に不安があるからとりあえず low にするのではなく、変動要因の大きさで判定する
+- 標準仮定を使ったこと自体は confidence を下げる理由にしない（安定していれば high 可）
+
+【出力前の自己確認】
+- 追加情報によって推定値は何kcal程度変わる可能性があるか
+- 標準的な仮定を置いても結果は安定しているか
+- 主菜・レシピ・ソース・店舗が変わるだけで数百kcal変わらないか
+- 同じ入力に対する一般的な別形態（例: 別の具材・味・セット内容）も、今の代表値で妥当と言えるか
+- 追加情報による変動が非常に大きい場合は、代表値を提示できても low にする
+- 「一人前を仮定できた」だけで medium 以上にしていないか
+- サイズ差程度の小さな誤差を過大評価して medium/low にしていないか
+
+【判定の目安（校准用・個別例外処理ではない）】
+- high になりやすい: ゆで卵2個、白米150g、牛乳200ml、バナナ1本（量が明確で、追加情報でも推定値が大きく変わらない）
+- medium になりやすい: おにぎり1個、食パン1枚、味噌汁1杯（多少の種類差はあるが代表値として使える）
+- low になりやすい: 日替わり定食、定食、弁当、ラーメン、カレー、サラダ、パスタ
+  （主菜・レシピ・店舗・ソース・セット内容などでおおよそ200kcal以上変わり得る。一人前を仮定できても low）
 TEXT;
 
         return <<<PROMPT
@@ -1206,7 +1271,7 @@ TEXT;
 【食品の判定】
 - 口に入れて摂取するものは食品として扱う（料理・飲み物・お菓子・ゼリー・サプリ・機能性食品・市販品を含む）
 - ダイエットゼリーやサプリメントも、食べる・飲むものであれば食品としてカロリーを推定する
-- 商品名が不明確・存在が確認できない場合でも、食べ物の可能性があるなら not_food にせず confidence: low で推定する
+- 商品名が不明確・存在が確認できない場合でも、食べ物の可能性があるなら not_food にせず推定する（食品・量が極端に曖昧なときだけ confidence: low）
 - not_food にするのは明らかに食べないもののみ（例: 髪の毛、紙、石、金属、洗剤、化粧品、ペットフード、肥料、毒物など）
 - 非食品の場合はカロリーを推定せず、次のJSONのみ返す: {"error":"not_food"}
 - 非食品の場合は説明文を付けない
@@ -1231,10 +1296,13 @@ TEXT;
 - 量が全く不明な場合は一般的な1食分を仮定する
 - 定食は主菜・ご飯・味噌汁・小鉢・漬物を含むものとして計算する
 - 定食のご飯は150gを標準とする
-- 定食・セットメニューは構成が不明なためconfidenceはlowにする
+- ただし定食・弁当・セットなど、主菜や構成が不明で数百kcal変動し得る入力は、代表値を出しても confidence は low
+- 料理カテゴリ名だけで、店舗・レシピ・具材・ソース・量により数百kcal変わりやすい入力も、代表値や一人前仮定ができても confidence は low
+- 種類やサイズで多少変わるが数百kcalまでは振れにくいものは medium
 - コンビニ・外食チェーン・市販品など商品名が含まれる場合はその商品の公式カロリーを優先する
 - 商品名が特定できない場合は同カテゴリの平均値で推定する
-- 市販品・宅配弁当など正確なカロリーが不明な場合はconfidenceをlowにする
+- 公式ラベルが無くても、推定値が安定していれば high、ある程度の幅なら medium、大きく振れるなら low（ラベル不足だけでは判定しない）
+- 標準量を仮定した場合は必要に応じて assumed_weight_g や assumption（短い説明）を返す。標準仮定を使ったこと自体は confidence を下げる理由にしない
 
 最終回答はJSONのみ。前置きや説明は不要。
 
@@ -1242,9 +1310,10 @@ TEXT;
 - 通常: {"kcal": 整数, "confidence": "high"|"medium"|"low"}
 - ページにカロリー表示がある場合: {"labeled_kcal": 整数, "kcal": 同じ整数, "confidence": "high"}
 - 重量(g)が公式または推定で分かる場合: {"kcal": 整数, "assumed_weight_g": 整数, "confidence": "high"|"medium"|"low"}
+- 標準量を仮定した場合は任意で "assumption": "短い説明" を追加してよい
 - 商品名が特定できた場合: 上記に "product_name": "正式な商品名" を追加
 - labeled_kcal がある場合は kcal も必ず同じ値にする
-- 公式ページに重量(g)が無い high の場合は assumed_weight_g を含めない
+- 公式ページに重量(g)が無い high の場合でも、標準量を仮定したなら assumed_weight_g を含めてよい
 非食品の場合の形式: {"error":"not_food"}
 
 食品名: {$foodName}
@@ -1349,7 +1418,7 @@ PROMPT;
      * Claude のテキスト応答を解析する。
      * 非食品は 'not_food'、食品推定成功は配列、パース失敗は null を返す。
      *
-     * @return array{kcal: int, assumed_weight_g?: int, confidence: string, product_name?: string, source_url?: string}|'not_food'|null
+     * @return array{kcal: int, assumed_weight_g?: int, assumption?: string, confidence: string, product_name?: string, source_url?: string}|'not_food'|null
      */
     private function parseResponse(string $text): array|string|null
     {
@@ -1412,10 +1481,10 @@ PROMPT;
 
     /**
      * パース済み JSON を画面用の推定結果に正規化する。
-     * kcal・assumed_weight_g・confidence のバリデーションと型変換を行う。
+     * kcal・assumed_weight_g・assumption・confidence のバリデーションと型変換を行う。
      *
      * @param array<string, mixed> $json
-     * @return array{kcal: int, assumed_weight_g?: int, confidence: string, product_name?: string, source_url?: string}|null
+     * @return array{kcal: int, assumed_weight_g?: int, assumption?: string, confidence: string, product_name?: string, source_url?: string}|null
      */
     private function normalizeEstimate(array $json): ?array
     {
@@ -1451,6 +1520,11 @@ PROMPT;
             if ($assumedWeightG > 0) {
                 $normalized['assumed_weight_g'] = $assumedWeightG;
             }
+        }
+
+        $assumption = trim((string) ($json['assumption'] ?? ''));
+        if ($assumption !== '') {
+            $normalized['assumption'] = mb_substr($assumption, 0, 120);
         }
 
         $productName = trim((string) ($json['product_name'] ?? ''));
