@@ -216,14 +216,27 @@ TEXT;
                 }
             );
         } catch (Throwable $exception) {
-            $onEvent('error', ['message' => $exception->getMessage()]);
-            $onEvent('done', []);
+            if (!connection_aborted()) {
+                $onEvent('error', ['message' => $exception->getMessage()]);
+                $onEvent('done', []);
+            }
+            return;
+        }
+
+        $assistantText = trim($assistantText);
+        if ($assistantText === '') {
+            if (!connection_aborted()) {
+                $onEvent('error', ['message' => 'AIコーチからの応答を取得できませんでした。']);
+                $onEvent('done', []);
+            }
             return;
         }
 
         $assistantMessage = $this->chatMessageRepository->add('assistant', $assistantText);
-        $onEvent('assistant_message', $assistantMessage);
-        $onEvent('done', []);
+        if (!connection_aborted()) {
+            $onEvent('assistant_message', $assistantMessage);
+            $onEvent('done', []);
+        }
     }
 
     /**
@@ -262,6 +275,11 @@ TEXT;
         ];
 
         $text = $this->streamFromAnthropic($payload, $apiKey, $onDelta);
+
+        // クライアント切断による途中停止では空文字でも例外にしない
+        if ($text === '' && connection_aborted()) {
+            return '';
+        }
 
         if ($text === '') {
             throw new RuntimeException('AIコーチからの応答を取得できませんでした。');
@@ -649,6 +667,7 @@ TEXT;
         $fullText = '';
         $rawFallback = '';
         $streamError = null;
+        $clientAborted = false;
 
         curl_setopt_array($ch, [
             CURLOPT_POST => true,
@@ -669,8 +688,14 @@ TEXT;
                 &$fullText,
                 &$rawFallback,
                 &$streamError,
+                &$clientAborted,
                 $onDelta
             ): int {
+                if (connection_aborted()) {
+                    $clientAborted = true;
+                    return 0;
+                }
+
                 if ($streamError !== null) {
                     return strlen($chunk);
                 }
@@ -729,6 +754,11 @@ TEXT;
                     if ($onDelta !== null) {
                         $onDelta($text);
                     }
+
+                    if (connection_aborted()) {
+                        $clientAborted = true;
+                        return 0;
+                    }
                 }
 
                 return strlen($chunk);
@@ -739,6 +769,10 @@ TEXT;
         $curlError = curl_error($ch);
         $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
+
+        if ($clientAborted || connection_aborted()) {
+            return trim($fullText);
+        }
 
         if ($executed === false) {
             throw new RuntimeException(

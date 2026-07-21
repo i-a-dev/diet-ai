@@ -21,6 +21,7 @@ import { ORANGE } from "../../constants.ts";
 import {
   fetchChatMessages,
   fetchUserProfile,
+  isAbortError,
   sendChatMessageStream,
   type ChatMessage,
 } from "../../api/client.ts";
@@ -145,6 +146,8 @@ export function ChatScreen() {
   const streamingKeyRef = useRef<string | null>(null);
   const pendingDeltasRef = useRef<string[]>([]);
   const pendingCompleteRef = useRef<ChatMessage | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const stoppedByUserRef = useRef(false);
 
   isBootstrappingRef.current = isBootstrapping;
 
@@ -174,6 +177,62 @@ export function ChatScreen() {
     pendingDeltasRef.current = [];
     pendingCompleteRef.current = null;
   }, []);
+
+  const resetStreamingUi = useCallback(() => {
+    abortActiveStream();
+    streamingKeyRef.current = null;
+    setStreamingKey(null);
+    setIsLoading(false);
+  }, [abortActiveStream]);
+
+  const handleStop = useCallback(() => {
+    if (!isLoading && streamingKey === null) {
+      return;
+    }
+
+    stoppedByUserRef.current = true;
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
+
+    const handle = streamHandleRef.current;
+    if (handle !== null) {
+      const settledPartial = handle.stop();
+      if (!settledPartial) {
+        resetStreamingUi();
+      }
+      return;
+    }
+
+    // onReady 前に停止した場合: バッファ済み delta があれば履歴へ確定
+    const pendingText = pendingDeltasRef.current.join("");
+    pendingDeltasRef.current = [];
+    pendingCompleteRef.current = null;
+
+    if (pendingText !== "") {
+      const key = streamingKeyRef.current;
+      const now = new Date();
+      streamingKeyRef.current = null;
+      streamHandleRef.current = null;
+      isStreamingRef.current = false;
+      setStreamingKey(null);
+      setMessages((current) => [
+        ...current,
+        {
+          id: -Date.now(),
+          role: "assistant",
+          content: pendingText,
+          createdAt: now.toISOString(),
+          createdAtDate: now,
+          animateEnter: false,
+          clientKey: key ?? `assistant-stopped-${now.getTime()}`,
+        },
+      ]);
+      setIsLoading(false);
+      return;
+    }
+
+    resetStreamingUi();
+  }, [isLoading, streamingKey, resetStreamingUi]);
 
   const markUserInteracting = useCallback(() => {
     isUserInteractingRef.current = true;
@@ -462,6 +521,8 @@ export function ChatScreen() {
       if (programmaticClearFrameRef.current !== null) {
         window.cancelAnimationFrame(programmaticClearFrameRef.current);
       }
+      abortControllerRef.current?.abort();
+      abortControllerRef.current = null;
       abortActiveStream();
     };
   }, [abortActiveStream]);
@@ -533,6 +594,10 @@ export function ChatScreen() {
       userInterruptedFollowRef.current = false;
     }
 
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
+    stoppedByUserRef.current = false;
+
     isStreamingRef.current = true;
     isUserInteractingRef.current = false;
     streamingKeyRef.current = assistantClientKey;
@@ -547,36 +612,57 @@ export function ChatScreen() {
     scheduleScrollToBottom({ force: true });
 
     try {
-      await sendChatMessageStream(trimmed, {
-        onUserMessage: (userMessage) => {
-          initialMessageIdsRef.current?.add(userMessage.id);
-          setMessages((current) =>
-            current.map((message) =>
-              message.clientKey === userClientKey
-                ? {
-                    ...toDisplayMessage(userMessage),
-                    animateEnter: false,
-                    clientKey: userClientKey,
-                  }
-                : message,
-            ),
-          );
+      await sendChatMessageStream(
+        trimmed,
+        {
+          onUserMessage: (userMessage) => {
+            initialMessageIdsRef.current?.add(userMessage.id);
+            setMessages((current) =>
+              current.map((message) =>
+                message.clientKey === userClientKey
+                  ? {
+                      ...toDisplayMessage(userMessage),
+                      animateEnter: false,
+                      clientKey: userClientKey,
+                    }
+                  : message,
+              ),
+            );
+          },
+          onDelta: (text) => {
+            pushDeltaToStream(text);
+          },
+          onAssistantMessage: (assistantMessage) => {
+            if (stoppedByUserRef.current) {
+              return;
+            }
+            completeStream(assistantMessage);
+          },
+          onError: (message) => {
+            if (stoppedByUserRef.current) {
+              return;
+            }
+            abortActiveStream();
+            streamingKeyRef.current = null;
+            setStreamingKey(null);
+            setError(message);
+            setIsLoading(false);
+          },
         },
-        onDelta: (text) => {
-          pushDeltaToStream(text);
-        },
-        onAssistantMessage: (assistantMessage) => {
-          completeStream(assistantMessage);
-        },
-        onError: (message) => {
-          abortActiveStream();
-          streamingKeyRef.current = null;
-          setStreamingKey(null);
-          setError(message);
-          setIsLoading(false);
-        },
-      });
+        { signal: abortController.signal },
+      );
     } catch (sendError) {
+      if (stoppedByUserRef.current || isAbortError(sendError)) {
+        const userStopped = stoppedByUserRef.current;
+        stoppedByUserRef.current = false;
+        // ユーザー停止は handleStop 側で UI を戻す／部分確定する。
+        // ここでもう一度消すと、途中までの返信確定と競合する。
+        if (!userStopped && streamingKeyRef.current !== null) {
+          resetStreamingUi();
+        }
+        return;
+      }
+
       abortActiveStream();
       streamingKeyRef.current = null;
       setStreamingKey(null);
@@ -589,6 +675,10 @@ export function ChatScreen() {
           : "メッセージの送信に失敗しました";
       setError(message);
       setIsLoading(false);
+    } finally {
+      if (abortControllerRef.current === abortController) {
+        abortControllerRef.current = null;
+      }
     }
   };
 
@@ -693,30 +783,49 @@ export function ChatScreen() {
             maxHeight: 120,
           }}
         />
-        <button
-          type="button"
-          onClick={() => void handleSend()}
-          disabled={isLoading || isBootstrapping || input.trim() === ""}
-          style={{
-            background:
-              isLoading || isBootstrapping || input.trim() === ""
-                ? "#F0C9A0"
-                : ORANGE,
-            color: "#fff",
-            border: "none",
-            borderRadius: 14,
-            padding: "6px 14px",
-            fontSize: 12,
-            fontWeight: 600,
-            cursor:
-              isLoading || isBootstrapping || input.trim() === ""
-                ? "not-allowed"
-                : "pointer",
-            lineHeight: 1.4,
-          }}
-        >
-          送信
-        </button>
+        {isLoading || streamingKey !== null ? (
+          <button
+            type="button"
+            onClick={handleStop}
+            aria-label="返信を停止"
+            style={{
+              background: "#5A5A5A",
+              color: "#fff",
+              border: "none",
+              borderRadius: 14,
+              padding: "6px 14px",
+              fontSize: 12,
+              fontWeight: 600,
+              cursor: "pointer",
+              lineHeight: 1.4,
+            }}
+          >
+            停止
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={() => void handleSend()}
+            disabled={isBootstrapping || input.trim() === ""}
+            style={{
+              background:
+                isBootstrapping || input.trim() === "" ? "#F0C9A0" : ORANGE,
+              color: "#fff",
+              border: "none",
+              borderRadius: 14,
+              padding: "6px 14px",
+              fontSize: 12,
+              fontWeight: 600,
+              cursor:
+                isBootstrapping || input.trim() === ""
+                  ? "not-allowed"
+                  : "pointer",
+              lineHeight: 1.4,
+            }}
+          >
+            送信
+          </button>
+        )}
       </div>
     </div>
   );

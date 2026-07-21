@@ -16,6 +16,8 @@ export const MAX_REVEALS_PER_FRAME = 1;
 export type StreamRevealController = {
   push: (text: string) => void;
   complete: () => void;
+  /** 未表示分を即座に公開して完了扱いにする（停止ボタン用） */
+  flushAndComplete: () => void;
   cancel: () => void;
   getBuffer: () => string;
   getDisplayed: () => string;
@@ -192,6 +194,21 @@ export function createStreamReveal(
       } else {
         ensureLoop();
       }
+    },
+    flushAndComplete() {
+      if (cancelled || caughtUpNotified) {
+        return;
+      }
+      isComplete = true;
+      stopLoop();
+      if (displayedUtf16Length < buffer.length) {
+        displayedUtf16Length = buffer.length;
+        displayed = buffer;
+        pendingGraphemeCount = 0;
+        options.onUpdate(displayed);
+      }
+      caughtUpNotified = true;
+      options.onCaughtUp?.(buffer);
     },
     cancel() {
       cancelled = true;

@@ -25,6 +25,11 @@ import type { ChatMessage } from "../api/client.ts";
 export type StreamingAssistantHandle = {
   pushDelta: (text: string) => void;
   complete: (assistantMessage: ChatMessage) => void;
+  /**
+   * 受信済みテキストを即座に確定する。
+   * テキストがなければ false（親側でストリーム UI を消す）。
+   */
+  stop: () => boolean;
   cancel: () => void;
 };
 
@@ -145,6 +150,26 @@ export const StreamingAssistantMessage = memo(function StreamingAssistantMessage
           }
         }
         reveal.complete();
+      },
+      stop: () => {
+        if (settledRef.current) {
+          return true;
+        }
+        const buffered = reveal.getBuffer();
+        if (buffered === "") {
+          reveal.cancel();
+          return false;
+        }
+        if (!pendingMessageRef.current) {
+          pendingMessageRef.current = {
+            id: -Date.now(),
+            role: "assistant",
+            content: buffered,
+            createdAt: new Date().toISOString(),
+          };
+        }
+        reveal.flushAndComplete();
+        return true;
       },
       cancel: () => {
         reveal.cancel();

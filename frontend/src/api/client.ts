@@ -624,14 +624,28 @@ export interface ChatStreamHandlers {
   onError?: (message: string) => void;
 }
 
+export function isAbortError(error: unknown): boolean {
+  return (
+    (error instanceof DOMException && error.name === "AbortError") ||
+    (error instanceof Error && error.name === "AbortError")
+  );
+}
+
 /**
  * AIコーチ返信を SSE（Server-Sent Events）で受信する。
  * delta イベントの text は LLM から届いたトークンそのもの。
+ * signal で中断すると接続を切断し AbortError を投げる。
  */
 export async function sendChatMessageStream(
   content: string,
   handlers: ChatStreamHandlers,
+  options?: { signal?: AbortSignal },
 ): Promise<void> {
+  const signal = options?.signal;
+  if (signal?.aborted) {
+    throw new DOMException("Aborted", "AbortError");
+  }
+
   const token = getAuthToken();
   const response = await fetch(`${API_BASE}/chat/stream`, {
     method: "POST",
@@ -641,6 +655,7 @@ export async function sendChatMessageStream(
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
     body: JSON.stringify({ content }),
+    signal,
   });
 
   if (!response.ok) {
@@ -663,7 +678,7 @@ export async function sendChatMessageStream(
   let sawError = false;
 
   const dispatchEvent = (eventName: string, data: string) => {
-    if (!data) {
+    if (!data || signal?.aborted) {
       return;
     }
 
@@ -702,50 +717,59 @@ export async function sendChatMessageStream(
     }
   };
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) {
-      break;
-    }
-
-    buffer += decoder.decode(value, { stream: true });
-
-    // SSE は空行でイベント区切り
+  try {
     while (true) {
-      const separatorIndex = buffer.indexOf("\n\n");
-      if (separatorIndex === -1) {
+      if (signal?.aborted) {
+        throw new DOMException("Aborted", "AbortError");
+      }
+
+      const { done, value } = await reader.read();
+      if (done) {
         break;
       }
 
-      const rawEvent = buffer.slice(0, separatorIndex);
-      buffer = buffer.slice(separatorIndex + 2);
+      buffer += decoder.decode(value, { stream: true });
 
+      // SSE は空行でイベント区切り
+      while (true) {
+        const separatorIndex = buffer.indexOf("\n\n");
+        if (separatorIndex === -1) {
+          break;
+        }
+
+        const rawEvent = buffer.slice(0, separatorIndex);
+        buffer = buffer.slice(separatorIndex + 2);
+
+        let eventName = "message";
+        const dataLines: string[] = [];
+
+        for (const line of rawEvent.split("\n")) {
+          if (line.startsWith("event:")) {
+            eventName = line.slice(6).trim();
+          } else if (line.startsWith("data:")) {
+            dataLines.push(line.slice(5).trimStart());
+          }
+        }
+
+        dispatchEvent(eventName, dataLines.join("\n"));
+      }
+    }
+
+    if (buffer.trim() !== "") {
       let eventName = "message";
       const dataLines: string[] = [];
-
-      for (const line of rawEvent.split("\n")) {
+      for (const line of buffer.split("\n")) {
         if (line.startsWith("event:")) {
           eventName = line.slice(6).trim();
         } else if (line.startsWith("data:")) {
           dataLines.push(line.slice(5).trimStart());
         }
       }
-
       dispatchEvent(eventName, dataLines.join("\n"));
     }
-  }
-
-  if (buffer.trim() !== "") {
-    let eventName = "message";
-    const dataLines: string[] = [];
-    for (const line of buffer.split("\n")) {
-      if (line.startsWith("event:")) {
-        eventName = line.slice(6).trim();
-      } else if (line.startsWith("data:")) {
-        dataLines.push(line.slice(5).trimStart());
-      }
-    }
-    dispatchEvent(eventName, dataLines.join("\n"));
+  } catch (error) {
+    await reader.cancel().catch(() => undefined);
+    throw error;
   }
 
   if (sawError) {

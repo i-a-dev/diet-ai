@@ -494,7 +494,8 @@ if ($requestMethod === 'POST' && $requestPath === '/api/chat/stream') {
     if (function_exists('set_time_limit')) {
         @set_time_limit(0);
     }
-    ignore_user_abort(true);
+    // クライアントが停止（切断）したら生成も止める
+    ignore_user_abort(false);
 
     sse_headers();
 
