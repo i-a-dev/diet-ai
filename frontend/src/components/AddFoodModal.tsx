@@ -876,6 +876,10 @@ export function AddFoodModal({
         <FoodResultPreview
           result={selectedResult}
           mode="register"
+          onEdit={() => {
+            setShowManualEdit(true);
+            setManualKcal(String(selectedResult.calories));
+          }}
           onAdd={() => void saveItem(selectedResult)}
           onReestimateWithAi={
             showReestimateWithAi

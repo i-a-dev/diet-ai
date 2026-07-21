@@ -1,8 +1,7 @@
 import type { FoodSearchResult } from "../types/foodSearch.ts";
 import { FoodEstimateCard } from "./FoodEstimateCard.tsx";
-import { FoodSearchResultCard } from "./FoodSearchResultCard.tsx";
 import {
-  shouldUseEstimateCard,
+  getFoodEstimateCardVariant,
   type FoodResultDisplayMode,
 } from "../utils/foodResultDisplay.ts";
 
@@ -27,29 +26,15 @@ export function FoodResultPreview({
   onSearchWeb,
   onReestimateWithAi,
 }: FoodResultPreviewProps) {
-  if (shouldUseEstimateCard(result, mode)) {
-    return (
-      <FoodEstimateCard
-        result={result}
-        variant={
-          mode === "history" ? "history" : mode === "detail" ? "detail" : "estimate"
-        }
-        caloriesEdited={caloriesEdited}
-        onEdit={onEdit ?? (() => {})}
-        onAdd={onAdd ?? (() => {})}
-        onSearchWeb={onSearchWeb}
-      />
-    );
-  }
-
   return (
-    <FoodSearchResultCard
+    <FoodEstimateCard
       result={result}
-      mode={mode === "register" ? "register" : "detail"}
-      onAdd={mode === "register" ? onAdd : undefined}
-      onReestimateWithAi={
-        mode === "register" ? onReestimateWithAi : undefined
-      }
+      variant={getFoodEstimateCardVariant(result, mode)}
+      caloriesEdited={caloriesEdited}
+      onEdit={onEdit ?? (() => {})}
+      onAdd={onAdd ?? (() => {})}
+      onSearchWeb={onSearchWeb}
+      onReestimateWithAi={onReestimateWithAi}
     />
   );
 }

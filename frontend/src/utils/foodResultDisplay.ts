@@ -6,15 +6,20 @@ export function isExternalApiFoodSource(source: FoodSource | string): boolean {
   return source === "fatsecret" || source === "open_food_facts";
 }
 
-export function shouldUseEstimateCard(
+export type FoodEstimateCardVariant = "estimate" | "history" | "detail" | "found";
+
+export function getFoodEstimateCardVariant(
   result: FoodSearchResult,
   mode: FoodResultDisplayMode,
-): boolean {
-  // 詳細・履歴は source に関わらず推定カード（手入力 / 登録）を出す。
-  // 履歴で FatSecret 等だけ FoodSearchResultCard(detail) に落ちるとボタンが消えるため。
-  if (mode === "detail" || mode === "history") {
-    return true;
+): FoodEstimateCardVariant {
+  if (mode === "history") {
+    return "history";
   }
-
-  return result.source === "claude_estimate";
+  if (mode === "detail") {
+    return "detail";
+  }
+  if (result.source === "claude_estimate") {
+    return "estimate";
+  }
+  return "found";
 }

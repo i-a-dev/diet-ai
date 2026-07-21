@@ -9,7 +9,8 @@ interface FoodEstimateCardProps {
   onEdit: () => void;
   onAdd: () => void;
   onSearchWeb?: () => void;
-  variant?: "estimate" | "history" | "detail";
+  onReestimateWithAi?: () => void;
+  variant?: "estimate" | "history" | "detail" | "found";
   caloriesEdited?: boolean;
 }
 
@@ -18,11 +19,13 @@ export function FoodEstimateCard({
   onEdit,
   onAdd,
   onSearchWeb,
+  onReestimateWithAi,
   variant = "estimate",
   caloriesEdited,
 }: FoodEstimateCardProps) {
   const isHistory = variant === "history";
   const isDetail = variant === "detail";
+  const isFound = variant === "found";
   const isEdited = parseCaloriesEdited(caloriesEdited ?? result.caloriesEdited);
   const showActions = !isDetail;
   const databaseSourceLabel =
@@ -30,7 +33,9 @@ export function FoodEstimateCard({
       ? "データ提供：FatSecret"
       : result.source === "open_food_facts"
         ? "データ提供：Open Food Facts"
-        : null;
+        : result.source === "alias_db"
+          ? "よく選ばれている候補"
+          : null;
 
   return (
     <div style={cardStyle}>
@@ -38,12 +43,19 @@ export function FoodEstimateCard({
         <div style={titleStyle}>
           {isHistory
             ? "過去の記録を選択しました"
-            : "AIがカロリーを推定しました"}
+            : isFound
+              ? "候補が見つかりました"
+              : "AIがカロリーを推定しました"}
         </div>
+      )}
+      {!isDetail && databaseSourceLabel && isFound && (
+        <div style={databaseSourceStyle}>{databaseSourceLabel}</div>
       )}
       {!isDetail && (
         <div style={badgeRowStyle}>
-          <span style={badgeStyle}>{isHistory ? "履歴" : "推定"}</span>
+          <span style={badgeStyle}>
+            {isHistory ? "履歴" : isFound ? "候補" : "推定"}
+          </span>
         </div>
       )}
       {isDetail && databaseSourceLabel && (
@@ -80,6 +92,15 @@ export function FoodEstimateCard({
               style={webSearchButtonStyle}
             >
               AI web検索を行う
+            </button>
+          )}
+          {variant === "found" && onReestimateWithAi && (
+            <button
+              type="button"
+              onClick={onReestimateWithAi}
+              style={reestimateButtonStyle}
+            >
+              AI推定で検索し直す
             </button>
           )}
         </>
@@ -181,4 +202,18 @@ const webSearchButtonStyle: CSSProperties = {
   fontSize: 13,
   padding: "10px 8px",
   cursor: "pointer",
+};
+
+const reestimateButtonStyle: CSSProperties = {
+  display: "block",
+  width: "100%",
+  marginTop: 8,
+  border: "none",
+  background: "transparent",
+  color: "#6B7280",
+  fontWeight: 500,
+  fontSize: 12,
+  padding: "4px 0 0",
+  cursor: "pointer",
+  textAlign: "center",
 };
