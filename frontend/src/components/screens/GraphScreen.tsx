@@ -5,6 +5,7 @@ import {
   useRef,
   useState,
   type ReactNode,
+  type RefObject,
 } from "react";
 import {
   Footprints,
@@ -42,7 +43,6 @@ const DEFAULT_STEP_CHART_MAX = 12000;
 const CHART_GRID_COLOR = "#ECECEC";
 const WEIGHT_AXIS_STEP_THRESHOLD_KG = 15;
 const DATE_LABEL_HALF_WIDTH = 14;
-const LATEST_POINT_REFERENCE_VISIBLE_DAYS = 7;
 const PERIOD_DAY_WINDOWS = [7, 30, 90, 180, 365, 1095] as const;
 const DEFAULT_PERIOD_TAB = PERIOD_TABS.indexOf("月");
 /** 3ヶ月（90日）以上の期間では体重の丸マーカーを非表示にする */
@@ -79,26 +79,17 @@ function toWeightTimelineBundle(
 function getTimelinePlotMetrics(clientWidth: number, visibleDays: number) {
   const safeClientWidth = Math.max(1, clientWidth);
   const safeVisibleDays = Math.max(1, visibleDays);
-  const provisionalSlotWidth = safeClientWidth / safeVisibleDays;
+  const slotWidth = safeClientWidth / safeVisibleDays;
   const leftInset =
-    provisionalSlotWidth / 2 >= DATE_LABEL_HALF_WIDTH
+    slotWidth / 2 >= DATE_LABEL_HALF_WIDTH
       ? 0
-      : Math.ceil(DATE_LABEL_HALF_WIDTH - provisionalSlotWidth / 2);
-  const contentWidth = Math.max(1, safeClientWidth - leftInset);
-  const slotWidth = contentWidth / safeVisibleDays;
+      : Math.ceil(DATE_LABEL_HALF_WIDTH - slotWidth / 2);
 
   return {
     leftInset,
-    contentWidth,
+    contentWidth: safeClientWidth,
     slotWidth,
   };
-}
-
-function getLatestPointAnchorX(contentWidth: number) {
-  return (
-    contentWidth -
-    contentWidth / (2 * LATEST_POINT_REFERENCE_VISIBLE_DAYS)
-  );
 }
 
 function getTimelineLatestAlignment(
@@ -108,47 +99,100 @@ function getTimelineLatestAlignment(
   scrollFloorIndex: number,
 ) {
   const metrics = getTimelinePlotMetrics(clientWidth, visibleDays);
-  const weekMetrics = getTimelinePlotMetrics(
-    clientWidth,
-    LATEST_POINT_REFERENCE_VISIBLE_DAYS,
-  );
-  const screenAnchorX = getLatestPointAnchorX(weekMetrics.contentWidth);
   const { leftInset, slotWidth } = metrics;
 
   const leadingPadSlots = Math.max(0, visibleDays - timelineLength);
   const dataSlotCount = leadingPadSlots + timelineLength;
-  const lastCenterChart =
-    timelineLength > 0
-      ? (dataSlotCount - 1) * slotWidth + slotWidth / 2
-      : 0;
+  const periodStartSlot = Math.max(0, dataSlotCount - visibleDays);
 
-  const rawScrollLeft = leftInset + lastCenterChart - screenAnchorX;
-  // 表示日数よりデータが多いときだけスクロール下限を適用（週タブ相当）。
-  // 1年・3年のようにデータ長≒表示幅のときは下限をかけると最新点のアンカー位置と衝突する。
   const minScrollLeft =
     timelineLength > visibleDays
       ? Math.max(0, scrollFloorIndex * slotWidth)
       : 0;
-  const targetScrollLeft = Math.max(minScrollLeft, rawScrollLeft);
+  const targetScrollLeft = Math.max(
+    minScrollLeft,
+    periodStartSlot * slotWidth,
+  );
 
   const minChartSlotsForScroll = Math.ceil(
     (targetScrollLeft + clientWidth) / slotWidth,
   );
-  const chartSlotCount = Math.max(
-    visibleDays,
-    dataSlotCount,
-    minChartSlotsForScroll,
-  );
+  const chartSlotCount = Math.max(dataSlotCount, minChartSlotsForScroll);
 
   return {
     leftInset,
     slotWidth,
     leadingPadSlots,
     chartSlotCount,
-    screenAnchorX,
+    periodStartSlot,
     targetScrollLeft,
     minScrollLeft,
   };
+}
+
+function isTimelineAtInitialScroll(
+  scrollLeft: number,
+  targetScrollLeft: number,
+) {
+  return Math.abs(scrollLeft - targetScrollLeft) < 1;
+}
+
+function getInitialPeriodGridOffsets(
+  visibleDays: number,
+  dateLabelStep: number,
+) {
+  const intervalCount = Math.max(1, Math.round(visibleDays / dateLabelStep));
+  return Array.from({ length: intervalCount + 1 }, (_, index) =>
+    (index * visibleDays) / intervalCount,
+  );
+}
+
+function buildInitialPeriodVerticalLines(
+  periodStartSlot: number,
+  visibleDays: number,
+  slotWidth: number,
+  dateLabelStep: number,
+) {
+  return getInitialPeriodGridOffsets(visibleDays, dateLabelStep).map(
+    (offset) => (periodStartSlot + offset) * slotWidth,
+  );
+}
+
+type TimelineDateLabel = {
+  key: string;
+  x: number;
+  text: string;
+};
+
+function buildInitialPeriodDateLabels(
+  points: { label: string; date: string }[],
+  leadingPadSlots: number,
+  periodStartSlot: number,
+  visibleDays: number,
+  slotWidth: number,
+  dateLabelStep: number,
+  useFullDateLabel: boolean,
+): TimelineDateLabel[] {
+  const offsets = getInitialPeriodGridOffsets(visibleDays, dateLabelStep);
+  const labels: TimelineDateLabel[] = [];
+
+  for (let index = 1; index < offsets.length - 1; index += 1) {
+    const offset = offsets[index];
+    const dataIndex = Math.min(
+      points.length - 1,
+      Math.max(0, Math.round(periodStartSlot - leadingPadSlots + offset)),
+    );
+    const point = points[dataIndex];
+    labels.push({
+      key: `${point.date}-${index}`,
+      x: (periodStartSlot + offset) * slotWidth,
+      text: useFullDateLabel
+        ? formatFullDateLabel(point.date)
+        : point.label,
+    });
+  }
+
+  return labels;
 }
 
 function clampTimelineScrollLeft(
@@ -239,6 +283,55 @@ function shouldShowTimelineDateLabel(
   dateLabelStep: number,
 ) {
   return alignsWithDateLabelPhase(index, dateLabelPhase, dateLabelStep);
+}
+
+function getTimelineDateLabelCenterX(
+  index: number,
+  leadingPadSlots: number,
+  slotWidth: number,
+) {
+  return leadingPadSlots * slotWidth + index * slotWidth + slotWidth / 2;
+}
+
+function getLeftBorderOverlappingDateLabelIndex(
+  pointCount: number,
+  scrollLeft: number,
+  leftInset: number,
+  leadingPadSlots: number,
+  slotWidth: number,
+  dateLabelPhase: number,
+  dateLabelStep: number,
+) {
+  let leftmostOverlappingIndex: number | null = null;
+  let leftmostCenterX = Infinity;
+
+  for (let index = 0; index < pointCount; index += 1) {
+    if (!shouldShowTimelineDateLabel(index, dateLabelPhase, dateLabelStep)) {
+      continue;
+    }
+
+    const centerX = getTimelineDateLabelCenterX(
+      index,
+      leadingPadSlots,
+      slotWidth,
+    );
+    const offsetFromViewportLeft = leftInset + centerX - scrollLeft;
+
+    // 表示領域の左端付近だけを対象にする（画面外の古い日付は除外）
+    if (offsetFromViewportLeft > DATE_LABEL_HALF_WIDTH) {
+      continue;
+    }
+    if (offsetFromViewportLeft < -DATE_LABEL_HALF_WIDTH) {
+      continue;
+    }
+
+    if (centerX < leftmostCenterX) {
+      leftmostCenterX = centerX;
+      leftmostOverlappingIndex = index;
+    }
+  }
+
+  return leftmostOverlappingIndex;
 }
 
 /**
@@ -680,6 +773,129 @@ function ChartGrid({
   );
 }
 
+function TimelineDateAxis({
+  chartWidth,
+  dateScrollRef,
+  leftInset,
+  isAtInitialPeriodView,
+  points,
+  leadingPadSlots,
+  periodStartSlot,
+  visibleWindowDays,
+  effectiveVisibleDays,
+  slotWidth,
+  dateLabelPhase,
+  dateLabelStep,
+  hiddenLeftDateLabelIndex,
+}: {
+  chartWidth: number;
+  dateScrollRef: RefObject<HTMLDivElement | null>;
+  leftInset: number;
+  isAtInitialPeriodView: boolean;
+  points: { label: string; date: string }[];
+  leadingPadSlots: number;
+  periodStartSlot: number;
+  visibleWindowDays: number;
+  effectiveVisibleDays: number;
+  slotWidth: number;
+  dateLabelPhase: number;
+  dateLabelStep: number;
+  hiddenLeftDateLabelIndex: number | null;
+}) {
+  const useFullDateLabel = visibleWindowDays > 365;
+  const initialLabels = useMemo(
+    () =>
+      buildInitialPeriodDateLabels(
+        points,
+        leadingPadSlots,
+        periodStartSlot,
+        effectiveVisibleDays,
+        slotWidth,
+        dateLabelStep,
+        useFullDateLabel,
+      ),
+    [
+      dateLabelStep,
+      effectiveVisibleDays,
+      leadingPadSlots,
+      periodStartSlot,
+      points,
+      slotWidth,
+      useFullDateLabel,
+    ],
+  );
+  const shouldShowDateLabel = (index: number) =>
+    shouldShowTimelineDateLabel(index, dateLabelPhase, dateLabelStep) &&
+    index !== hiddenLeftDateLabelIndex;
+
+  return (
+    <div
+      ref={dateScrollRef as RefObject<HTMLDivElement>}
+      style={{
+        flex: 1,
+        minWidth: 0,
+        overflowX: "auto",
+        overflowY: "hidden",
+        scrollbarWidth: "none",
+        pointerEvents: "none",
+        paddingLeft: isAtInitialPeriodView ? 0 : leftInset,
+        boxSizing: "border-box",
+      }}
+    >
+      <div
+        style={{
+          width: chartWidth,
+          position: "relative",
+          height: 20,
+        }}
+      >
+        {isAtInitialPeriodView
+          ? initialLabels.map((label) => (
+              <span
+                key={label.key}
+                style={{
+                  position: "absolute",
+                  left: label.x,
+                  transform: "translateX(-50%)",
+                  fontSize: 11,
+                  color: "#888",
+                  fontWeight: 500,
+                  lineHeight: "20px",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {label.text}
+              </span>
+            ))
+          : points.map((point, index) => (
+              <span
+                key={`${point.date}-${index}`}
+                style={{
+                  position: "absolute",
+                  left:
+                    leadingPadSlots * slotWidth +
+                    index * slotWidth +
+                    slotWidth / 2,
+                  transform: "translateX(-50%)",
+                  fontSize: 11,
+                  color: "#888",
+                  fontWeight: 500,
+                  lineHeight: "20px",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {shouldShowDateLabel(index)
+                  ? useFullDateLabel
+                    ? formatFullDateLabel(point.date)
+                    : point.label
+                  : ""}
+              </span>
+            ))}
+      </div>
+    </div>
+  );
+}
+
 function BarGraphCard({
   icon,
   label,
@@ -706,6 +922,8 @@ function BarGraphCard({
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const dateScrollRef = useRef<HTMLDivElement | null>(null);
   const [viewport, setViewport] = useState({ startIndex: 0, endIndex: 0 });
+  const [scrollLeft, setScrollLeft] = useState(0);
+  const [isAtInitialPeriodView, setIsAtInitialPeriodView] = useState(true);
   const [dateLabelPhase, setDateLabelPhase] = useState(0);
   const [viewportWidth, setViewportWidth] = useState(CHART_PLOT_WIDTH);
   const scrollFloorIndex = useMemo(() => {
@@ -723,7 +941,7 @@ function BarGraphCard({
       ),
     [effectiveVisibleDays, points.length, scrollFloorIndex, viewportWidth],
   );
-  const { leftInset, slotWidth, leadingPadSlots, chartSlotCount } =
+  const { leftInset, slotWidth, leadingPadSlots, chartSlotCount, periodStartSlot } =
     latestAlignment;
   const chartWidth = chartSlotCount * slotWidth;
   const dateLabelStep = useMemo(
@@ -772,6 +990,8 @@ function BarGraphCard({
     if (dateScrollRef.current) {
       dateScrollRef.current.scrollLeft = nextScrollLeft;
     }
+    setScrollLeft(nextScrollLeft);
+    setIsAtInitialPeriodView(true);
     setViewport({
       startIndex,
       endIndex: Math.min(points.length - 1, startIndex + visibleCount - 1),
@@ -783,6 +1003,7 @@ function BarGraphCard({
     rightLabelOffset,
     scrollFloorIndex,
     leadingPadSlots,
+    visibleWindowDays,
   ]);
 
   useEffect(() => {
@@ -819,6 +1040,13 @@ function BarGraphCard({
       const endIndex = Math.min(
         points.length - 1,
         startIndex + visibleCount - 1,
+      );
+      setScrollLeft(clampedScrollLeft);
+      setIsAtInitialPeriodView(
+        isTimelineAtInitialScroll(
+          clampedScrollLeft,
+          alignment.targetScrollLeft,
+        ),
       );
       setViewport({ startIndex, endIndex });
       if (dateScrollRef.current) {
@@ -875,15 +1103,44 @@ function BarGraphCard({
     return Math.round(total / visiblePoints.length);
   }, [points, viewport.endIndex, viewport.startIndex]);
 
-  const shouldShowDateLabel = (index: number) =>
-    shouldShowTimelineDateLabel(index, dateLabelPhase, dateLabelStep);
-  const verticalLines = buildTimelineVerticalLines(
-    chartSlotCount,
-    leadingPadSlots,
-    dateLabelPhase,
-    dateLabelStep,
-    slotWidth,
+  const hiddenLeftDateLabelIndex = useMemo(
+    () =>
+      isAtInitialPeriodView
+        ? null
+        : getLeftBorderOverlappingDateLabelIndex(
+            points.length,
+            scrollLeft,
+            leftInset,
+            leadingPadSlots,
+            slotWidth,
+            dateLabelPhase,
+            dateLabelStep,
+          ),
+    [
+      dateLabelPhase,
+      dateLabelStep,
+      isAtInitialPeriodView,
+      leadingPadSlots,
+      leftInset,
+      points.length,
+      scrollLeft,
+      slotWidth,
+    ],
   );
+  const verticalLines = isAtInitialPeriodView
+    ? buildInitialPeriodVerticalLines(
+        periodStartSlot,
+        effectiveVisibleDays,
+        slotWidth,
+        dateLabelStep,
+      )
+    : buildTimelineVerticalLines(
+        chartSlotCount,
+        leadingPadSlots,
+        dateLabelPhase,
+        dateLabelStep,
+        slotWidth,
+      );
 
   return (
     <CardShell>
@@ -949,7 +1206,7 @@ function BarGraphCard({
                 border: `1px solid ${CHART_GRID_COLOR}`,
                 overscrollBehaviorX: "contain",
                 overscrollBehaviorY: "contain",
-                paddingLeft: leftInset,
+                paddingLeft: isAtInitialPeriodView ? 0 : leftInset,
                 boxSizing: "border-box",
               }}
             >
@@ -1008,52 +1265,21 @@ function BarGraphCard({
             style={{ width: Y_AXIS_WIDTH, flexShrink: 0 }}
             aria-hidden="true"
           />
-          <div
-            ref={dateScrollRef}
-            style={{
-              flex: 1,
-              minWidth: 0,
-              overflowX: "auto",
-              overflowY: "hidden",
-              scrollbarWidth: "none",
-              pointerEvents: "none",
-              paddingLeft: leftInset,
-              boxSizing: "border-box",
-            }}
-          >
-            <div
-              style={{
-                width: chartWidth,
-                position: "relative",
-                height: 20,
-              }}
-            >
-              {points.map((point, index) => (
-                <span
-                  key={`${point.date}-${index}`}
-                  style={{
-                    position: "absolute",
-                    left:
-                      leadingPadSlots * slotWidth +
-                      index * slotWidth +
-                      slotWidth / 2,
-                    transform: "translateX(-50%)",
-                    fontSize: 11,
-                    color: "#888",
-                    fontWeight: 500,
-                    lineHeight: "20px",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {shouldShowDateLabel(index)
-                    ? visibleWindowDays > 365
-                      ? formatFullDateLabel(point.date)
-                      : point.label
-                    : ""}
-                </span>
-              ))}
-            </div>
-          </div>
+          <TimelineDateAxis
+            chartWidth={chartWidth}
+            dateScrollRef={dateScrollRef}
+            leftInset={leftInset}
+            isAtInitialPeriodView={isAtInitialPeriodView}
+            points={points}
+            leadingPadSlots={leadingPadSlots}
+            periodStartSlot={periodStartSlot}
+            visibleWindowDays={visibleWindowDays}
+            effectiveVisibleDays={effectiveVisibleDays}
+            slotWidth={slotWidth}
+            dateLabelPhase={dateLabelPhase}
+            dateLabelStep={dateLabelStep}
+            hiddenLeftDateLabelIndex={hiddenLeftDateLabelIndex}
+          />
         </div>
       </div>
 
@@ -1082,6 +1308,8 @@ function WeightGraphCard({
   const dateScrollRef = useRef<HTMLDivElement | null>(null);
   const pendingCommitRef = useRef(false);
   const [viewport, setViewport] = useState({ startIndex: 0, endIndex: 0 });
+  const [scrollLeft, setScrollLeft] = useState(0);
+  const [isAtInitialPeriodView, setIsAtInitialPeriodView] = useState(true);
   const [dateLabelPhase, setDateLabelPhase] = useState(0);
   const [viewportWidth, setViewportWidth] = useState(CHART_PLOT_WIDTH);
 
@@ -1122,7 +1350,7 @@ function WeightGraphCard({
       viewportWidth,
     ],
   );
-  const { leftInset, slotWidth, leadingPadSlots, chartSlotCount } =
+  const { leftInset, slotWidth, leadingPadSlots, chartSlotCount, periodStartSlot } =
     latestAlignment;
   const dateLabelStep = useMemo(
     () => getTimelineDateLabelStep(visibleWindowDays, effectiveVisibleDays),
@@ -1227,6 +1455,8 @@ function WeightGraphCard({
     if (dateScrollRef.current) {
       dateScrollRef.current.scrollLeft = nextScrollLeft;
     }
+    setScrollLeft(nextScrollLeft);
+    setIsAtInitialPeriodView(true);
     setViewport({
       startIndex,
       endIndex: Math.min(timelinePoints.length - 1, startIndex + visibleCount - 1),
@@ -1254,6 +1484,7 @@ function WeightGraphCard({
     scrollFloorIndex,
     timelinePoints,
     leadingPadSlots,
+    visibleWindowDays,
   ]);
 
   useEffect(() => {
@@ -1290,6 +1521,13 @@ function WeightGraphCard({
       const endIndex = Math.min(
         timelinePoints.length - 1,
         startIndex + visibleCount - 1,
+      );
+      setScrollLeft(clampedScrollLeft);
+      setIsAtInitialPeriodView(
+        isTimelineAtInitialScroll(
+          clampedScrollLeft,
+          alignment.targetScrollLeft,
+        ),
       );
       setViewport({ startIndex, endIndex });
       if (dateScrollRef.current) {
@@ -1377,6 +1615,31 @@ function WeightGraphCard({
     viewport.startIndex,
   ]);
 
+  const hiddenLeftDateLabelIndex = useMemo(
+    () =>
+      isAtInitialPeriodView
+        ? null
+        : getLeftBorderOverlappingDateLabelIndex(
+            timelinePoints.length,
+            scrollLeft,
+            leftInset,
+            leadingPadSlots,
+            slotWidth,
+            dateLabelPhase,
+            dateLabelStep,
+          ),
+    [
+      dateLabelPhase,
+      dateLabelStep,
+      isAtInitialPeriodView,
+      leadingPadSlots,
+      leftInset,
+      scrollLeft,
+      slotWidth,
+      timelinePoints.length,
+    ],
+  );
+
   if (!chart || !timelineBounds) {
     return (
       <CardShell>
@@ -1404,15 +1667,20 @@ function WeightGraphCard({
     );
   }
 
-  const shouldShowDateLabel = (index: number) =>
-    shouldShowTimelineDateLabel(index, dateLabelPhase, dateLabelStep);
-  const verticalLines = buildTimelineVerticalLines(
-    chartSlotCount,
-    leadingPadSlots,
-    dateLabelPhase,
-    dateLabelStep,
-    slotWidth,
-  );
+  const verticalLines = isAtInitialPeriodView
+    ? buildInitialPeriodVerticalLines(
+        periodStartSlot,
+        effectiveVisibleDays,
+        slotWidth,
+        dateLabelStep,
+      )
+    : buildTimelineVerticalLines(
+        chartSlotCount,
+        leadingPadSlots,
+        dateLabelPhase,
+        dateLabelStep,
+        slotWidth,
+      );
 
   return (
     <CardShell>
@@ -1504,7 +1772,7 @@ function WeightGraphCard({
                 border: `1px solid ${CHART_GRID_COLOR}`,
                 overscrollBehaviorX: "contain",
                 overscrollBehaviorY: "contain",
-                paddingLeft: leftInset,
+                paddingLeft: isAtInitialPeriodView ? 0 : leftInset,
                 boxSizing: "border-box",
               }}
             >
@@ -1586,52 +1854,21 @@ function WeightGraphCard({
             style={{ width: Y_AXIS_WIDTH, flexShrink: 0 }}
             aria-hidden="true"
           />
-          <div
-            ref={dateScrollRef}
-            style={{
-              flex: 1,
-              minWidth: 0,
-              overflowX: "auto",
-              overflowY: "hidden",
-              scrollbarWidth: "none",
-              pointerEvents: "none",
-              paddingLeft: leftInset,
-              boxSizing: "border-box",
-            }}
-          >
-            <div
-              style={{
-                width: chart.chartWidth,
-                position: "relative",
-                height: 20,
-              }}
-            >
-              {timelinePoints.map((point, index) => (
-                <span
-                  key={`${point.date}-${index}`}
-                  style={{
-                    position: "absolute",
-                    left:
-                      leadingPadSlots * slotWidth +
-                      index * slotWidth +
-                      slotWidth / 2,
-                    transform: "translateX(-50%)",
-                    fontSize: 11,
-                    color: "#888",
-                    fontWeight: 500,
-                    lineHeight: "20px",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {shouldShowDateLabel(index)
-                    ? visibleWindowDays > 365
-                      ? formatFullDateLabel(point.date)
-                      : point.label
-                    : ""}
-                </span>
-              ))}
-            </div>
-          </div>
+          <TimelineDateAxis
+            chartWidth={chart.chartWidth}
+            dateScrollRef={dateScrollRef}
+            leftInset={leftInset}
+            isAtInitialPeriodView={isAtInitialPeriodView}
+            points={timelinePoints}
+            leadingPadSlots={leadingPadSlots}
+            periodStartSlot={periodStartSlot}
+            visibleWindowDays={visibleWindowDays}
+            effectiveVisibleDays={effectiveVisibleDays}
+            slotWidth={slotWidth}
+            dateLabelPhase={dateLabelPhase}
+            dateLabelStep={dateLabelStep}
+            hiddenLeftDateLabelIndex={hiddenLeftDateLabelIndex}
+          />
         </div>
       </div>
 
