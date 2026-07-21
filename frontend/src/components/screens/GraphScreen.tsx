@@ -648,9 +648,13 @@ function ChartGrid({
   verticalLines: number[];
   plotWidth?: number;
 }) {
+  const innerHorizontalTicks = horizontalTicks.filter(
+    (y) => y > 0 && y < CHART_HEIGHT,
+  );
+
   return (
     <>
-      {horizontalTicks.map((y) => (
+      {innerHorizontalTicks.map((y) => (
         <line
           key={`h-${y}`}
           x1="0"
@@ -942,6 +946,7 @@ function BarGraphCard({
                 WebkitOverflowScrolling: "touch",
                 scrollbarWidth: "thin",
                 position: "relative",
+                border: `1px solid ${CHART_GRID_COLOR}`,
                 overscrollBehaviorX: "contain",
                 overscrollBehaviorY: "contain",
                 paddingLeft: leftInset,
@@ -1496,6 +1501,7 @@ function WeightGraphCard({
                 WebkitOverflowScrolling: "touch",
                 scrollbarWidth: "thin",
                 position: "relative",
+                border: `1px solid ${CHART_GRID_COLOR}`,
                 overscrollBehaviorX: "contain",
                 overscrollBehaviorY: "contain",
                 paddingLeft: leftInset,
