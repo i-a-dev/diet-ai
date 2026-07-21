@@ -44,6 +44,7 @@ const WEIGHT_AXIS_STEP_THRESHOLD_KG = 15;
 const DATE_LABEL_HALF_WIDTH = 14;
 const LATEST_POINT_REFERENCE_VISIBLE_DAYS = 7;
 const PERIOD_DAY_WINDOWS = [7, 30, 90, 180, 365, 1095] as const;
+const DEFAULT_PERIOD_TAB = PERIOD_TABS.indexOf("月");
 /** 3ヶ月（90日）以上の期間では体重の丸マーカーを非表示にする */
 const WEIGHT_MARKER_MAX_VISIBLE_DAYS = 90;
 const WEIGHT_SCROLL_FLOOR_YMD = "2026-01-01";
@@ -385,7 +386,7 @@ interface GraphScreenProps {
 
 export function GraphScreen({ profileRefreshKey = 0 }: GraphScreenProps) {
   const [metricTab, setMetricTab] = useState(0);
-  const [periodTab, setPeriodTab] = useState(0);
+  const [periodTab, setPeriodTab] = useState(DEFAULT_PERIOD_TAB);
   const [displayedTimeline, setDisplayedTimeline] =
     useState<WeightTimelineBundle | null>(null);
   const [pendingTimeline, setPendingTimeline] =
