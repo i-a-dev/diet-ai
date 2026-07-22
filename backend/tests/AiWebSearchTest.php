@@ -172,35 +172,42 @@ $nashChiliPlan = FoodWebSearchPlan::fromArray([
 $nashChiliQueries = $builder->build($nashChiliPlan, 'ナッシュ たらと旨辛のチリソース');
 assertTrue(count($nashChiliQueries) >= 1, 'nash chili has queries');
 assertTrue(
-    str_contains(implode("\n", $nashChiliQueries), 'site:nosh.jp/menu/detail'),
-    'nash chili uses menu/detail site query',
+    str_contains(implode("\n", $nashChiliQueries), 'site:nosh.jp'),
+    'nash chili uses official site query',
+);
+assertTrue(
+    !str_contains(implode("\n", $nashChiliQueries), 'site:nosh.jp/menu/detail'),
+    'nash chili does not use brand-specific path hint',
 );
 assertTrue(
     str_contains(implode("\n", $nashChiliQueries), 'たら')
-        && str_contains(implode("\n", $nashChiliQueries), 'チリソース'),
-    'nash chili core tokens include たら and チリソース',
+        && str_contains(implode("\n", $nashChiliQueries), 'チリソース')
+        && (str_contains(implode("\n", $nashChiliQueries), '旨辛')
+            || str_contains(implode("\n", $nashChiliQueries), '辛旨')),
+    'nash chili core tokens include middle 辛旨/旨辛',
 );
 assertTrue(
     !str_contains(implode("\n", $nashChiliQueries), 'site:nosh.jp たらと旨辛のチリソース'),
     'nash chili does not use wrong full-name site query as second query',
 );
 $coreTokens = $builder->extractCoreSearchTokens('たらと旨辛のチリソース', 'ナッシュ');
-assertSame(['たら', 'チリソース'], $coreTokens, 'core tokens are head+tail');
+assertSame(['たら', '旨辛', 'チリソース'], $coreTokens, 'core tokens keep middle');
+$coreTokensOfficial = $builder->extractCoreSearchTokens('たらの辛旨チリソース', 'ナッシュ');
+assertSame(['たら', '辛旨', 'チリソース'], $coreTokensOfficial, 'core tokens keep 辛旨');
 echo "OK nash chili core detail query\n";
 
 $claudeHints = $builder->buildClaudeWebSearchQueryHints('ナッシュ たらと旨辛チリソース');
 assertTrue($claudeHints !== [], 'claude hints not empty');
 assertTrue(
-    str_contains($claudeHints[0], 'site:nosh.jp/menu/detail'),
-    'claude primary hint prefers menu/detail core query',
+    str_contains($claudeHints[0], 'site:nosh.jp')
+        && !str_contains($claudeHints[0], 'site:nosh.jp/menu/detail'),
+    'claude primary hint prefers official site core query without path hint',
 );
 assertTrue(
-    str_contains($claudeHints[0], 'たら') && str_contains($claudeHints[0], 'チリソース'),
-    'claude primary hint has core tokens',
-);
-assertTrue(
-    !str_contains($claudeHints[0], '旨辛'),
-    'claude primary hint avoids wrong middle token',
+    str_contains($claudeHints[0], 'たら')
+        && str_contains($claudeHints[0], 'チリソース')
+        && str_contains($claudeHints[0], '旨辛'),
+    'claude primary hint keeps middle token',
 );
 echo "OK claude web search query hints\n";
 

@@ -858,7 +858,6 @@ PROMPT;
 【Web検索】
 - 必ず web_search で検索してから回答する
 {$queryInstructions}- メーカー公式・コンビニ公式・商品詳細ページを優先する
-- ナッシュ等の宅配弁当は公式の /menu/detail/ 商品ページを最優先する
 - 入力と味・ソース名が違う類似メニュー（例: 旨辛と甘酢）を選ばない。語順が近いだけの別商品は不可
 {$storeSourceHint}- レビューサイト、ブログ、まとめ記事は source_urls に入れない
 - ログイン必須のサイト（eatsmart.jp など）は source_urls に入れない

@@ -144,8 +144,8 @@ final class NutritionSearchQueryBuilder
     }
 
     /**
-     * 公式詳細ページ向け: 助詞・ブランドを除いた先頭+末尾トークンで site 検索する。
-     * 例: たらと旨辛のチリソース → site:nosh.jp/menu/detail たら チリソース
+     * 公式詳細ページ向け: 助詞・ブランドを除いた有意トークンで site 検索する。
+     * 例: たらと辛旨チリソース → site:nosh.jp たら 辛旨 チリソース
      */
     private function buildOfficialDetailCoreQuery(string $officialSite, FoodWebSearchPlan $plan): ?string
     {
@@ -154,20 +154,7 @@ final class NutritionSearchQueryBuilder
             return null;
         }
 
-        $pathHint = $this->officialDetailPathHint($officialSite);
-        $siteScope = $pathHint !== null
-            ? 'site:' . $officialSite . $pathHint
-            : 'site:' . $officialSite;
-
-        return trim($siteScope . ' ' . implode(' ', $tokens));
-    }
-
-    private function officialDetailPathHint(string $officialSite): ?string
-    {
-        return match ($officialSite) {
-            'nosh.jp' => '/menu/detail',
-            default => null,
-        };
+        return trim('site:' . $officialSite . ' ' . implode(' ', $tokens));
     }
 
     /**
@@ -201,16 +188,8 @@ final class NutritionSearchQueryBuilder
             }
         }
 
-        if ($tokens === []) {
-            return [];
-        }
-
-        if (count($tokens) === 1) {
-            return $tokens;
-        }
-
-        // 先頭 + 末尾（たら / チリソース）を優先し、誤った中間語（旨辛）に依存しない
-        return [$tokens[0], $tokens[array_key_last($tokens)]];
+        // 中間語（辛旨 / 旨辛）も含める。先頭+末尾だけだと別メニュー（甘酢等）に寄る。
+        return $tokens;
     }
 
     /**
@@ -248,7 +227,7 @@ final class NutritionSearchQueryBuilder
 
     /**
      * Claude Web Search 用の検索クエリヒント。
-     * Brave と同じ方針: 公式 detail + 核心トークンを優先し、誤ったフルネーム依存を避ける。
+     * Brave と同じ方針: 公式 detail + 核心トークン（中間語含む）を優先する。
      *
      * @return list<string> 最大2件（先頭が最優先）
      */
