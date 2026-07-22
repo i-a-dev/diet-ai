@@ -114,7 +114,11 @@ final class AiWebSearchService
             && $this->claudeWebSearchFallback !== null
         ) {
             $budget->recordClaudeWebSearch();
-            $fallbackResult = ($this->claudeWebSearchFallback)($trimmed, $apiKey);
+            try {
+                $fallbackResult = ($this->claudeWebSearchFallback)($trimmed, $apiKey);
+            } catch (Throwable) {
+                $fallbackResult = null;
+            }
             if (is_array($fallbackResult) && $fallbackResult !== []) {
                 $diagnostics->addFallbackReason('claude_web_search');
                 $diagnostics->setStoppedReason('fallback');
@@ -122,6 +126,7 @@ final class AiWebSearchService
 
                 return $fallbackResult;
             }
+            $diagnostics->addFallbackReason('claude_web_search_rejected');
         }
 
         if ($acceptedCandidates === [] && $confirmationCandidates === []) {

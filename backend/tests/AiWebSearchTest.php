@@ -155,6 +155,55 @@ assertTrue(str_contains($nashQueries[0], 'おろしハンバーグ'), 'nash quer
 assertSame('ナッシュ おろしハンバーグ', $builder->resolveSearchName($nashPlan, 'ナッシュ おろしハンバーグ'), 'search name preserves user words');
 echo "OK user input tokens preserved in brave query\n";
 
+$nashChiliPlan = FoodWebSearchPlan::fromArray([
+    'isFood' => true,
+    'normalizedProductName' => 'たらと旨辛のチリソース',
+    'brandName' => 'ナッシュ',
+    'productType' => 'prepared_food',
+    'variantAnalysis' => [
+        'likelyHasVariants' => false,
+        'dimension' => 'none',
+        'expectedLabels' => [],
+        'confidence' => 'high',
+    ],
+    'searchMode' => 'single_product',
+    'queryTerms' => ['カロリー', '栄養成分'],
+]);
+$nashChiliQueries = $builder->build($nashChiliPlan, 'ナッシュ たらと旨辛のチリソース');
+assertTrue(count($nashChiliQueries) >= 1, 'nash chili has queries');
+assertTrue(
+    str_contains(implode("\n", $nashChiliQueries), 'site:nosh.jp/menu/detail'),
+    'nash chili uses menu/detail site query',
+);
+assertTrue(
+    str_contains(implode("\n", $nashChiliQueries), 'たら')
+        && str_contains(implode("\n", $nashChiliQueries), 'チリソース'),
+    'nash chili core tokens include たら and チリソース',
+);
+assertTrue(
+    !str_contains(implode("\n", $nashChiliQueries), 'site:nosh.jp たらと旨辛のチリソース'),
+    'nash chili does not use wrong full-name site query as second query',
+);
+$coreTokens = $builder->extractCoreSearchTokens('たらと旨辛のチリソース', 'ナッシュ');
+assertSame(['たら', 'チリソース'], $coreTokens, 'core tokens are head+tail');
+echo "OK nash chili core detail query\n";
+
+$claudeHints = $builder->buildClaudeWebSearchQueryHints('ナッシュ たらと旨辛チリソース');
+assertTrue($claudeHints !== [], 'claude hints not empty');
+assertTrue(
+    str_contains($claudeHints[0], 'site:nosh.jp/menu/detail'),
+    'claude primary hint prefers menu/detail core query',
+);
+assertTrue(
+    str_contains($claudeHints[0], 'たら') && str_contains($claudeHints[0], 'チリソース'),
+    'claude primary hint has core tokens',
+);
+assertTrue(
+    !str_contains($claudeHints[0], '旨辛'),
+    'claude primary hint avoids wrong middle token',
+);
+echo "OK claude web search query hints\n";
+
 $homePlan = FoodWebSearchPlan::fromArray([
     'isFood' => true,
     'normalizedProductName' => '鶏むね肉とキャベツの炒め物',

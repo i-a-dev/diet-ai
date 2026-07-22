@@ -135,10 +135,240 @@ final class NutritionSearchQueryBuilder
 
         $officialSite = $this->resolveOfficialSite($plan->brandName, $searchName);
         if ($officialSite !== null) {
-            $queries[] = 'site:' . $officialSite . ' ' . $plan->normalizedProductName . ' 栄養成分';
+            $coreQuery = $this->buildOfficialDetailCoreQuery($officialSite, $plan);
+            // 公式サイトがあるときは、誤ったフルネーム site 検索より核心トークンで detail を狙う
+            $queries[] = $coreQuery ?? ('site:' . $officialSite . ' ' . $plan->normalizedProductName . ' 栄養成分');
         }
 
         return $this->uniqueNonEmpty(array_slice($queries, 0, 2));
+    }
+
+    /**
+     * 公式詳細ページ向け: 助詞・ブランドを除いた先頭+末尾トークンで site 検索する。
+     * 例: たらと旨辛のチリソース → site:nosh.jp/menu/detail たら チリソース
+     */
+    private function buildOfficialDetailCoreQuery(string $officialSite, FoodWebSearchPlan $plan): ?string
+    {
+        $tokens = $this->extractCoreSearchTokens($plan->normalizedProductName, $plan->brandName);
+        if ($tokens === []) {
+            return null;
+        }
+
+        $pathHint = $this->officialDetailPathHint($officialSite);
+        $siteScope = $pathHint !== null
+            ? 'site:' . $officialSite . $pathHint
+            : 'site:' . $officialSite;
+
+        return trim($siteScope . ' ' . implode(' ', $tokens));
+    }
+
+    private function officialDetailPathHint(string $officialSite): ?string
+    {
+        return match ($officialSite) {
+            'nosh.jp' => '/menu/detail',
+            default => null,
+        };
+    }
+
+    /**
+     * @return list<string>
+     */
+    public function extractCoreSearchTokens(string $productName, ?string $brandName = null): array
+    {
+        $value = trim($productName);
+        if ($value === '') {
+            return [];
+        }
+
+        $value = mb_strtolower($value);
+        if ($brandName !== null && trim($brandName) !== '') {
+            $brand = mb_strtolower(trim($brandName));
+            $value = str_replace([$brand, 'nosh'], ' ', $value);
+        }
+
+        // 助詞相当の1文字接続を空白化
+        $value = (string) preg_replace('/[のとをがへに]/u', ' ', $value);
+        $value = (string) preg_replace('/\s+/u', ' ', trim($value));
+
+        $tokens = [];
+        if (preg_match_all('/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}ーｰa-z0-9]{2,}/u', $value, $matches) > 0) {
+            foreach ($matches[0] as $token) {
+                foreach ($this->splitMixedScriptToken((string) $token) as $part) {
+                    if ($part !== '' && !in_array($part, $tokens, true)) {
+                        $tokens[] = $part;
+                    }
+                }
+            }
+        }
+
+        if ($tokens === []) {
+            return [];
+        }
+
+        if (count($tokens) === 1) {
+            return $tokens;
+        }
+
+        // 先頭 + 末尾（たら / チリソース）を優先し、誤った中間語（旨辛）に依存しない
+        return [$tokens[0], $tokens[array_key_last($tokens)]];
+    }
+
+    /**
+     * 漢字塊とカタカナ塊が連結した語を分割する。
+     * 例: 旨辛チリソース → [旨辛, チリソース]
+     *
+     * @return list<string>
+     */
+    private function splitMixedScriptToken(string $token): array
+    {
+        $token = trim($token);
+        if ($token === '') {
+            return [];
+        }
+
+        if (preg_match_all(
+            '/\p{Script=Han}+|[\p{Script=Katakana}ーｰ]+|\p{Script=Hiragana}+|[a-z0-9]+/u',
+            $token,
+            $parts,
+        ) > 0) {
+            $split = [];
+            foreach ($parts[0] as $part) {
+                $part = trim((string) $part);
+                if (mb_strlen($part) >= 2) {
+                    $split[] = $part;
+                }
+            }
+            if ($split !== []) {
+                return $split;
+            }
+        }
+
+        return [$token];
+    }
+
+    /**
+     * Claude Web Search 用の検索クエリヒント。
+     * Brave と同じ方針: 公式 detail + 核心トークンを優先し、誤ったフルネーム依存を避ける。
+     *
+     * @return list<string> 最大2件（先頭が最優先）
+     */
+    public function buildClaudeWebSearchQueryHints(string $userInput): array
+    {
+        $trimmed = trim($userInput);
+        if ($trimmed === '') {
+            return [];
+        }
+
+        $brand = $this->detectBrandFromInput($trimmed);
+        $productName = $this->stripBrandPrefix($trimmed, $brand);
+        if ($productName === '') {
+            $productName = $trimmed;
+        }
+
+        $plan = new FoodWebSearchPlan(
+            isFood: true,
+            normalizedProductName: $productName,
+            brandName: $brand,
+            productType: 'unknown',
+            likelyHasVariants: false,
+            variantDimension: 'none',
+            expectedLabels: [],
+            variantConfidence: 'low',
+            searchMode: 'single_product',
+            queryTerms: ['カロリー', '栄養成分'],
+        );
+
+        $queries = $this->build($plan, $trimmed);
+        $ordered = [];
+
+        // 公式 detail / site クエリを最優先
+        foreach ($queries as $query) {
+            if (str_contains($query, 'site:')) {
+                $ordered[] = $query;
+            }
+        }
+
+        $tokens = $this->extractCoreSearchTokens($productName, $brand);
+        if ($tokens !== []) {
+            $coreCalorie = trim(($brand ?? '') . ' ' . implode(' ', $tokens) . ' カロリー');
+            $ordered[] = $coreCalorie;
+        }
+
+        foreach ($queries as $query) {
+            $ordered[] = $query;
+        }
+
+        // 最後の保険: 従来どおりフルネーム + カロリー
+        $ordered[] = $trimmed . (str_contains(mb_strtolower($trimmed), 'カロリー') ? '' : ' カロリー');
+
+        return array_slice($this->uniqueNonEmpty($ordered), 0, 2);
+    }
+
+    public function detectBrandFromInput(string $userInput): ?string
+    {
+        $normalized = mb_strtolower(trim($userInput));
+        if ($normalized === '') {
+            return null;
+        }
+
+        $best = null;
+        $bestLen = 0;
+        foreach (array_keys(self::BRAND_OFFICIAL_SITES) as $brand) {
+            $brandLower = mb_strtolower($brand);
+            if ($brandLower === '') {
+                continue;
+            }
+            if (mb_strpos($normalized, $brandLower) !== false && mb_strlen($brandLower) > $bestLen) {
+                $best = $brand === 'nosh' ? 'ナッシュ' : $brand;
+                // マック → マクドナルドに正規化（公式サイト解決と揃える）
+                if ($best === 'マック') {
+                    $best = 'マクドナルド';
+                } elseif ($best === 'セブン') {
+                    $best = 'セブンイレブン';
+                } elseif ($best === 'ファミマ') {
+                    $best = 'ファミリーマート';
+                } elseif ($best === 'スタバ' || $best === 'starbucks') {
+                    $best = 'スターバックス';
+                }
+                $bestLen = mb_strlen($brandLower);
+            }
+        }
+
+        return $best;
+    }
+
+    private function stripBrandPrefix(string $userInput, ?string $brandName): string
+    {
+        $value = trim($userInput);
+        if ($brandName === null || $brandName === '') {
+            return $value;
+        }
+
+        $aliases = [$brandName, 'nosh'];
+        if ($brandName === 'マクドナルド') {
+            $aliases[] = 'マック';
+        } elseif ($brandName === 'セブンイレブン') {
+            $aliases[] = 'セブン';
+        } elseif ($brandName === 'ファミリーマート') {
+            $aliases[] = 'ファミマ';
+        } elseif ($brandName === 'スターバックス') {
+            $aliases[] = 'スタバ';
+            $aliases[] = 'starbucks';
+        }
+
+        foreach ($aliases as $alias) {
+            $alias = trim($alias);
+            if ($alias === '') {
+                continue;
+            }
+            if (mb_stripos($value, $alias) === 0) {
+                $value = trim(mb_substr($value, mb_strlen($alias)));
+                break;
+            }
+            $value = trim(str_ireplace($alias, ' ', $value));
+        }
+
+        return trim((string) preg_replace('/\s+/u', ' ', $value));
     }
 
     /**

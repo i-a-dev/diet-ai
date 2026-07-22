@@ -33,6 +33,15 @@ final class ProductMatchEvaluator
     /** 一覧ページの needs_confirmation 下限 */
     private const NAME_SIM_CONFIRM_LIST = 0.70;
 
+    /**
+     * 確認 UI に載せる名前類似度の下限（弱い誤候補を出さない）。
+     * accepted 単品下限と同じにし、甘酢↔辛旨のような別メニューを除外する。
+     */
+    private const CONFIRMATION_UI_NAME_SIM_MIN = 0.72;
+
+    /** 文字集合 Jaccard で name_similarity を底上げする下限 */
+    private const CHAR_JACCARD_BOOST_MIN = 0.85;
+
     /** ブランド根拠ありとみなすスコア */
     private const BRAND_EVIDENCE_STRONG = 0.80;
 
@@ -190,6 +199,12 @@ final class ProductMatchEvaluator
                 continue;
             }
 
+            // 弱い誤候補（別味の類似メニュー等）は確認 UI に出さない
+            $nameSimilarity = $this->extractNameSimilarityFromCandidate($candidate);
+            if ($nameSimilarity !== null && $nameSimilarity < self::CONFIRMATION_UI_NAME_SIM_MIN) {
+                continue;
+            }
+
             $filtered[] = $candidate;
         }
 
@@ -220,13 +235,22 @@ final class ProductMatchEvaluator
     }
 
     /**
-     * 判定ログ用配列。
-     *
-     * @return array<string, mixed>
+     * 確認 UI / 自動確定に載せてよい候補か。
+     * 弱い誤候補（別味の類似メニュー等）は false。
      */
-    public function toLogPayload(ProductMatchResult $result): array
+    public function isStrongEnoughForUi(ProductMatchResult $result): bool
     {
-        return $result->reasons;
+        if ($result->isRejected()) {
+            return false;
+        }
+
+        if ($result->isAccepted()) {
+            return true;
+        }
+
+        $nameSimilarity = (float) ($result->reasons['name_similarity'] ?? 0.0);
+
+        return $nameSimilarity >= self::CONFIRMATION_UI_NAME_SIM_MIN;
     }
 
     private function resolveQueryBrand(
@@ -371,7 +395,11 @@ final class ProductMatchEvaluator
             ];
         }
 
-        if ($query === $candidate) {
+        // 助詞ゆれ（の/と）を落としてから比較する
+        $queryLoose = $this->normalizeForLooseCompare($query);
+        $candidateLoose = $this->normalizeForLooseCompare($candidate);
+
+        if ($query === $candidate || ($queryLoose !== '' && $queryLoose === $candidateLoose)) {
             return [
                 'name_similarity' => 1.0,
                 'bigram_similarity' => 1.0,
@@ -382,8 +410,8 @@ final class ProductMatchEvaluator
             ];
         }
 
-        $left = str_replace(' ', '', $query);
-        $right = str_replace(' ', '', $candidate);
+        $left = $queryLoose !== '' ? $queryLoose : str_replace(' ', '', $query);
+        $right = $candidateLoose !== '' ? $candidateLoose : str_replace(' ', '', $candidate);
         $leftLen = mb_strlen($left);
         $rightLen = mb_strlen($right);
         $lengthRatio = ($leftLen > 0 && $rightLen > 0)
@@ -400,6 +428,7 @@ final class ProductMatchEvaluator
         $lcsRatio = ($leftLen + $rightLen) > 0
             ? (2.0 * $lcsLen) / ($leftLen + $rightLen)
             : 0.0;
+        $charJaccard = $this->characterJaccard($left, $right);
 
         [$coreLeft, $coreRight] = $this->extractAutomaticCores($left, $right);
         $hasDistinctCores = mb_strlen($coreLeft) >= self::AUTO_CORE_MIN_LEN
@@ -407,12 +436,13 @@ final class ProductMatchEvaluator
         if ($coreLeft === '' && $coreRight === '') {
             $coreSimilarity = 1.0;
         } elseif ($coreLeft === '' || $coreRight === '') {
-            $coreSimilarity = max($bigram, $lcsRatio);
+            $coreSimilarity = max($bigram, $lcsRatio, $charJaccard);
         } elseif ($coreLeft === $coreRight) {
             $coreSimilarity = 1.0;
         } else {
             $coreSimilarity = max(
                 $this->bigramDice($coreLeft, $coreRight),
+                $this->characterJaccard($coreLeft, $coreRight),
                 $this->longestCommonSubstringLength($coreLeft, $coreRight) > 0
                     ? (2.0 * $this->longestCommonSubstringLength($coreLeft, $coreRight))
                         / (mb_strlen($coreLeft) + mb_strlen($coreRight))
@@ -424,6 +454,14 @@ final class ProductMatchEvaluator
             $containment,
             (0.45 * $bigram) + (0.35 * $lcsRatio) + (0.20 * $lengthRatio),
         );
+
+        // 語順転置（旨辛↔辛旨）向け: 文字集合が大きく重なるときだけ底上げ
+        if ($charJaccard >= self::CHAR_JACCARD_BOOST_MIN) {
+            $nameSimilarity = max(
+                $nameSimilarity,
+                (0.55 * $charJaccard) + (0.45 * $lengthRatio),
+            );
+        }
 
         // 共通接頭・接尾を除いたコアが近い場合は底上げ
         if ($coreSimilarity >= 0.85) {
@@ -438,6 +476,60 @@ final class ProductMatchEvaluator
             'core_similarity' => max(0.0, min(1.0, $coreSimilarity)),
             'has_distinct_cores' => $hasDistinctCores,
         ];
+    }
+
+    /**
+     * 助詞ゆれを吸収した比較用文字列を作る。
+     * 「のり」など助詞以外の語頭は壊さないよう、前後に文字がある接続助詞だけ除去する。
+     */
+    private function normalizeForLooseCompare(string $value): string
+    {
+        $value = str_replace(' ', '', $this->normalizeProductName($value));
+        if ($value === '') {
+            return '';
+        }
+
+        // たらと旨辛 / たらの辛旨 → 接続の の・と を除去（のり弁当の語頭「の」は残る）
+        $value = (string) preg_replace(
+            '/(?<=[\p{L}\p{N}\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}])[のとをがへに](?=[\p{L}\p{N}\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}])/u',
+            '',
+            $value,
+        );
+
+        return $value;
+    }
+
+    private function characterJaccard(string $left, string $right): float
+    {
+        $leftChars = preg_split('//u', str_replace(' ', '', $left), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        $rightChars = preg_split('//u', str_replace(' ', '', $right), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        if ($leftChars === [] || $rightChars === []) {
+            return 0.0;
+        }
+
+        $leftSet = array_unique($leftChars);
+        $rightSet = array_unique($rightChars);
+        $intersection = count(array_intersect($leftSet, $rightSet));
+        $union = count(array_unique(array_merge($leftSet, $rightSet)));
+
+        return $union > 0 ? $intersection / $union : 0.0;
+    }
+
+    /**
+     * @param array<string, mixed> $candidate
+     */
+    private function extractNameSimilarityFromCandidate(array $candidate): ?float
+    {
+        $reasons = $candidate['match_reasons'] ?? null;
+        if (!is_array($reasons)) {
+            return null;
+        }
+
+        if (!isset($reasons['name_similarity']) || !is_numeric($reasons['name_similarity'])) {
+            return null;
+        }
+
+        return (float) $reasons['name_similarity'];
     }
 
     /**

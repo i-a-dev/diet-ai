@@ -233,5 +233,52 @@ foreach ($list as $item) {
 }
 echo "OK list page does not keep wrong kcal row\n";
 
+// Case: 旨辛入力でも公式の辛旨を accepted（助詞・語順ゆれ）
+$caseKaraUma = $evaluator->evaluate([
+    'queryProductName' => 'ナッシュ たらと旨辛のチリソース',
+    'queryBrandName' => 'ナッシュ',
+    'candidateProductName' => 'たらの辛旨チリソース',
+    'evidenceText' => 'たらの辛旨チリソース 327kcal',
+    'pageTitle' => 'たらの辛旨チリソース｜【nosh-ナッシュ】',
+    'url' => 'https://nosh.jp/menu/detail/1057',
+    'sourceType' => 'html_single_product',
+]);
+assertSame(ProductMatchResult::DECISION_ACCEPTED, $caseKaraUma->decision, 'kara-uma transposition accepted');
+assertTrue($evaluator->isStrongEnoughForUi($caseKaraUma), 'kara-uma strong enough for UI');
+echo "OK kara-uma transposition => accepted\n";
+
+// Case: 甘酢は別メニューなので confirmation UI に載せない
+$caseAmazu = $evaluator->evaluate([
+    'queryProductName' => 'ナッシュ たらと旨辛のチリソース',
+    'queryBrandName' => 'ナッシュ',
+    'candidateProductName' => 'たらの甘酢チリソース',
+    'evidenceText' => 'たらの甘酢チリソース 287kcal',
+    'pageTitle' => 'たらの甘酢チリソース｜【nosh-ナッシュ】',
+    'url' => 'https://nosh.jp/menu/detail/1025',
+    'sourceType' => 'html_single_product',
+]);
+assertNotSame(ProductMatchResult::DECISION_ACCEPTED, $caseAmazu->decision, 'amazu not accepted');
+assertTrue(!$evaluator->isStrongEnoughForUi($caseAmazu), 'amazu not strong enough for UI');
+
+$finalized = $evaluator->finalizeConfirmationCandidates([
+    [
+        'product_name' => 'たらの甘酢チリソース',
+        'kcal' => 287,
+        'match_score' => $caseAmazu->score,
+        'match_reasons' => $caseAmazu->reasons,
+        'variant_label' => '通常サイズ',
+    ],
+    [
+        'product_name' => 'たらの辛旨チリソース',
+        'kcal' => 327,
+        'match_score' => $caseKaraUma->score,
+        'match_reasons' => $caseKaraUma->reasons,
+        'variant_label' => '通常サイズ',
+    ],
+]);
+assertSame(1, count($finalized), 'finalize keeps only strong candidate');
+assertSame('たらの辛旨チリソース', $finalized[0]['product_name'], 'finalize keeps official kara-uma');
+echo "OK amazu filtered from confirmation UI\n";
+
 echo str_repeat('=', 48) . "\n";
 echo "All product match tests passed\n";
