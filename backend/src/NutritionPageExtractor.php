@@ -5,7 +5,7 @@ declare(strict_types=1);
 /**
  * Brave Search の検索結果 URL から、HTML 上の栄養成分・カロリー表記を抽出する。
  */
-final class NutritionPageExtractor
+class NutritionPageExtractor
 {
     private const MAX_URL_FETCHES = 8;
     private const MIN_URL_FETCH_SCORE = 0;
@@ -451,40 +451,18 @@ final class NutritionPageExtractor
         $path = (string) parse_url($url, PHP_URL_PATH);
         $score = 50;
 
-        $officialDomains = [
-            'products.kirin.co.jp' => 45,
-            'www.meiji.co.jp' => 45,
-            'meiji.co.jp' => 45,
-            'www.nissin.com' => 45,
-            'nissin.com' => 45,
+        $officialBonus = (new OfficialSiteBrandResolver())->officialScoreBonus($host);
+        if ($officialBonus > 0) {
+            $score += $officialBonus;
+        }
+
+        $legacyBonusDomains = [
             'store.nissin.com' => 35,
-            'samyangfoods.co.jp' => 45,
-            'www.sej.co.jp' => 40,
-            '7premium.jp' => 45,
-            'www.lawson.co.jp' => 40,
-            'www.family.co.jp' => 40,
-            'www.calbee.co.jp' => 45,
-            'calbee.co.jp' => 45,
-            'www.morinaga.co.jp' => 45,
-            'morinaga.co.jp' => 45,
-            'www.nichirei.co.jp' => 45,
-            'nichirei.co.jp' => 45,
-            'www.ajinomoto.co.jp' => 45,
-            'ajinomoto.co.jp' => 45,
-            'www.starbucks.co.jp' => 45,
-            'starbucks.co.jp' => 45,
-            'www.31ice.co.jp' => 45,
-            '31ice.co.jp' => 45,
-            'www.nongshim.co.jp' => 45,
-            'nongshim.co.jp' => 45,
-            'www.muji.com' => 40,
             'greenbeans.com' => 25,
             'kalori.jp' => 20,
-            'mcdonalds.co.jp' => 50,
-            'www.mcdonalds.co.jp' => 50,
         ];
 
-        foreach ($officialDomains as $domain => $bonus) {
+        foreach ($legacyBonusDomains as $domain => $bonus) {
             if ($host === $domain || str_ends_with($host, '.' . $domain)) {
                 $score += $bonus;
                 break;
@@ -1023,9 +1001,7 @@ final class NutritionPageExtractor
 
     public function isOfficialUrl(string $url): bool
     {
-        $host = strtolower((string) parse_url(trim($url), PHP_URL_HOST));
-
-        return $host !== '' && $this->isOfficialHost($host);
+        return (new OfficialSiteBrandResolver())->isOfficialUrl($url);
     }
 
     /**
@@ -1062,6 +1038,25 @@ final class NutritionPageExtractor
         $userHasBrandHint = $this->inputContainsBrandHint($userNormalized, $brandNormalized, $candidateTokens);
         $extraCandidateTokens = array_values(array_diff($candidateTokens, $userTokens));
         $missingUserTokens = array_values(array_diff($userTokens, $candidateTokens));
+
+        // 不足トークンが期待ブランド（または既知ブランド）だけの場合は欠落とみなさない
+        if ($missingUserTokens !== []) {
+            $brandNormalized = $brand !== null && trim($brand) !== ''
+                ? $this->normalizeIdentityText($brand)
+                : '';
+            $nonBrandMissing = [];
+            foreach ($missingUserTokens as $token) {
+                $tokenNorm = $this->normalizeIdentityText($token);
+                if ($brandNormalized !== '' && ($tokenNorm === $brandNormalized || str_contains($brandNormalized, $tokenNorm))) {
+                    continue;
+                }
+                if ($this->isKnownBrandToken($token)) {
+                    continue;
+                }
+                $nonBrandMissing[] = $token;
+            }
+            $missingUserTokens = $nonBrandMissing;
+        }
 
         if ($missingUserTokens !== []) {
             $matchedUserTokens = array_values(array_intersect($userTokens, $candidateTokens));
@@ -1116,34 +1111,7 @@ final class NutritionPageExtractor
 
     private function isOfficialHost(string $host): bool
     {
-        $officialDomains = [
-            'products.kirin.co.jp',
-            'meiji.co.jp',
-            'nissin.com',
-            'samyangfoods.co.jp',
-            'sej.co.jp',
-            '7premium.jp',
-            'lawson.co.jp',
-            'family.co.jp',
-            'calbee.co.jp',
-            'morinaga.co.jp',
-            'nichirei.co.jp',
-            'ajinomoto.co.jp',
-            'starbucks.co.jp',
-            '31ice.co.jp',
-            'nongshim.co.jp',
-            'muji.com',
-            'mcdonalds.co.jp',
-            'nosh.jp',
-        ];
-
-        foreach ($officialDomains as $domain) {
-            if ($host === $domain || str_ends_with($host, '.' . $domain)) {
-                return true;
-            }
-        }
-
-        return false;
+        return (new OfficialSiteBrandResolver())->isOfficialHost($host);
     }
 
     /**

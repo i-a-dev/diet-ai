@@ -8,7 +8,7 @@ declare(strict_types=1);
  * 1. Claude Haiku で検索計画（1回）
  * 2. 固定テンプレートで Brave 検索（通常1〜2回、最大4回）
  * 3. 上位URL HTML から複数バリアント抽出（最大8URL）
- * 4. 候補0件のみ Claude Web Search フォールバック（最大1回）
+ * 4. Brave を安全に自動確定できない場合のみ Claude Web Search フォールバック（最大1回）
  */
 final class CalorieEstimateService
 {
@@ -16,17 +16,25 @@ final class CalorieEstimateService
     private const MODEL = 'claude-haiku-4-5-20251001';
     private const SYSTEM_PROMPT = 'あなたは日本の食品・料理全般に詳しいカロリー推定の専門家です。口に入れて摂取するもの（料理・飲み物・お菓子・ゼリー・サプリ・機能性食品・市販品）は食品として扱ってください。明らかに食べないもの（洗剤・化粧品・金属など）だけ {"error":"not_food"} を返してください。商品名が不明確でも食べ物の可能性がある場合は not_food にせず推定してください。confidenceは「標準量を仮定できるか」ではなく「その仮定を置いても推定値がどれだけ安定するか」を表します。代表値を出せても、追加情報で数百kcal変わり得るなら low にしてください。ブランド・コンビニ・チェーン・宅配弁当など市販既製品は公式未確認のAI推定では confidence を high にせず medium（または low）にしてください。should_offer_web_searchはconfidenceとは別軸で、Web上に特定可能な商品・栄養成分情報がありそうかを判定してください。食品の場合はJSONのみ返答し、前置きや説明は不要です。';
     private const PRODUCT_CANDIDATE_SYSTEM_PROMPT = 'あなたは日本の市販食品に詳しい専門家です。Web検索はせず、カロリー推定もしません。入力が食べ物でない場合のみ {"error":"not_food"} を返してください。食品の場合は、日本国内で販売されている可能性が高い市販食品候補を最大3件返してください。JSONのみ返答し、前置きや説明は不要です。';
-    private const WEB_SEARCH_SYSTEM_PROMPT = 'あなたは日本の食品・市販品に詳しい専門家です。口に入れて摂取するものは食品として扱ってください。明らかに食べないものだけ {"error":"not_food"} を返してください。食品の場合は web_search で商品を調べ、正式な商品名とその商品の栄養成分・カロリーが載っているページ URL を返してください。まとめ記事・ブログよりメーカー公式・商品詳細ページを優先してください。最終回答はJSONのみ。前置きや説明は不要です。';
+    private const WEB_SEARCH_SYSTEM_PROMPT = 'あなたは日本の食品・市販品の商品情報検索の専門家です。これは食品分類タスクではありません。入力はすでに食品として扱われています。必ず web_search で商品を調べ、正式な商品名とその商品の栄養成分・カロリーが載っているページ URL を返してください。まとめ記事・ブログよりメーカー公式・商品詳細ページを優先してください。似た別味（例: 辛旨と甘酢）を同一商品として扱わないでください。見つからない場合は not_found を返してください。not_food は返さないでください。最終回答はJSONのみ。前置きや説明は不要です。';
     private const WEB_SEARCH_MAX_TOKENS = 1024;
     private const PRODUCT_CANDIDATE_MAX_TOKENS = 512;
     private const MAX_WEB_SEARCH_URL_FETCHES = 5;
     private const MAX_PRODUCT_CANDIDATES = 3;
+    private const MAX_PAUSE_TURN_CONTINUATIONS = 2;
 
+    /** @var array<string, mixed>|null */
+    private ?array $lastClaudeWebSearchMeta = null;
+
+    /**
+     * @param callable(array<string, mixed>, string, bool): array<string, mixed>|null $anthropicTransport
+     */
     public function __construct(
         private readonly ?BraveNutritionSearchService $braveNutritionSearch = null,
         private readonly ?NutritionPageExtractor $nutritionPageExtractor = null,
         private readonly ?FoodVariantAnalyzer $variantAnalyzer = null,
         private readonly ?AiWebSearchService $aiWebSearchService = null,
+        private $anthropicTransport = null,
     ) {
     }
 
@@ -354,6 +362,7 @@ final class CalorieEstimateService
             'source' => $result['source'],
             'identity_confidence' => $result['identity_confidence'],
             'needs_confirmation' => false,
+            'web_search_status' => 'confirmed',
         ];
 
         foreach ([
@@ -365,6 +374,7 @@ final class CalorieEstimateService
             'variant_confidence',
             'serving_weight_g',
             'package_size',
+            'verification_confidence',
         ] as $field) {
             if (array_key_exists($field, $result) && $result[$field] !== null && $result[$field] !== '') {
                 $formatted[$field] = $result[$field];
@@ -532,18 +542,40 @@ final class CalorieEstimateService
     {
         $inputAnalysis ??= $this->resolveVariantAnalyzer()->analyzeInput($trimmed);
         $variantAnalyzer = $this->resolveVariantAnalyzer();
-        $claudeResult = $this->requestClaudeWebIdentification($trimmed, $apiKey);
-        if ($claudeResult === 'not_food' || $claudeResult === null) {
-            throw new RuntimeException('カロリーを推定できませんでした。');
+        $subject = (new FoodSearchSubjectNormalizer())->normalize($trimmed);
+        $queryProductName = $subject->productName !== '' ? $subject->productName : $trimmed;
+        $officialDomains = (new OfficialSiteBrandResolver())->resolveOfficialDomains($trimmed, $subject->brandName);
+        $claudeResult = $this->requestClaudeWebIdentification($trimmed, $apiKey, $officialDomains);
+        if ($claudeResult === 'not_food') {
+            return [
+                'web_search_status' => 'not_found',
+                'claude_status' => 'not_found',
+                '_claude_meta' => array_merge($this->lastClaudeWebSearchMeta ?? [], [
+                    'claude_status' => 'not_found',
+                    'claude_not_food_contract_violation' => true,
+                ]),
+            ];
+        }
+        if ($claudeResult === 'not_found' || $claudeResult === 'ambiguous' || $claudeResult === null) {
+            $status = is_string($claudeResult) ? $claudeResult : 'not_found';
+
+            return [
+                'web_search_status' => 'not_found',
+                'claude_status' => $status,
+                '_claude_meta' => array_merge($this->lastClaudeWebSearchMeta ?? [], [
+                    'claude_status' => $status,
+                    'claude_not_food_contract_violation' => false,
+                ]),
+            ];
         }
 
         $productName = $claudeResult['product_name'];
         $brand = $claudeResult['brand'] ?? null;
-        $brandName = is_string($brand) ? $brand : null;
+        $brandName = is_string($brand) ? $brand : ($subject->brandName);
 
         $matchEvaluator = new ProductMatchEvaluator();
         $match = $matchEvaluator->evaluate([
-            'queryProductName' => $trimmed,
+            'queryProductName' => $queryProductName,
             'queryBrandName' => $brandName,
             'candidateProductName' => $productName,
             'pageTitle' => $productName,
@@ -552,20 +584,26 @@ final class CalorieEstimateService
             'evidenceText' => $productName,
         ]);
         if (!$matchEvaluator->isStrongEnoughForUi($match)) {
-            // 甘酢↔辛旨のような弱い誤同定は確認 UI に出さず、AI 推定フォールバックへ
-            throw new RuntimeException('正確な商品情報を確認できませんでした。');
+            return [
+                'web_search_status' => 'not_found',
+                'claude_status' => 'ambiguous',
+                '_claude_meta' => array_merge($this->lastClaudeWebSearchMeta ?? [], [
+                    'claude_status' => 'ambiguous',
+                    'claude_not_food_contract_violation' => false,
+                ]),
+            ];
         }
 
         $rankedSourceUrls = $this->rankClaudeSourceUrlsLikeBrave(
             $claudeResult['source_urls'],
             $productName,
             $brandName,
-            [$trimmed, $productName],
+            [$queryProductName, $productName],
         );
         $htmlResult = $this->probeClaudeSourceUrls($rankedSourceUrls, $productName);
 
         $extractor = $this->resolveNutritionPageExtractor();
-        $identityConfidence = $extractor->assessProductIdentity($trimmed, $productName, $brand);
+        $identityConfidence = $extractor->assessProductIdentity($queryProductName, $productName, $brandName);
 
         $variant = $variantAnalyzer->analyzeProduct($productName);
 
@@ -581,6 +619,7 @@ final class CalorieEstimateService
                 'source_url' => $htmlResult['url'],
                 'source' => 'claude_web_search',
                 'identity_confidence' => $identityConfidence,
+                'verification_confidence' => 'high',
                 'base_product_name' => $variant['base_product_name'],
                 'variant_label' => $variant['variant_label'],
                 'variant_confidence' => $variant['variant_confidence'],
@@ -588,7 +627,9 @@ final class CalorieEstimateService
                 'package_size' => $variant['package_size'],
             ];
 
-            return $this->resolveWebSearchOutcome($trimmed, [$result], $inputAnalysis);
+            return $this->attachClaudeWebSearchMeta(
+                $this->resolveWebSearchOutcome($trimmed, [$result], $inputAnalysis),
+            );
         }
 
         $fallbackConfidence = $claudeResult['confidence'] === 'high' ? 'medium' : $claudeResult['confidence'];
@@ -603,6 +644,7 @@ final class CalorieEstimateService
             'brand' => $brand,
             'source' => 'claude_web_search',
             'identity_confidence' => $identityConfidence,
+            'verification_confidence' => 'medium',
             'base_product_name' => $variant['base_product_name'],
             'variant_label' => $variant['variant_label'],
             'variant_confidence' => $variant['variant_confidence'],
@@ -615,7 +657,22 @@ final class CalorieEstimateService
             $result['source_url'] = $fallbackSourceUrl;
         }
 
-        return $this->resolveWebSearchOutcome($trimmed, [$result], $inputAnalysis);
+        return $this->attachClaudeWebSearchMeta(
+            $this->resolveWebSearchOutcome($trimmed, [$result], $inputAnalysis),
+        );
+    }
+
+    /**
+     * @param array<string, mixed> $outcome
+     * @return array<string, mixed>
+     */
+    private function attachClaudeWebSearchMeta(array $outcome): array
+    {
+        if (is_array($this->lastClaudeWebSearchMeta)) {
+            $outcome['_claude_meta'] = $this->lastClaudeWebSearchMeta;
+        }
+
+        return $outcome;
     }
 
     private function looksLikeHomeCookedMeal(string $foodName): bool
@@ -787,40 +844,132 @@ PROMPT;
     /**
      * Claude Web 検索で商品名と参照 URL を特定する（mode=web のフォールバック用）。
      *
-     * @return array{product_name: string, brand?: string, source_urls: list<string>, kcal: int, confidence: string}|'not_food'|null
+     * @param list<string> $allowedDomains
+     * @return array{product_name: string, brand?: string, source_urls: list<string>, kcal: int, confidence: string, status?: string}|'not_food'|'not_found'|'ambiguous'|null
      */
-    private function requestClaudeWebIdentification(string $foodName, string $apiKey): array|string|null
-    {
+    private function requestClaudeWebIdentification(
+        string $foodName,
+        string $apiKey,
+        array $allowedDomains = [],
+    ): array|string|null {
         $queryHints = (new NutritionSearchQueryBuilder())->buildClaudeWebSearchQueryHints($foodName);
         if ($queryHints === []) {
             $queryHints = [trim($foodName) . ' カロリー'];
         }
 
-        $payload = [
-            'model' => self::MODEL,
-            'max_tokens' => self::WEB_SEARCH_MAX_TOKENS,
-            'system' => self::WEB_SEARCH_SYSTEM_PROMPT,
-            'messages' => [
-                [
-                    'role' => 'user',
-                    'content' => $this->buildClaudeWebIdentificationPrompt($foodName, $queryHints),
-                ],
-            ],
-            'tools' => [
-                [
-                    'type' => 'web_search_20250305',
-                    'name' => 'web_search',
-                    'max_uses' => min(2, max(1, count($queryHints))),
-                    'user_location' => [
-                        'type' => 'approximate',
-                        'country' => 'JP',
-                        'timezone' => 'Asia/Tokyo',
-                    ],
-                ],
+        $domainPasses = [];
+        if ($allowedDomains !== []) {
+            $domainPasses[] = $allowedDomains;
+        }
+        $domainPasses[] = []; // ドメイン制限なし（公式限定で見つからない場合のみ到達）
+
+        $lastParsed = null;
+        foreach ($domainPasses as $passIndex => $domains) {
+            $parsed = $this->runClaudeWebIdentificationPass(
+                $foodName,
+                $apiKey,
+                $queryHints,
+                $domains,
+                $passIndex === 0 && $domains !== [],
+            );
+            if (is_array($parsed)) {
+                return $parsed;
+            }
+            if ($parsed === 'ambiguous') {
+                $lastParsed = 'ambiguous';
+                // 公式限定で ambiguous なら制限なしでも試す
+                continue;
+            }
+            if ($parsed === 'not_found' || $parsed === null) {
+                $lastParsed = $parsed;
+                continue;
+            }
+            if ($parsed === 'not_food') {
+                return 'not_food';
+            }
+        }
+
+        return $lastParsed;
+    }
+
+    /**
+     * @param list<string> $queryHints
+     * @param list<string> $allowedDomains
+     * @return array{product_name: string, brand?: string, source_urls: list<string>, kcal: int, confidence: string}|'not_food'|'not_found'|'ambiguous'|null
+     */
+    private function runClaudeWebIdentificationPass(
+        string $foodName,
+        string $apiKey,
+        array $queryHints,
+        array $allowedDomains,
+        bool $officialDomainPass,
+    ): array|string|null {
+        $messages = [
+            [
+                'role' => 'user',
+                'content' => $this->buildClaudeWebIdentificationPrompt(
+                    $foodName,
+                    $queryHints,
+                    $allowedDomains,
+                    $officialDomainPass,
+                ),
             ],
         ];
 
-        $decoded = $this->postToAnthropic($payload, $apiKey, true);
+        $tool = [
+            'type' => 'web_search_20250305',
+            'name' => 'web_search',
+            'max_uses' => min(2, max(1, count($queryHints))),
+            'user_location' => [
+                'type' => 'approximate',
+                'country' => 'JP',
+                'timezone' => 'Asia/Tokyo',
+            ],
+        ];
+        if ($allowedDomains !== []) {
+            $tool['allowed_domains'] = array_values($allowedDomains);
+        }
+
+        $tools = [$tool];
+        $decoded = $this->sendClaudeWebSearchRequest($messages, $tools, $apiKey);
+        $continuationCount = 0;
+
+        while (
+            ($decoded['stop_reason'] ?? '') === 'pause_turn'
+            && $continuationCount < self::MAX_PAUSE_TURN_CONTINUATIONS
+        ) {
+            $content = $decoded['content'] ?? [];
+            if (!is_array($content) || $content === []) {
+                break;
+            }
+
+            $messages[] = [
+                'role' => 'assistant',
+                'content' => $content,
+            ];
+
+            $decoded = $this->sendClaudeWebSearchRequest($messages, $tools, $apiKey);
+            $continuationCount++;
+        }
+
+        $stopReason = (string) ($decoded['stop_reason'] ?? '');
+        $this->lastClaudeWebSearchMeta = [
+            'stop_reason' => $stopReason,
+            'pause_turn_continuations' => $continuationCount,
+            'pause_turn_limit_exceeded' => $stopReason === 'pause_turn',
+            'allowed_domains' => $allowedDomains,
+            'official_domain_pass' => $officialDomainPass,
+        ];
+
+        if ($stopReason === 'pause_turn') {
+            error_log('[ai_web_search] ' . json_encode([
+                'event' => 'claude_pause_turn_limit_exceeded',
+                'continuations' => $continuationCount,
+            ], JSON_UNESCAPED_UNICODE));
+
+            return null;
+        }
+
         $text = $this->extractText($decoded);
         $parsed = $this->parseClaudeWebIdentificationResponse($text, $foodName);
 
@@ -837,10 +986,33 @@ PROMPT;
     }
 
     /**
-     * @param list<string> $queryHints
+     * @param list<array<string, mixed>> $messages
+     * @param list<array<string, mixed>> $tools
+     * @return array<string, mixed>
      */
-    private function buildClaudeWebIdentificationPrompt(string $foodName, array $queryHints): string
+    private function sendClaudeWebSearchRequest(array $messages, array $tools, string $apiKey): array
     {
+        $payload = [
+            'model' => self::MODEL,
+            'max_tokens' => self::WEB_SEARCH_MAX_TOKENS,
+            'system' => self::WEB_SEARCH_SYSTEM_PROMPT,
+            'messages' => $messages,
+            'tools' => $tools,
+        ];
+
+        return $this->postToAnthropic($payload, $apiKey, true);
+    }
+
+    /**
+     * @param list<string> $queryHints
+     * @param list<string> $allowedDomains
+     */
+    private function buildClaudeWebIdentificationPrompt(
+        string $foodName,
+        array $queryHints,
+        array $allowedDomains = [],
+        bool $officialDomainPass = false,
+    ): string {
         $storeSourceHint = $this->buildConvenienceStoreSourceHint($foodName);
         $primary = $queryHints[0] ?? (trim($foodName) . ' カロリー');
         $alternate = $queryHints[1] ?? null;
@@ -849,27 +1021,41 @@ PROMPT;
             $queryInstructions .= "- 見つからない場合のみ、次のクエリで1回だけ追加検索してよい: 「{$alternate}」\n";
         }
         $queryInstructions .= "- 入力の誤記・語順ゆれに引きずられず、核心語（食材名+料理名）と公式詳細ページを優先する\n";
+        $queryInstructions .= "- 完全な商品名とコアトークンで検索する\n";
+
+        $domainInstructions = '';
+        if ($officialDomainPass && $allowedDomains !== []) {
+            $domainList = implode(', ', $allowedDomains);
+            $domainInstructions = "- これは公式ドメイン限定の最初の試行です。allowed_domains={$domainList} 内だけを検索する\n"
+                . "- 公式ドメインを最初に検索する\n";
+        } elseif ($allowedDomains === []) {
+            $domainInstructions = "- 公式ドメイン限定で見つからなかったため、ドメイン制限なしで再検索してよい\n";
+        }
 
         return <<<PROMPT
-以下の入力が食品かどうかを判定し、食品の場合は正式な商品名と、その商品のカロリーが記載されているページ URL を特定してください。
+これは食品分類タスクではなく、商品情報検索タスクです。入力は食品として扱います。not_food は返さないでください。
+必ず web_search で検索してから回答してください。
 
 入力: {$foodName}
 
 【Web検索】
 - 必ず web_search で検索してから回答する
-{$queryInstructions}- メーカー公式・コンビニ公式・商品詳細ページを優先する
+{$domainInstructions}{$queryInstructions}- メーカー公式・コンビニ公式・商品詳細ページを優先する
 - 入力と味・ソース名が違う類似メニュー（例: 旨辛と甘酢）を選ばない。語順が近いだけの別商品は不可
-{$storeSourceHint}- レビューサイト、ブログ、まとめ記事は source_urls に入れない
+- 似た別味を同一商品として扱わない
+{$storeSourceHint}- レビューサイト、ブログ、まとめ記事は source_urls に入れない（公式が見つからない場合の最終手段を除く）
 - ログイン必須のサイト（eatsmart.jp など）は source_urls に入れない
 - source_urls には特定した商品の栄養成分・カロリーが載っている URL のみ入れる（最大5件）
 - kcal はページに記載があればその値、なければ推定値を入れる（HTML 抽出失敗時のフォールバック用）
 
 最終回答は JSON のみ。前置きや説明は不要。
 
-食品の場合:
-{"product_name": "正式な商品名", "brand": "ブランド名またはnull", "source_urls": ["URL1", "URL2"], "kcal": 整数, "confidence": "high"|"medium"|"low"}
+見つかった場合 (status=found):
+{"status":"found","product_name":"正式な商品名","brand":"ブランド名またはnull","source_urls":["URL1","URL2"],"kcal":整数,"confidence":"high"|"medium"|"low"}
 - brand はメーカー・店舗・サービス名。入力やページに明示がある場合のみ。推測で埋めない。不明なら null
-非食品の場合: {"error":"not_food"}
+
+見つからない場合: {"status":"not_found"}
+候補が複数で特定できない場合: {"status":"ambiguous"}
 PROMPT;
     }
 
@@ -1111,7 +1297,7 @@ PROMPT;
     }
 
     /**
-     * @return array{product_name: string, brand?: string|null, source_urls: list<string>, kcal: int, confidence: string}|'not_food'|null
+     * @return array{product_name: string, brand?: string|null, source_urls: list<string>, kcal: int, confidence: string}|'not_food'|'not_found'|'ambiguous'|null
      */
     private function parseClaudeWebIdentificationResponse(string $text, string $foodName): array|string|null
     {
@@ -1126,11 +1312,27 @@ PROMPT;
                 continue;
             }
 
+            $status = strtolower(trim((string) ($json['status'] ?? '')));
+            if ($status === 'not_found') {
+                return 'not_found';
+            }
+            if ($status === 'ambiguous') {
+                return 'ambiguous';
+            }
+
             if ($this->isNotFoodResponse($json)) {
+                // 互換: 旧スキーマ。呼び出し側で食品事前分類なら契約違反として扱う
                 return 'not_food';
             }
 
+            if ($status !== '' && $status !== 'found') {
+                continue;
+            }
+
             if (!isset($json['kcal']) || !is_numeric($json['kcal'])) {
+                if ($status === 'found') {
+                    return 'ambiguous';
+                }
                 continue;
             }
 
@@ -1160,6 +1362,7 @@ PROMPT;
                 'source_urls' => $this->normalizeSourceUrls($json['source_urls'] ?? []),
                 'kcal' => $kcal,
                 'confidence' => $confidence,
+                'status' => 'found',
             ];
         }
 
@@ -1419,6 +1622,15 @@ PROMPT;
      */
     private function postToAnthropic(array $payload, string $apiKey, bool $withWebSearch): array
     {
+        if (is_callable($this->anthropicTransport)) {
+            $decoded = ($this->anthropicTransport)($payload, $apiKey, $withWebSearch);
+            if (!is_array($decoded)) {
+                throw new RuntimeException('カロリー推定サービスの応答を解析できませんでした。');
+            }
+
+            return $decoded;
+        }
+
         if (!function_exists('curl_init')) {
             throw new RuntimeException('curl 拡張が有効になっていません。');
         }

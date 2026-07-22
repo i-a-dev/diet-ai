@@ -85,6 +85,11 @@ final class WebSearchBudget
         return $this->htmlFetchCalls < self::MAX_HTML_FETCHES;
     }
 
+    public function remainingHtmlFetches(): int
+    {
+        return max(0, self::MAX_HTML_FETCHES - $this->htmlFetchCalls);
+    }
+
     public function recordHtmlFetch(string $url): void
     {
         $this->htmlFetchCalls++;

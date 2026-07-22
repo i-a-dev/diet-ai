@@ -253,6 +253,70 @@ final class ProductMatchEvaluator
         return $nameSimilarity >= self::CONFIRMATION_UI_NAME_SIM_MIN;
     }
 
+    /**
+     * ランカー向けの商品名／タイトル一致分析（コア判定は evaluate と共有）。
+     *
+     * @return array{
+     *   name_similarity: float,
+     *   core_similarity: float,
+     *   has_distinct_cores: bool,
+     *   has_exact_phrase: bool,
+     *   token_coverage: float
+     * }
+     */
+    public function analyzeTitleMatch(
+        string $queryProductName,
+        string $titleOrCandidate,
+        ?string $brandName = null,
+    ): array {
+        $queryProduct = $this->extractProductForComparison($queryProductName, $this->normalizeBrandToken((string) $brandName));
+        $candidateProduct = $this->extractProductForComparison($titleOrCandidate, null);
+        $nameAnalysis = $this->analyzeNameSimilarity($queryProduct, $candidateProduct);
+
+        $queryNorm = $this->normalizeProductName($queryProduct);
+        $candidateNorm = $this->normalizeProductName($candidateProduct);
+        $hasExactPhrase = $queryNorm !== '' && str_contains($candidateNorm, $queryNorm);
+
+        $queryTokens = $this->tokenizeForCoverage($queryProduct);
+        $candidateTokens = $this->tokenizeForCoverage($candidateProduct);
+        $tokenCoverage = 0.0;
+        if ($queryTokens !== []) {
+            $matched = count(array_intersect($queryTokens, $candidateTokens));
+            $tokenCoverage = $matched / count($queryTokens);
+        }
+
+        return [
+            'name_similarity' => (float) $nameAnalysis['name_similarity'],
+            'core_similarity' => (float) $nameAnalysis['core_similarity'],
+            'has_distinct_cores' => (bool) $nameAnalysis['has_distinct_cores'],
+            'has_exact_phrase' => $hasExactPhrase,
+            'token_coverage' => $tokenCoverage,
+        ];
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function tokenizeForCoverage(string $value): array
+    {
+        $normalized = $this->normalizeProductName($value);
+        if ($normalized === '') {
+            return [];
+        }
+
+        $tokens = [];
+        if (preg_match_all('/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}ーｰa-z0-9]{2,}/u', $normalized, $matches) > 0) {
+            foreach ($matches[0] as $token) {
+                $token = mb_strtolower(trim((string) $token));
+                if ($token !== '' && !in_array($token, $tokens, true)) {
+                    $tokens[] = $token;
+                }
+            }
+        }
+
+        return $tokens;
+    }
+
     private function resolveQueryBrand(
         string $queryRaw,
         string $planBrand,

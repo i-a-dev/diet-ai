@@ -17,6 +17,16 @@ require_once __DIR__ . '/../src/OfficialSiteBrandResolver.php';
 require_once __DIR__ . '/../src/ProductMatchResult.php';
 require_once __DIR__ . '/../src/ProductMatchEvaluator.php';
 require_once __DIR__ . '/../src/NutritionPageVariantExtractor.php';
+require_once __DIR__ . '/../src/FoodSearchSubject.php';
+require_once __DIR__ . '/../src/FoodSearchSubjectNormalizer.php';
+require_once __DIR__ . '/../src/HtmlFetchPlanBuilder.php';
+require_once __DIR__ . '/../src/OfficialCatalogCandidate.php';
+require_once __DIR__ . '/../src/OfficialCatalogProvider.php';
+require_once __DIR__ . '/../src/OfficialCatalogCache.php';
+require_once __DIR__ . '/../src/NoshCatalogProvider.php';
+require_once __DIR__ . '/../src/GenericSitemapCatalogProvider.php';
+require_once __DIR__ . '/../src/GenericListingPageCatalogProvider.php';
+require_once __DIR__ . '/../src/OfficialCatalogDiscovery.php';
 require_once __DIR__ . '/../src/FoodWebSearchPlanService.php';
 require_once __DIR__ . '/../src/AiWebSearchService.php';
 require_once __DIR__ . '/../src/CalorieEstimateService.php';
@@ -45,14 +55,28 @@ echo "OK provider resolve / flags\n";
 $cacheDir = sys_get_temp_dir() . '/diet_ai_web_search_cache_provider_' . getmypid();
 @mkdir($cacheDir, 0775, true);
 $cache = new WebSearchResultCache($cacheDir, 3600);
-$payload = ['response' => ['kcal' => 100, 'source' => 'brave_html']];
+$payload = ['response' => [
+    'kcal' => 100,
+    'source' => 'brave_html',
+    'needs_confirmation' => false,
+    'identity_confidence' => 'high',
+    'verification_confidence' => 'high',
+    'web_search_status' => 'confirmed',
+]];
 $cache->put('テスト商品', $payload, provider: 'auto');
 assertTrue($cache->get('テスト商品', provider: 'auto') !== null, 'auto cache hit');
 assertTrue($cache->get('テスト商品', provider: 'brave_only') === null, 'brave_only does not see auto cache');
-$cache->put('テスト商品', ['response' => ['kcal' => 200, 'source' => 'brave_html']], provider: 'brave_only');
+$cache->put('テスト商品', ['response' => [
+    'kcal' => 200,
+    'source' => 'brave_html',
+    'needs_confirmation' => false,
+    'identity_confidence' => 'high',
+    'verification_confidence' => 'high',
+    'web_search_status' => 'confirmed',
+]], provider: 'brave_only');
 $braveHit = $cache->get('テスト商品', provider: 'brave_only');
 assertTrue(($braveHit['response']['kcal'] ?? 0) === 200, 'brave_only cache isolated');
-echo "OK cache key includes provider (v5)\n";
+echo "OK cache key includes provider (v6)\n";
 
 $calorie = new CalorieEstimateService();
 $ref = new ReflectionClass($calorie);

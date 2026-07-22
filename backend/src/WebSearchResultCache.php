@@ -10,12 +10,64 @@ final class WebSearchResultCache
     private const DEFAULT_TTL_SECONDS = 86400;
 
     /** 候補スキーマ変更時に上げて古いキャッシュを無効化する */
-    private const CACHE_SCHEMA_VERSION = 'v5';
+    private const CACHE_SCHEMA_VERSION = 'v6';
 
     public function __construct(
         private readonly string $cacheDir = '',
         private readonly int $ttlSeconds = self::DEFAULT_TTL_SECONDS,
     ) {
+    }
+
+    public function isEnabled(): bool
+    {
+        $raw = getenv('AI_WEB_SEARCH_CACHE_ENABLED');
+        if ($raw === false || $raw === '') {
+            return true;
+        }
+
+        return !in_array(strtolower(trim((string) $raw)), ['0', 'false', 'no', 'off'], true);
+    }
+
+    /**
+     * 自動確定済みの強い結果だけキャッシュする。
+     *
+     * @param array<string, mixed> $response
+     */
+    public function shouldCacheResponse(array $response): bool
+    {
+        if (($response['needs_confirmation'] ?? false) === true) {
+            return false;
+        }
+
+        $status = (string) ($response['web_search_status'] ?? '');
+        if (in_array($status, [
+            'needs_variant_confirmation',
+            'identity_ambiguous',
+            'variant_ambiguous',
+            'estimated_fallback',
+            'no_web_search',
+            'not_found',
+        ], true)) {
+            return false;
+        }
+
+        if ((int) ($response['kcal'] ?? 0) <= 0) {
+            return false;
+        }
+
+        if (($response['identity_confidence'] ?? '') !== 'high') {
+            return false;
+        }
+
+        if (($response['verification_confidence'] ?? 'medium') === 'low') {
+            return false;
+        }
+
+        if ($status !== '' && $status !== 'confirmed') {
+            return false;
+        }
+
+        return true;
     }
 
     /**
@@ -27,6 +79,10 @@ final class WebSearchResultCache
         ?string $variantHint = null,
         string $provider = AiWebSearchProvider::AUTO,
     ): ?array {
+        if (!$this->isEnabled()) {
+            return null;
+        }
+
         $path = $this->pathForKey($this->buildKey($userInput, $brandName, $variantHint, $provider));
         if (!is_file($path)) {
             return null;
@@ -49,11 +105,23 @@ final class WebSearchResultCache
             return null;
         }
 
-        return $decoded['payload'] ?? null;
+        $payload = $decoded['payload'] ?? null;
+        if (!is_array($payload)) {
+            return null;
+        }
+
+        $response = $payload['response'] ?? null;
+        if (is_array($response) && !$this->shouldCacheResponse($response)) {
+            @unlink($path);
+
+            return null;
+        }
+
+        return $payload;
     }
 
     /**
-     * @param array{plan?: array<string, mixed>, candidates?: list<array<string, mixed>>} $payload
+     * @param array{plan?: array<string, mixed>, candidates?: list<array<string, mixed>>, response?: array<string, mixed>} $payload
      */
     public function put(
         string $userInput,
@@ -62,6 +130,15 @@ final class WebSearchResultCache
         ?string $variantHint = null,
         string $provider = AiWebSearchProvider::AUTO,
     ): void {
+        if (!$this->isEnabled()) {
+            return;
+        }
+
+        $response = $payload['response'] ?? null;
+        if (is_array($response) && !$this->shouldCacheResponse($response)) {
+            return;
+        }
+
         $dir = $this->resolveCacheDir();
         if (!is_dir($dir) && !mkdir($dir, 0775, true) && !is_dir($dir)) {
             return;

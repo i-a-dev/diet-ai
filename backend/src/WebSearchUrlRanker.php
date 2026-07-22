@@ -65,12 +65,13 @@ final class WebSearchUrlRanker
 
     public function __construct(
         private readonly NutritionPageExtractor $pageExtractor = new NutritionPageExtractor(),
+        private readonly ProductMatchEvaluator $productMatchEvaluator = new ProductMatchEvaluator(),
     ) {
     }
 
     /**
      * @param list<array{title: string, url: string, description: string}> $results
-     * @return list<array{url: string, score: int, title: string, description: string}>
+     * @return list<array{url: string, score: int, title: string, description: string, title_match?: array<string, mixed>}>
      */
     public function rank(
         array $results,
@@ -101,14 +102,45 @@ final class WebSearchUrlRanker
             $seen[$canonical] = true;
             $title = trim($result['title'] ?? '');
             $description = trim($result['description'] ?? '');
+            $extraSnippets = [];
+            if (is_array($result['extra_snippets'] ?? null)) {
+                foreach ($result['extra_snippets'] as $snippet) {
+                    $text = trim((string) $snippet);
+                    if ($text !== '') {
+                        $extraSnippets[] = $text;
+                    }
+                }
+            }
+            $descriptionForScore = trim($description . ' ' . implode(' ', $extraSnippets));
+            $titleMatch = $this->productMatchEvaluator->analyzeTitleMatch(
+                $productName,
+                $this->titleProductHint($title),
+                $brandName,
+            );
+            // extra snippets 上の完全一致もタイトル一致に反映
+            if ($extraSnippets !== [] && ($titleMatch['has_exact_phrase'] ?? false) !== true) {
+                $snippetMatch = $this->productMatchEvaluator->analyzeTitleMatch(
+                    $productName,
+                    implode(' ', $extraSnippets),
+                    $brandName,
+                );
+                if (($snippetMatch['has_exact_phrase'] ?? false) === true) {
+                    $titleMatch['has_exact_phrase'] = true;
+                    $titleMatch['token_coverage'] = max(
+                        (float) ($titleMatch['token_coverage'] ?? 0),
+                        (float) ($snippetMatch['token_coverage'] ?? 0),
+                    );
+                }
+            }
             $score = $this->scoreUrl(
                 $url,
                 $title,
-                $description,
+                $descriptionForScore,
                 $normalizedProduct,
                 $normalizedBrand,
                 $index,
                 $searchMode,
+                $titleMatch,
             );
 
             $ranked[] = [
@@ -116,6 +148,8 @@ final class WebSearchUrlRanker
                 'score' => $score,
                 'title' => $title,
                 'description' => $description,
+                'extra_snippets' => $extraSnippets,
+                'title_match' => $titleMatch,
             ];
         }
 
@@ -124,6 +158,15 @@ final class WebSearchUrlRanker
         return $ranked;
     }
 
+    /**
+     * @param array{
+     *   name_similarity: float,
+     *   core_similarity: float,
+     *   has_distinct_cores: bool,
+     *   has_exact_phrase: bool,
+     *   token_coverage: float
+     * } $titleMatch
+     */
     private function scoreUrl(
         string $url,
         string $title,
@@ -132,6 +175,7 @@ final class WebSearchUrlRanker
         string $brandName,
         int $braveIndex,
         string $searchMode,
+        array $titleMatch,
     ): int {
         $score = max(0, 100 - ($braveIndex * 5));
         $host = strtolower((string) parse_url($url, PHP_URL_HOST));
@@ -141,7 +185,10 @@ final class WebSearchUrlRanker
         $descLower = $this->normalize($description);
         $urlLower = $this->normalize($url);
         $preferListPages = in_array($searchMode, ['variant_list_page', 'product_list_page'], true);
-        $titleHasProduct = $productName !== '' && str_contains($titleLower, $productName);
+        $hasExactPhrase = (bool) ($titleMatch['has_exact_phrase'] ?? false);
+        $tokenCoverage = (float) ($titleMatch['token_coverage'] ?? 0.0);
+        $hasDistinctCores = (bool) ($titleMatch['has_distinct_cores'] ?? false);
+        $titleHasProduct = $hasExactPhrase || $tokenCoverage >= 0.67;
         $isOfficial = $this->pageExtractor->isOfficialUrl($url);
 
         if ($isOfficial) {
@@ -154,8 +201,17 @@ final class WebSearchUrlRanker
             }
         }
 
-        if ($titleHasProduct) {
-            $score += 40;
+        if ($hasExactPhrase) {
+            $score += 50;
+        } elseif ($tokenCoverage >= 0.67) {
+            $score += 35;
+        } elseif ($tokenCoverage >= 0.50) {
+            $score += 15;
+        }
+
+        if ($hasDistinctCores) {
+            // 公式でも別味（辛旨 vs 甘酢等）は HTML 取得上位に上げない
+            $score -= $isOfficial ? 140 : 80;
         }
 
         if ($brandName !== '' && (str_contains($titleLower, $brandName) || str_contains($descLower, $brandName))) {
@@ -179,6 +235,16 @@ final class WebSearchUrlRanker
 
         if ($productName !== '' && str_contains($descLower, $productName)) {
             $score += 10;
+        }
+
+        // 公式でも全文一致が無く、トークン一致も弱い場合だけ減点する
+        if (
+            $isOfficial
+            && !$hasExactPhrase
+            && $tokenCoverage < 0.50
+            && !$preferListPages
+        ) {
+            $score -= 40;
         }
 
         return $score;
@@ -212,12 +278,15 @@ final class WebSearchUrlRanker
             $score -= 55;
         }
 
-        // 公式なのにタイトルに商品名が無い（メニューTOP等）
-        if ($isOfficial && !$titleHasProduct) {
-            $score -= 40;
-        }
-
         return $score;
+    }
+
+    private function titleProductHint(string $title): string
+    {
+        $hint = trim((string) preg_replace('/\s*[|｜].*$/u', '', $title));
+        $hint = trim((string) preg_replace('/\s*(栄養成分|カロリー|エネルギー).*$/u', '', $hint));
+
+        return $hint !== '' ? $hint : $title;
     }
 
     private function looksLikeDetailId(string $segment): bool

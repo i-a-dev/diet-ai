@@ -77,18 +77,26 @@ final class FoodWebSearchPlan
      */
     public static function fallbackFromInput(string $userInput, FoodVariantAnalyzer $analyzer): self
     {
-        $analysis = $analyzer->analyzeInput($userInput);
-        $baseName = $analysis['base_product_name'] !== ''
-            ? $analysis['base_product_name']
-            : trim($userInput);
+        $subject = (new FoodSearchSubjectNormalizer())->normalize($userInput);
+
+        return self::fallbackFromSubject($subject, $analyzer);
+    }
+
+    /**
+     * 正規化済み検索対象からフォールバック計画を生成する。
+     */
+    public static function fallbackFromSubject(FoodSearchSubject $subject, FoodVariantAnalyzer $analyzer): self
+    {
+        $productName = $subject->productName !== '' ? $subject->productName : $subject->rawInput;
+        $analysis = $analyzer->analyzeInput($productName);
 
         return new self(
             isFood: true,
-            normalizedProductName: $baseName,
-            brandName: null,
+            normalizedProductName: $productName,
+            brandName: $subject->brandName,
             productType: 'unknown',
-            likelyHasVariants: $analysis['has_explicit_variant'] === false
-                && in_array($analysis['variant_risk'], ['medium', 'high'], true),
+            likelyHasVariants: ($analysis['has_explicit_variant'] ?? false) === false
+                && in_array($analysis['variant_risk'] ?? 'low', ['medium', 'high'], true),
             variantDimension: 'unknown',
             expectedLabels: [],
             variantConfidence: 'low',

@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../src/NutritionPageExtractor.php';
 require_once __DIR__ . '/../src/OfficialSiteBrandResolver.php';
+require_once __DIR__ . '/../src/FoodVariantAnalyzer.php';
+require_once __DIR__ . '/../src/ProductMatchResult.php';
+require_once __DIR__ . '/../src/ProductMatchEvaluator.php';
 require_once __DIR__ . '/../src/WebSearchUrlRanker.php';
 
 function assertTrue(bool $condition, string $message): void

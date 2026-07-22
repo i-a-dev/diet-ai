@@ -5,8 +5,8 @@ declare(strict_types=1);
 /**
  * AI Web 検索の実行モード（AI_WEB_SEARCH_PROVIDER）。
  *
- * - auto: Brave → 0件時のみ Claude Web Search（既定）
- * - brave_only: Brave のみ（0件は estimated_fallback）
+ * - auto: Brave → 自動確定できない場合に Claude Web Search
+ * - brave_only: Brave のみ（自動確定不可は estimated_fallback / confirmation）
  * - claude_only: Haiku 計画なしで Claude Web Search 直
  */
 final class AiWebSearchProvider

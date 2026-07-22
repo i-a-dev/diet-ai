@@ -5,7 +5,7 @@ declare(strict_types=1);
 /**
  * 1ページの HTML から複数バリアントとカロリーを抽出する。
  */
-final class NutritionPageVariantExtractor
+class NutritionPageVariantExtractor
 {
     /** @var list<string> */
     private const SERVING_SIZE_LABELS = [

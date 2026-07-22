@@ -7,49 +7,114 @@ declare(strict_types=1);
  */
 final class NutritionSearchQueryBuilder
 {
-    /** @var array<string, string> */
-    private const BRAND_OFFICIAL_SITES = [
-        'マクドナルド' => 'mcdonalds.co.jp',
-        'マック' => 'mcdonalds.co.jp',
-        'mcdonald' => 'mcdonalds.co.jp',
-        'すき家' => 'sukiya.jp',
-        '吉野家' => 'yoshinoya.com',
-        '松屋' => 'matsuyafoods.co.jp',
-        'スターバックス' => 'starbucks.co.jp',
-        'starbucks' => 'starbucks.co.jp',
-        'セブンイレブン' => 'sej.co.jp',
-        'セブン' => 'sej.co.jp',
-        'ローソン' => 'lawson.co.jp',
-        'ファミリーマート' => 'family.co.jp',
-        'ファミマ' => 'family.co.jp',
-        '山芳製菓' => 'sanyo-seika.co.jp',
-        'ナッシュ' => 'nosh.jp',
-        'nosh' => 'nosh.jp',
-    ];
+    public function __construct(
+        private readonly OfficialSiteBrandResolver $officialSiteBrandResolver = new OfficialSiteBrandResolver(),
+    ) {
+    }
 
     /**
-     * @return list<string> 最大2件
+     * @return list<string> 最大4件（互換用。buildSearchQueries へ委譲）
      */
     public function build(FoodWebSearchPlan $plan, string $userInput = ''): array
+    {
+        return $this->buildSearchQueries($userInput, $plan);
+    }
+
+    /**
+     * 目的の異なる Brave 検索クエリを最大4件生成する。
+     *
+     * 推奨順:
+     * 1. 公式商品ページ検索
+     * 2. 一般的な商品名＋カロリー検索
+     * 3. ブランド＋主要商品トークン＋栄養成分検索
+     * 4. バリアント・サイズ・商品一覧検索（likelyHasVariants 時のみ）
+     *
+     * @return list<string>
+     */
+    public function buildSearchQueries(string $userInput, FoodWebSearchPlan $plan): array
     {
         if ($plan->searchMode === 'no_web_search' || !$plan->isFood) {
             return [];
         }
 
-        $productName = $plan->normalizedProductName;
+        $subject = (new FoodSearchSubjectNormalizer($this->officialSiteBrandResolver, $this))->normalize(
+            $userInput !== '' ? $userInput : trim(($plan->brandName ?? '') . ' ' . $plan->normalizedProductName),
+        );
+
+        $productName = $plan->normalizedProductName !== ''
+            ? $plan->normalizedProductName
+            : $subject->productName;
+        // plan にブランドが残っている場合は subject の brand-free 名を優先
+        if (
+            $subject->productName !== ''
+            && $plan->brandName === null
+            && $subject->brandName !== null
+            && str_contains($productName, $subject->brandName)
+        ) {
+            $productName = $subject->productName;
+        }
         if ($productName === '') {
             return [];
         }
 
-        $searchName = $this->resolveSearchName($plan, $userInput);
-        $terms = $plan->queryTerms !== [] ? $plan->queryTerms : $this->defaultQueryTerms($plan);
+        $brandName = $plan->brandName ?? $subject->brandName;
+        $rawInput = $subject->rawInput !== '' ? $subject->rawInput : $this->normalizeUserSearchBase($userInput);
+        $officialSite = $this->resolveOfficialSite($brandName, $productName !== '' ? $productName : $rawInput);
+        $coreTokens = $subject->productTokens !== []
+            ? $subject->productTokens
+            : $this->extractCoreSearchTokens($productName, $brandName);
+        $coreTokenText = $coreTokens !== [] ? implode(' ', $coreTokens) : $productName;
 
-        return match ($plan->searchMode) {
-            'variant_list_page' => $this->buildVariantListQueries($searchName, $terms, $plan),
-            'product_list_page' => $this->buildProductListQueries($searchName, $terms, $plan),
-            'single_product' => $this->buildSingleProductQueries($searchName, $terms, $plan),
-            default => array_slice([$this->joinTerms($searchName, $terms)], 0, 1),
-        };
+        $ordered = [];
+
+        // 1. 公式詳細向け site クエリ（ブランド名は冗長なので付けない）
+        if ($officialSite !== null) {
+            $pathHint = $this->officialSiteBrandResolver->officialDetailPathHint($brandName, $productName);
+            if ($pathHint !== null && $coreTokenText !== '') {
+                $ordered[] = 'site:' . $officialSite . $pathHint . ' ' . $coreTokenText;
+            }
+            $ordered[] = 'site:' . $officialSite . ' ' . $productName;
+        }
+
+        // 2. raw input を含む一般カロリー検索
+        if ($rawInput !== '') {
+            $ordered[] = trim($rawInput . ' カロリー');
+        }
+
+        // 3. 商品名 + ブランドエイリアス + 栄養成分（バリアント検索が必要なときは後回し）
+        $aliases = $this->officialSiteBrandResolver->brandAliases($brandName);
+        $aliasHint = '';
+        foreach ($aliases as $alias) {
+            if ($alias !== $brandName && !str_contains(mb_strtolower($productName), mb_strtolower($alias))) {
+                $aliasHint = $alias;
+                break;
+            }
+        }
+        $nutritionQuery = trim($productName . ($aliasHint !== '' ? ' ' . $aliasHint : '') . ' 栄養成分');
+
+        // 4. バリアント・サイズ・一覧（根拠があるときだけ・上限内に残す）
+        if ($plan->likelyHasVariants) {
+            $variantBase = trim(($brandName !== null ? $brandName . ' ' : '') . $productName);
+            $ordered[] = match ($plan->searchMode) {
+                'product_list_page' => trim($variantBase . ' 商品一覧 内容量'),
+                default => trim($variantBase . ' サイズ カロリー'),
+            };
+            if ($nutritionQuery !== '栄養成分') {
+                $ordered[] = $nutritionQuery;
+            }
+        } elseif ($nutritionQuery !== '栄養成分') {
+            $ordered[] = $nutritionQuery;
+        }
+
+        $deduped = $this->uniqueNormalizedQueries($ordered);
+
+        // raw user input を含む検索を最低1件残す
+        if ($rawInput !== '' && !$this->queriesContainRawInput($deduped, $rawInput)) {
+            array_unshift($deduped, trim($rawInput . ' カロリー'));
+            $deduped = $this->uniqueNormalizedQueries($deduped);
+        }
+
+        return array_slice($deduped, 0, WebSearchBudget::MAX_TOTAL_BRAVE_SEARCHES);
     }
 
     /**
@@ -58,6 +123,12 @@ final class NutritionSearchQueryBuilder
     public function buildAdditionalSearchName(FoodWebSearchPlan $plan, string $userInput = ''): string
     {
         return $this->resolveSearchName($plan, $userInput);
+    }
+
+    /** @internal テスト用 */
+    public function resolveOfficialSiteForTest(?string $brandName, string $searchName = ''): ?string
+    {
+        return $this->resolveOfficialSite($brandName, $searchName);
     }
 
     /**
@@ -292,7 +363,7 @@ final class NutritionSearchQueryBuilder
 
         $best = null;
         $bestLen = 0;
-        foreach (array_keys(self::BRAND_OFFICIAL_SITES) as $brand) {
+        foreach (array_keys($this->officialSiteBrandResolver->brandOfficialSites()) as $brand) {
             $brandLower = mb_strtolower($brand);
             if ($brandLower === '') {
                 continue;
@@ -394,15 +465,51 @@ final class NutritionSearchQueryBuilder
 
     private function resolveOfficialSite(?string $brandName, string $searchName): ?string
     {
-        $haystack = mb_strtolower(trim(($brandName ?? '') . ' ' . $searchName));
+        return $this->officialSiteBrandResolver->resolveOfficialSite($brandName, $searchName);
+    }
 
-        foreach (self::BRAND_OFFICIAL_SITES as $needle => $site) {
-            if (mb_strpos($haystack, mb_strtolower($needle)) !== false) {
-                return $site;
+    /**
+     * @param list<string> $queries
+     * @return list<string>
+     */
+    private function uniqueNormalizedQueries(array $queries): array
+    {
+        $unique = [];
+        $seen = [];
+        foreach ($queries as $query) {
+            $query = trim($query);
+            if ($query === '') {
+                continue;
+            }
+            $normalized = mb_strtolower(trim(preg_replace('/\s+/u', ' ', $query) ?? ''));
+            if ($normalized === '' || isset($seen[$normalized])) {
+                continue;
+            }
+            $seen[$normalized] = true;
+            $unique[] = $query;
+        }
+
+        return $unique;
+    }
+
+    /**
+     * @param list<string> $queries
+     */
+    private function queriesContainRawInput(array $queries, string $rawInput): bool
+    {
+        $rawNormalized = mb_strtolower(trim(preg_replace('/\s+/u', ' ', $rawInput) ?? ''));
+        if ($rawNormalized === '') {
+            return true;
+        }
+
+        foreach ($queries as $query) {
+            $queryNormalized = mb_strtolower(trim(preg_replace('/\s+/u', ' ', $query) ?? ''));
+            if (str_contains($queryNormalized, $rawNormalized)) {
+                return true;
             }
         }
 
-        return null;
+        return false;
     }
 
     /**

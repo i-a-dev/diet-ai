@@ -320,10 +320,8 @@ final class FoodVariantAnalyzer
             return 'high';
         }
 
-        if (mb_strlen(trim($baseProductName)) >= 4) {
-            return 'medium';
-        }
-
+        // 明示バリアント語・高リスクカテゴリが無い具体的な単品名は low。
+        // 「名前が長いだけ」で medium にしない。
         return 'low';
     }
 

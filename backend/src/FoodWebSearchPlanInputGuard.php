@@ -36,16 +36,43 @@ final class FoodWebSearchPlanInputGuard
 
     public function apply(string $userInput, FoodWebSearchPlan $plan): FoodWebSearchPlan
     {
-        $brandName = $this->resolveBrandNameForInput($userInput, $plan);
-        $queryTerms = $this->sanitizeQueryTerms($userInput, $plan->queryTerms, $plan->normalizedProductName, $brandName);
+        $subject = (new FoodSearchSubjectNormalizer())->normalize($userInput);
 
-        if ($brandName === $plan->brandName && $queryTerms === $plan->queryTerms) {
+        $brandName = $this->resolveBrandNameForInput($userInput, $plan);
+        if ($brandName === null && $subject->brandName !== null) {
+            $brandName = $subject->brandName;
+        }
+
+        $normalizedProductName = $plan->normalizedProductName;
+        if (
+            $subject->productName !== ''
+            && (
+                $normalizedProductName === ''
+                || ($brandName !== null && str_contains($normalizedProductName, $brandName))
+                || ($subject->brandName !== null && str_contains($normalizedProductName, $subject->brandName))
+            )
+        ) {
+            $normalizedProductName = $subject->productName;
+        }
+
+        $queryTerms = $this->sanitizeQueryTerms(
+            $userInput,
+            $plan->queryTerms,
+            $normalizedProductName,
+            $brandName,
+        );
+
+        if (
+            $brandName === $plan->brandName
+            && $queryTerms === $plan->queryTerms
+            && $normalizedProductName === $plan->normalizedProductName
+        ) {
             return $plan;
         }
 
         return new FoodWebSearchPlan(
             isFood: $plan->isFood,
-            normalizedProductName: $plan->normalizedProductName,
+            normalizedProductName: $normalizedProductName,
             brandName: $brandName,
             productType: $plan->productType,
             likelyHasVariants: $plan->likelyHasVariants,

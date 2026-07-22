@@ -5,7 +5,7 @@ declare(strict_types=1);
 /**
  * Claude Haiku で AI Web 検索計画（バリアント仮説）を1回生成する。
  */
-final class FoodWebSearchPlanService
+class FoodWebSearchPlanService
 {
     private const API_URL = 'https://api.anthropic.com/v1/messages';
     private const MODEL = 'claude-haiku-4-5-20251001';

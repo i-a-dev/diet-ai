@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-final class BraveSearchService
+class BraveSearchService
 {
     private const API_URL = 'https://api.search.brave.com/res/v1/web/search';
 
@@ -12,7 +12,7 @@ final class BraveSearchService
      *   http_code: int,
      *   error: string|null,
      *   urls: list<string>,
-     *   results: list<array{title: string, url: string, description: string}>
+     *   results: list<array{title: string, url: string, description: string, extra_snippets?: list<string>}>
      * }
      */
     public function search(string $query, int $count = 10): array
@@ -39,11 +39,15 @@ final class BraveSearchService
             ];
         }
 
+        // Brave の search_lang は ISO 639-1 の ja ではなく jp。要件の「日本語検索」は jp で満たす。
+        // ui_lang は ja-JP。extra_snippets で追加抜粋を取得する。
         $params = http_build_query([
             'q' => $query,
             'count' => max(1, min($count, 20)),
             'country' => 'JP',
             'search_lang' => 'jp',
+            'ui_lang' => 'ja-JP',
+            'extra_snippets' => 'true',
         ]);
 
         $ch = curl_init(self::API_URL . '?' . $params);
@@ -192,7 +196,7 @@ final class BraveSearchService
      *   http_code: int,
      *   error: string|null,
      *   urls: list<string>,
-     *   results: list<array{title: string, url: string, description: string}>
+     *   results: list<array{title: string, url: string, description: string, extra_snippets?: list<string>}>
      * }
      */
     private function buildSearchResult(array $decoded, int $httpCode): array
@@ -211,11 +215,26 @@ final class BraveSearchService
                 continue;
             }
 
-            $results[] = [
+            $extraSnippets = [];
+            if (is_array($item['extra_snippets'] ?? null)) {
+                foreach ($item['extra_snippets'] as $snippet) {
+                    $text = trim((string) $snippet);
+                    if ($text !== '') {
+                        $extraSnippets[] = $text;
+                    }
+                }
+            }
+
+            $result = [
                 'title' => trim((string) ($item['title'] ?? '')),
                 'url' => $url,
                 'description' => trim((string) ($item['description'] ?? '')),
             ];
+            if ($extraSnippets !== []) {
+                $result['extra_snippets'] = $extraSnippets;
+            }
+
+            $results[] = $result;
             $urls[] = $url;
         }
 

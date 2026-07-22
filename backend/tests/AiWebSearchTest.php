@@ -12,6 +12,8 @@ require_once __DIR__ . '/../src/OfficialSiteBrandResolver.php';
 require_once __DIR__ . '/../src/ProductMatchResult.php';
 require_once __DIR__ . '/../src/ProductMatchEvaluator.php';
 require_once __DIR__ . '/../src/NutritionPageVariantExtractor.php';
+require_once __DIR__ . '/../src/FoodSearchSubject.php';
+require_once __DIR__ . '/../src/FoodSearchSubjectNormalizer.php';
 
 function assertTrue(bool $condition, string $message): void
 {
@@ -53,7 +55,7 @@ $macPlan = FoodWebSearchPlan::fromArray([
     'queryTerms' => ['栄養成分', 'サイズ', 'カロリー'],
 ]);
 $macQueries = $builder->build($macPlan);
-assertTrue(count($macQueries) <= 2, 'mac queries max 2');
+assertTrue(count($macQueries) <= 4, 'mac queries max 4');
 assertTrue(count($macQueries) >= 1, 'mac queries at least 1');
 assertTrue(str_contains($macQueries[0], 'マックフライポテト'), 'mac query contains product');
 echo "OK mac plan queries\n";
@@ -91,7 +93,12 @@ $wasabeefPlan = FoodWebSearchPlan::fromArray([
     'queryTerms' => ['商品情報', '内容量', '栄養成分'],
 ]);
 $wasabeefQueries = $builder->build($wasabeefPlan);
-assertTrue(str_contains($wasabeefQueries[0], '商品情報') || str_contains($wasabeefQueries[0], '内容量'), 'wasabeef product list query');
+assertTrue(
+    str_contains(implode("\n", $wasabeefQueries), '商品情報')
+        || str_contains(implode("\n", $wasabeefQueries), '内容量')
+        || str_contains(implode("\n", $wasabeefQueries), '商品一覧'),
+    'wasabeef product list query',
+);
 echo "OK wasabeef plan queries\n";
 
 $planGuard = new FoodWebSearchPlanInputGuard();
@@ -150,8 +157,9 @@ $nashPlan = FoodWebSearchPlan::fromArray([
     'queryTerms' => ['カロリー', '栄養成分'],
 ]);
 $nashQueries = $builder->build($nashPlan, 'ナッシュ おろしハンバーグ');
-assertTrue(str_contains($nashQueries[0], 'ナッシュ'), 'nash query keeps user token when brand is null');
-assertTrue(str_contains($nashQueries[0], 'おろしハンバーグ'), 'nash query keeps normalized product');
+$nashJoined = implode("\n", $nashQueries);
+assertTrue(str_contains($nashJoined, 'ナッシュ'), 'nash query keeps user token when brand is null');
+assertTrue(str_contains($nashJoined, 'おろしハンバーグ') || str_contains($nashJoined, 'おろし'), 'nash query keeps normalized product');
 assertSame('ナッシュ おろしハンバーグ', $builder->resolveSearchName($nashPlan, 'ナッシュ おろしハンバーグ'), 'search name preserves user words');
 echo "OK user input tokens preserved in brave query\n";
 
@@ -176,8 +184,8 @@ assertTrue(
     'nash chili uses official site query',
 );
 assertTrue(
-    !str_contains(implode("\n", $nashChiliQueries), 'site:nosh.jp/menu/detail'),
-    'nash chili does not use brand-specific path hint',
+    str_contains(implode("\n", $nashChiliQueries), 'site:nosh.jp/menu/detail'),
+    'nash chili uses official detail path hint',
 );
 assertTrue(
     str_contains(implode("\n", $nashChiliQueries), 'たら')
@@ -187,8 +195,8 @@ assertTrue(
     'nash chili core tokens include middle 辛旨/旨辛',
 );
 assertTrue(
-    !str_contains(implode("\n", $nashChiliQueries), 'site:nosh.jp たらと旨辛のチリソース'),
-    'nash chili does not use wrong full-name site query as second query',
+    !str_contains(implode("\n", $nashChiliQueries), 'site:nosh.jp/menu/detail ナッシュ'),
+    'nash chili site detail query does not require brand token',
 );
 $coreTokens = $builder->extractCoreSearchTokens('たらと旨辛のチリソース', 'ナッシュ');
 assertSame(['たら', '旨辛', 'チリソース'], $coreTokens, 'core tokens keep middle');
@@ -199,9 +207,8 @@ echo "OK nash chili core detail query\n";
 $claudeHints = $builder->buildClaudeWebSearchQueryHints('ナッシュ たらと旨辛チリソース');
 assertTrue($claudeHints !== [], 'claude hints not empty');
 assertTrue(
-    str_contains($claudeHints[0], 'site:nosh.jp')
-        && !str_contains($claudeHints[0], 'site:nosh.jp/menu/detail'),
-    'claude primary hint prefers official site core query without path hint',
+    str_contains($claudeHints[0], 'site:nosh.jp'),
+    'claude primary hint prefers official site query',
 );
 assertTrue(
     str_contains($claudeHints[0], 'たら')
@@ -231,7 +238,7 @@ echo "OK homemade no_web_search\n";
 $fallback = FoodWebSearchPlan::fallbackFromInput('フライドポテト マック', $analyzer);
 assertSame('single_product', $fallback->searchMode, 'fallback does not use fixed L/M/S mode');
 $fallbackQueries = $builder->build($fallback);
-assertTrue(count($fallbackQueries) <= 2, 'fallback max 2 queries');
+assertTrue(count($fallbackQueries) <= 4, 'fallback max 4 queries');
 echo "OK fallback plan\n";
 
 $budget = new WebSearchBudget();
