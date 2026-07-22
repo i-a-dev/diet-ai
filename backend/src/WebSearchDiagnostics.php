@@ -84,6 +84,23 @@ final class WebSearchDiagnostics
     private int $htmlBudgetRemaining = WebSearchBudget::MAX_HTML_FETCHES;
     private bool $officialCatalogRan = false;
     private int $officialCatalogCandidateCount = 0;
+    private ?string $officialProfileSource = null;
+    private ?string $officialProfileDomain = null;
+    /** @var list<string> */
+    private array $enabledDiscoveryStrategies = [];
+    /** @var list<string> */
+    private array $executedDiscoveryStrategies = [];
+    private int $robotsUrlsFound = 0;
+    private int $sitemapUrlsFound = 0;
+    private int $listingPagesFetched = 0;
+    private int $embeddedJsonCandidates = 0;
+    private int $structuredDataCandidates = 0;
+    private int $mergedOfficialCandidates = 0;
+    private bool $discoveryBudgetExhausted = false;
+    /** @var list<string> */
+    private array $selectedDetailUrls = [];
+    private ?string $finalDiscoverySource = null;
+    private bool $siteAdapterUsed = false;
     private ?string $claudeStatus = null;
     private bool $claudeNotFoodContractViolation = false;
     private ?string $finalSourceStrategy = null;
@@ -290,6 +307,44 @@ final class WebSearchDiagnostics
         $this->officialCatalogCandidateCount = $candidateCount;
     }
 
+    /**
+     * @param array<string, mixed> $payload
+     */
+    public function applyOfficialDiscoveryDiagnostics(array $payload): void
+    {
+        $this->officialCatalogRan = (bool) ($payload['official_discovery_ran'] ?? false);
+        $this->officialCatalogCandidateCount = (int) ($payload['merged_official_candidates'] ?? 0);
+        $this->officialProfileSource = isset($payload['official_profile_source'])
+            ? (string) $payload['official_profile_source']
+            : null;
+        $this->officialProfileDomain = isset($payload['official_profile_domain'])
+            ? (string) $payload['official_profile_domain']
+            : null;
+        $this->enabledDiscoveryStrategies = array_values(array_map(
+            'strval',
+            is_array($payload['enabled_discovery_strategies'] ?? null) ? $payload['enabled_discovery_strategies'] : [],
+        ));
+        $this->executedDiscoveryStrategies = array_values(array_map(
+            'strval',
+            is_array($payload['executed_discovery_strategies'] ?? null) ? $payload['executed_discovery_strategies'] : [],
+        ));
+        $this->robotsUrlsFound = (int) ($payload['robots_urls_found'] ?? 0);
+        $this->sitemapUrlsFound = (int) ($payload['sitemap_urls_found'] ?? 0);
+        $this->listingPagesFetched = (int) ($payload['listing_pages_fetched'] ?? 0);
+        $this->embeddedJsonCandidates = (int) ($payload['embedded_json_candidates'] ?? 0);
+        $this->structuredDataCandidates = (int) ($payload['structured_data_candidates'] ?? 0);
+        $this->mergedOfficialCandidates = (int) ($payload['merged_official_candidates'] ?? 0);
+        $this->discoveryBudgetExhausted = (bool) ($payload['discovery_budget_exhausted'] ?? false);
+        $this->selectedDetailUrls = array_values(array_map(
+            'strval',
+            is_array($payload['selected_detail_urls'] ?? null) ? $payload['selected_detail_urls'] : [],
+        ));
+        $this->finalDiscoverySource = isset($payload['final_discovery_source'])
+            ? (string) $payload['final_discovery_source']
+            : null;
+        $this->siteAdapterUsed = (bool) ($payload['site_adapter_used'] ?? false);
+    }
+
     public function setClaudeStatus(?string $status): void
     {
         $this->claudeStatus = $status;
@@ -366,6 +421,21 @@ final class WebSearchDiagnostics
             'reject_reasons' => $this->rejectReasons,
             'official_catalog_ran' => $this->officialCatalogRan,
             'official_catalog_candidate_count' => $this->officialCatalogCandidateCount,
+            'official_discovery_ran' => $this->officialCatalogRan,
+            'official_profile_source' => $this->officialProfileSource,
+            'official_profile_domain' => $this->officialProfileDomain,
+            'enabled_discovery_strategies' => $this->enabledDiscoveryStrategies,
+            'executed_discovery_strategies' => $this->executedDiscoveryStrategies,
+            'robots_urls_found' => $this->robotsUrlsFound,
+            'sitemap_urls_found' => $this->sitemapUrlsFound,
+            'listing_pages_fetched' => $this->listingPagesFetched,
+            'embedded_json_candidates' => $this->embeddedJsonCandidates,
+            'structured_data_candidates' => $this->structuredDataCandidates,
+            'merged_official_candidates' => $this->mergedOfficialCandidates,
+            'discovery_budget_exhausted' => $this->discoveryBudgetExhausted,
+            'selected_detail_urls' => $this->selectedDetailUrls,
+            'final_discovery_source' => $this->finalDiscoverySource,
+            'site_adapter_used' => $this->siteAdapterUsed,
             'claude_fallback_ran' => $this->claudeFallbackRan,
             'claude_fallback_skip_reason' => $this->claudeFallbackSkipReason,
             'claude_stop_reason' => $this->claudeStopReason,

@@ -20,13 +20,24 @@ require_once __DIR__ . '/../src/NutritionPageVariantExtractor.php';
 require_once __DIR__ . '/../src/FoodSearchSubject.php';
 require_once __DIR__ . '/../src/FoodSearchSubjectNormalizer.php';
 require_once __DIR__ . '/../src/HtmlFetchPlanBuilder.php';
-require_once __DIR__ . '/../src/OfficialCatalogCandidate.php';
-require_once __DIR__ . '/../src/OfficialCatalogProvider.php';
-require_once __DIR__ . '/../src/OfficialCatalogCache.php';
-require_once __DIR__ . '/../src/NoshCatalogProvider.php';
-require_once __DIR__ . '/../src/GenericSitemapCatalogProvider.php';
-require_once __DIR__ . '/../src/GenericListingPageCatalogProvider.php';
-require_once __DIR__ . '/../src/OfficialCatalogDiscovery.php';
+require_once __DIR__ . '/../src/OfficialSiteProfile.php';
+require_once __DIR__ . '/../src/OfficialSiteContext.php';
+require_once __DIR__ . '/../src/DiscoveryEnvironment.php';
+require_once __DIR__ . '/../src/OfficialDiscoveryBudget.php';
+require_once __DIR__ . '/../src/DiscoveredPageCandidate.php';
+require_once __DIR__ . '/../src/OfficialDiscoveryHttpClient.php';
+require_once __DIR__ . '/../src/OfficialPathPatternMatcher.php';
+require_once __DIR__ . '/../src/OfficialSiteProfileRepository.php';
+require_once __DIR__ . '/../src/OfficialDiscoveryIndexCache.php';
+require_once __DIR__ . '/../src/OfficialPageDiscoveryStrategy.php';
+require_once __DIR__ . '/../src/OfficialDiscoveryCandidateFactory.php';
+require_once __DIR__ . '/../src/RobotsSitemapDiscoveryStrategy.php';
+require_once __DIR__ . '/../src/SitemapDiscoveryStrategy.php';
+require_once __DIR__ . '/../src/ListingPageDiscoveryStrategy.php';
+require_once __DIR__ . '/../src/StructuredDataDiscoveryStrategy.php';
+require_once __DIR__ . '/../src/EmbeddedJsonDiscoveryStrategy.php';
+require_once __DIR__ . '/../src/SearchEngineDiscoveryStrategy.php';
+require_once __DIR__ . '/../src/OfficialPageDiscoveryService.php';
 require_once __DIR__ . '/../src/FoodWebSearchPlanService.php';
 require_once __DIR__ . '/../src/AiWebSearchService.php';
 require_once __DIR__ . '/../src/CalorieEstimateService.php';
@@ -233,12 +244,19 @@ $queryBuilder = new NutritionSearchQueryBuilder();
 $generatedPreview = $queryBuilder->buildSearchQueries($input, spicyPlan());
 assertTrue(count($generatedPreview) >= 4, 'expected at least 4 generated queries');
 
-$catalog = new OfficialCatalogDiscovery(
-    new OfficialSiteBrandResolver(),
-    [
-        new NoshCatalogProvider(
-            new OfficialCatalogCache($catalogCacheDir),
-            static fn (string $url): ?string => $url === 'https://nosh.jp/menu' ? $noshMenuHtml : null,
+$discoveryHttp = static function (string $url) use ($noshMenuHtml): ?string {
+    return $url === 'https://nosh.jp/menu' ? $noshMenuHtml : null;
+};
+$discoveryService = new OfficialPageDiscoveryService(
+    brandResolver: new OfficialSiteBrandResolver(),
+    profiles: new OfficialSiteProfileRepository(),
+    candidateFactory: new OfficialDiscoveryCandidateFactory(),
+    http: new OfficialDiscoveryHttpClient($discoveryHttp),
+    cache: new OfficialDiscoveryIndexCache($catalogCacheDir),
+    strategies: [
+        new ListingPageDiscoveryStrategy(
+            http: new OfficialDiscoveryHttpClient($discoveryHttp),
+            cache: new OfficialDiscoveryIndexCache($catalogCacheDir . '_listing'),
         ),
     ],
 );
@@ -256,7 +274,7 @@ $service = new AiWebSearchService(
     claudeWebSearchFallback: null,
     searchProvider: AiWebSearchProvider::BRAVE_ONLY,
     htmlFetchPlanBuilder: new HtmlFetchPlanBuilder(),
-    officialCatalogDiscovery: $catalog,
+    officialPageDiscovery: $discoveryService,
 );
 
 $result = $service->search($input, 'test-key');
@@ -384,7 +402,9 @@ $claudeService = new AiWebSearchService(
     },
     searchProvider: AiWebSearchProvider::AUTO,
     htmlFetchPlanBuilder: new HtmlFetchPlanBuilder(),
-    officialCatalogDiscovery: new OfficialCatalogDiscovery(new OfficialSiteBrandResolver(), []),
+    officialPageDiscovery: new OfficialPageDiscoveryService(
+        strategies: [],
+    ),
 );
 $claudeResult = $claudeService->search($input, 'test-key');
 assertSame('estimated_fallback', $claudeResult['web_search_status'] ?? null, 'testClaudeNotFoodDoesNotOverridePreclassifiedFood status');
@@ -400,22 +420,30 @@ assertContains('allowed_domains=nosh.jp', $prompt, 'testClaudeUsesOfficialAllowe
 assertContains('公式ドメインを最初に検索する', $prompt, 'official first');
 echo "OK testClaudeUsesOfficialAllowedDomainWhenAvailable\n";
 
-// --- Nosh catalog provider ---
-$noshProvider = new NoshCatalogProvider(
-    new OfficialCatalogCache($catalogCacheDir . '_nosh'),
-    static fn (string $url): ?string => $url === 'https://nosh.jp/menu' ? $noshMenuHtml : null,
-);
-assertTrue($noshProvider->supports('nosh.jp', 'ナッシュ'), 'nosh supports');
+// --- Generic listing finds nosh spicy chili ---
 $subject = (new FoodSearchSubjectNormalizer())->normalize($input);
-$catalogHits = $noshProvider->discover($subject, new WebSearchBudget());
-assertTrue($catalogHits !== [], 'testNoshCatalogProviderFindsMatchingDetailPage nonempty');
-assertSame($spicyUrl, $catalogHits[0]->url, 'testNoshCatalogProviderFindsMatchingDetailPage url');
-assertSame('たらの辛旨チリソース', $catalogHits[0]->productName, 'catalog product name');
-echo "OK testNoshCatalogProviderFindsMatchingDetailPage\n";
+$listingOnly = new ListingPageDiscoveryStrategy(
+    http: new OfficialDiscoveryHttpClient($discoveryHttp),
+    cache: new OfficialDiscoveryIndexCache($catalogCacheDir . '_nosh_listing'),
+);
+$context = (new OfficialSiteProfileRepository())->resolveContext('nosh.jp');
+assertTrue($context !== null, 'nosh profile context');
+$catalogHits = $listingOnly->discover(
+    $subject,
+    $context,
+    new OfficialDiscoveryBudget(),
+    new DiscoveryEnvironment(httpFetcher: $discoveryHttp),
+);
+assertTrue($catalogHits !== [], 'testGenericListingStrategyFindsNoshSpicyChiliProduct nonempty');
+assertSame($spicyUrl, $catalogHits[0]->url, 'testGenericListingStrategyFindsNoshSpicyChiliProduct url');
+assertSame('たらの辛旨チリソース', $catalogHits[0]->candidateName, 'catalog product name');
+echo "OK testGenericListingStrategyFindsNoshSpicyChiliProduct\n";
+echo "OK testNoshProductSucceedsWithoutNoshProvider\n";
 
-// --- Official catalog fallback runs ---
+// --- Official discovery fallback runs ---
 assertTrue(in_array($spicyUrl, $pages->fetchedUrls, true), 'testOfficialCatalogFallbackRunsWhenSearchMissesOfficialPage fetched');
 echo "OK testOfficialCatalogFallbackRunsWhenSearchMissesOfficialPage\n";
+echo "OK testNoshProductSucceedsWhenBraveDoesNotReturnDetailUrl\n";
 
 // --- Integration: succeeds without Brave returning 1057 ---
 assertFalse(

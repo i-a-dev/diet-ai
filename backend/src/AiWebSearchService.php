@@ -37,7 +37,7 @@ final class AiWebSearchService
         private readonly string $searchProvider = AiWebSearchProvider::AUTO,
         private readonly FoodSearchSubjectNormalizer $subjectNormalizer = new FoodSearchSubjectNormalizer(),
         private readonly HtmlFetchPlanBuilder $htmlFetchPlanBuilder = new HtmlFetchPlanBuilder(),
-        private readonly OfficialCatalogDiscovery $officialCatalogDiscovery = new OfficialCatalogDiscovery(),
+        private readonly OfficialPageDiscoveryService $officialPageDiscovery = new OfficialPageDiscoveryService(),
     ) {
     }
 
@@ -483,19 +483,22 @@ final class AiWebSearchService
         $diagnostics->setBraveResultCount(count($mergedResults));
         $this->recordExtraSnippetSignals($mergedResults, $plan, $diagnostics);
 
-        // --- Phase 1.5: 公式カタログ補完（検索が公式詳細を逃した場合） ---
-        if ($this->officialCatalogDiscovery->shouldRun($subject, array_values($mergedResults))) {
-            $catalogCandidates = $this->officialCatalogDiscovery->discover($subject, $budget);
-            $diagnostics->setOfficialCatalogRan(true, count($catalogCandidates));
-            foreach ($catalogCandidates as $catalogCandidate) {
+        // --- Phase 1.5: 公式ページ探索（検索が公式詳細を逃した場合） ---
+        if ($this->officialPageDiscovery->shouldRun($subject, array_values($mergedResults))) {
+            $discoveryEnv = new DiscoveryEnvironment(searchResults: array_values($mergedResults));
+            $discovery = $this->officialPageDiscovery->discoverWithDiagnostics($subject, $discoveryEnv);
+            $diagnostics->applyOfficialDiscoveryDiagnostics($discovery['diagnostics']);
+            foreach ($discovery['candidates'] as $catalogCandidate) {
+                if ($catalogCandidate->hasDistinctCoreConflict) {
+                    continue;
+                }
                 $result = $catalogCandidate->toSearchResult();
-                $result['fetch_source'] = 'official_catalog';
                 $url = $result['url'];
                 if (!isset($mergedResults[$url])) {
                     $mergedResults[$url] = $result;
                 } else {
-                    $mergedResults[$url]['fetch_source'] = 'official_catalog';
-                    if (trim((string) ($mergedResults[$url]['title'] ?? '')) === '') {
+                    $mergedResults[$url]['fetch_source'] = $result['fetch_source'] ?? 'official_catalog';
+                    if (trim((string) ($mergedResults[$url]['title'] ?? '')) === '' && ($result['title'] ?? '') !== '') {
                         $mergedResults[$url]['title'] = $result['title'];
                     }
                 }
@@ -503,7 +506,17 @@ final class AiWebSearchService
             $diagnostics->setMergedUrlCount(count($mergedResults));
             $diagnostics->setBraveResultCount(count($mergedResults));
         } else {
-            $diagnostics->setOfficialCatalogRan(false, 0);
+            $diagnostics->applyOfficialDiscoveryDiagnostics([
+                'official_discovery_ran' => false,
+                'official_profile_source' => null,
+                'official_profile_domain' => null,
+                'enabled_discovery_strategies' => [],
+                'executed_discovery_strategies' => [],
+                'merged_official_candidates' => 0,
+                'discovery_budget_exhausted' => false,
+                'site_adapter_used' => false,
+                'final_discovery_source' => null,
+            ]);
         }
 
         if ($mergedResults === []) {
