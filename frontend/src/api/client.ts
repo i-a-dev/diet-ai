@@ -337,17 +337,25 @@ export interface CalorieEstimateResponse {
   allow_estimated_add?: boolean;
   message_code?: string;
   allow_retry?: boolean;
+  offer_deep_web_search?: boolean;
 }
 
-export type CalorieEstimateMode = "auto" | "no_web" | "web";
+export type CalorieEstimateMode = "auto" | "no_web" | "web" | "deep_web";
 
 export function estimateCalories(
   foodName: string,
   mode: CalorieEstimateMode = "auto",
+  options?: { allowExpensiveFallback?: boolean },
 ) {
   return request<CalorieEstimateResponse>("/foods/estimate-calories", {
     method: "POST",
-    body: JSON.stringify({ foodName, mode }),
+    body: JSON.stringify({
+      foodName,
+      mode,
+      ...(options?.allowExpensiveFallback
+        ? { allow_expensive_fallback: true }
+        : {}),
+    }),
   });
 }
 

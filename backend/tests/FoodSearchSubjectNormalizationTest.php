@@ -39,6 +39,16 @@ require_once __DIR__ . '/../src/EmbeddedJsonDiscoveryStrategy.php';
 require_once __DIR__ . '/../src/SearchEngineDiscoveryStrategy.php';
 require_once __DIR__ . '/../src/OfficialPageDiscoveryService.php';
 require_once __DIR__ . '/../src/FoodWebSearchPlanService.php';
+require_once __DIR__ . '/../src/SearchTiming.php';
+require_once __DIR__ . '/../src/SearchRuntimeContext.php';
+require_once __DIR__ . '/../src/ClaudeFallbackDecision.php';
+require_once __DIR__ . '/../src/ClaudeFallbackPolicy.php';
+require_once __DIR__ . '/../src/ParallelHttpClient.php';
+require_once __DIR__ . '/../src/HtmlExtractionCache.php';
+require_once __DIR__ . '/../src/ClaudeNotFoundCache.php';
+require_once __DIR__ . '/../src/ClaudeWebSearchGuard.php';
+require_once __DIR__ . '/../src/AnthropicPricingCalculator.php';
+require_once __DIR__ . '/../src/WebSearchMetricsStore.php';
 require_once __DIR__ . '/../src/AiWebSearchService.php';
 
 function assertTrue(bool $condition, string $message): void
@@ -232,22 +242,27 @@ $cacheDir = sys_get_temp_dir() . '/diet_ai_nosh_subject_' . getmypid();
 @mkdir($cacheDir, 0775, true);
 putenv('AI_WEB_SEARCH_CACHE_ENABLED=false');
 
-$fetched = [];
-$pages = new class($fetched) extends NutritionPageExtractor {
-    /** @param list<string> $fetched */
-    public function __construct(private array &$fetched)
-    {
-    }
-
+$GLOBALS['nosh_fetched'] = [];
+$pages = new class extends NutritionPageExtractor {
     public function fetchPageHtml(string $url): ?string
     {
-        $this->fetched[] = $url;
+        $GLOBALS['nosh_fetched'][] = $url;
 
         return match ($url) {
             $GLOBALS['spicyUrl'] => $GLOBALS['spicyHtml'],
             $GLOBALS['sweetUrl'] => $GLOBALS['sweetHtml'],
             default => null,
         };
+    }
+
+    public function fetchPagesHtml(array $urls, ?SearchRuntimeContext $runtime = null): array
+    {
+        $out = [];
+        foreach ($urls as $url) {
+            $out[$url] = $this->fetchPageHtml($url);
+        }
+
+        return $out;
     }
 };
 
@@ -265,6 +280,8 @@ $service = new AiWebSearchService(
         throw new RuntimeException('Claude should not be required for this fixture');
     },
     searchProvider: AiWebSearchProvider::AUTO,
+    officialPageDiscovery: new OfficialPageDiscoveryService(strategies: []),
+    htmlExtractionCache: new HtmlExtractionCache($cacheDir . '/html_ext'),
 );
 
 $result = $service->search($input, 'test-key');
@@ -272,27 +289,33 @@ assertSame('confirmed', $result['web_search_status'] ?? null, 'testNoshSpicyChil
 assertSame(false, $result['needs_confirmation'] ?? true, 'needs_confirmation false');
 assertSame($spicyKcal, $result['kcal'] ?? null, 'testNoshSpicyChiliEndToEndReturnsConfirmedResult kcal');
 assertSame('high', $result['identity_confidence'] ?? null, 'identity high');
-assertTrue(in_array($sweetUrl, $fetched, true) || in_array($spicyUrl, $fetched, true), 'fetched at least one');
+$fetched = $GLOBALS['nosh_fetched'];
+assertTrue($fetched !== [], 'fetched at least one');
 assertTrue(in_array($spicyUrl, $fetched, true), 'spicy page evaluated');
 echo "OK testNoshSpicyChiliEndToEndReturnsConfirmedResult\n";
 
 // confirmation/rejected must not stop fetching when spicy is later
-$fetchOrder = [];
-$orderPages = new class($fetchOrder) extends NutritionPageExtractor {
-    /** @param list<string> $fetchOrder */
-    public function __construct(private array &$fetchOrder)
-    {
-    }
-
+$GLOBALS['nosh_fetch_order'] = [];
+$orderPages = new class extends NutritionPageExtractor {
     public function fetchPageHtml(string $url): ?string
     {
-        $this->fetchOrder[] = $url;
+        $GLOBALS['nosh_fetch_order'][] = $url;
 
         return match ($url) {
             $GLOBALS['spicyUrl'] => $GLOBALS['spicyHtml'],
             $GLOBALS['sweetUrl'] => $GLOBALS['sweetHtml'],
             default => null,
         };
+    }
+
+    public function fetchPagesHtml(array $urls, ?SearchRuntimeContext $runtime = null): array
+    {
+        $out = [];
+        foreach ($urls as $url) {
+            $out[$url] = $this->fetchPageHtml($url);
+        }
+
+        return $out;
     }
 };
 $service2 = new AiWebSearchService(
@@ -305,8 +328,11 @@ $service2 = new AiWebSearchService(
     cache: new WebSearchResultCache($cacheDir . '_2', 3600),
     claudeWebSearchFallback: null,
     searchProvider: AiWebSearchProvider::BRAVE_ONLY,
+    officialPageDiscovery: new OfficialPageDiscoveryService(strategies: []),
+    htmlExtractionCache: new HtmlExtractionCache($cacheDir . '_2/html_ext'),
 );
 $service2->search($input, 'test-key');
+$fetchOrder = $GLOBALS['nosh_fetch_order'];
 assertTrue(
     in_array($spicyUrl, $fetchOrder, true),
     'testRejectedOrConfirmationCandidateDoesNotStopOfficialCandidateFetching',

@@ -6,18 +6,22 @@ import { CalorieSourceInfo } from "./CalorieSourceInfo.tsx";
 interface LowConfidenceEstimateCardProps {
   result: FoodSearchResult;
   onSearchWeb?: () => void;
+  onDeepWebSearch?: () => void;
   onUseAiEstimate: () => void;
   onEdit: () => void;
   showSearchButton?: boolean;
+  showDeepSearchButton?: boolean;
   warningMessage?: string;
 }
 
 export function LowConfidenceEstimateCard({
   result,
   onSearchWeb,
+  onDeepWebSearch,
   onUseAiEstimate,
   onEdit,
   showSearchButton = true,
+  showDeepSearchButton = false,
   warningMessage,
 }: LowConfidenceEstimateCardProps) {
   const isWebFailure = warningMessage != null && warningMessage !== "";
@@ -47,11 +51,23 @@ export function LowConfidenceEstimateCard({
             サイズや量が分かると、より正確に記録できます
           </div>
         )}
+        {showDeepSearchButton && (
+          <div style={noticeTipStyle}>時間と追加処理が必要です</div>
+        )}
       </div>
       <div style={actionsStyle}>
         <button type="button" onClick={onUseAiEstimate} style={primaryButtonStyle}>
           この内容で追加
         </button>
+        {showDeepSearchButton && onDeepWebSearch && (
+          <button
+            type="button"
+            onClick={onDeepWebSearch}
+            style={secondaryButtonStyle}
+          >
+            さらに詳しく検索
+          </button>
+        )}
         {showSearchButton && onSearchWeb && (
           <button
             type="button"

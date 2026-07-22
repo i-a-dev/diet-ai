@@ -256,6 +256,61 @@ class NutritionPageExtractor
         return $this->fetchPublicHtml($url);
     }
 
+    public function canFetchUrl(string $url): bool
+    {
+        $url = trim($url);
+
+        return $url !== '' && !$this->isBlockedSourceUrl($url) && $this->isSafePublicUrl($url);
+    }
+
+    /**
+     * @param list<string> $urls
+     * @return array<string, string|null>
+     */
+    public function fetchPagesHtml(array $urls, ?SearchRuntimeContext $runtime = null): array
+    {
+        $runtime ??= SearchRuntimeContext::fromEnvironment();
+        $unique = [];
+        foreach ($urls as $url) {
+            $url = trim((string) $url);
+            if ($url === '' || isset($unique[$url])) {
+                continue;
+            }
+            $unique[$url] = true;
+        }
+        $list = array_keys($unique);
+        if ($list === []) {
+            return [];
+        }
+
+        if (!class_exists(ParallelHttpClient::class) || static::class !== self::class) {
+            $out = [];
+            foreach ($list as $url) {
+                $out[$url] = $this->fetchPageHtml($url);
+            }
+
+            return $out;
+        }
+
+        $client = new ParallelHttpClient();
+        $raw = $client->getMany(
+            $list,
+            $runtime,
+            fn (string $url): bool => $this->canFetchUrl($url),
+            $runtime->timing,
+            'html',
+        );
+
+        $out = [];
+        foreach ($list as $url) {
+            $item = $raw[$url] ?? null;
+            $body = is_array($item) && ($item['ok'] ?? false) === true ? ($item['body'] ?? null) : null;
+            $out[$url] = is_string($body) && $body !== '' ? $body : null;
+        }
+
+        return $out;
+    }
+
     /**
      * HTML 抽出用に、検索クエリを商品名+サイズ中心の短い文字列へ整える。
      */

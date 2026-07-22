@@ -95,12 +95,12 @@ final class CalorieEstimateService
             throw new RuntimeException('ANTHROPIC_API_KEY が設定されていません。');
         }
 
-        if (!in_array($mode, ['auto', 'no_web', 'web'], true)) {
-            throw new InvalidArgumentException('mode must be one of auto, no_web, web.');
+        if (!in_array($mode, ['auto', 'no_web', 'web', 'deep_web'], true)) {
+            throw new InvalidArgumentException('mode must be one of auto, no_web, web, deep_web.');
         }
 
-        if ($mode === 'web') {
-            return $this->estimateWithWebSearchFlow($trimmed, $apiKey);
+        if ($mode === 'web' || $mode === 'deep_web') {
+            return $this->estimateWithWebSearchFlow($trimmed, $apiKey, $mode === 'deep_web');
         }
 
         $initial = $this->requestEstimate($trimmed, $apiKey);
@@ -154,7 +154,7 @@ final class CalorieEstimateService
         );
     }
 
-    private function estimateWithWebSearchFlow(string $trimmed, string $apiKey): array
+    private function estimateWithWebSearchFlow(string $trimmed, string $apiKey, bool $allowExpensiveFallback = false): array
     {
         // 一時無効: 「鶏もも」+「焼き」等で市販メニューが自炊誤判定されるため
         // if ($this->looksLikeHomeCookedMeal($trimmed)) {
@@ -167,14 +167,15 @@ final class CalorieEstimateService
             return $this->estimateWithClaudeOnlyWebSearch($trimmed, $apiKey);
         }
 
-        $result = $this->resolveAiWebSearchService($provider)->search($trimmed, $apiKey);
+        $runtime = SearchRuntimeContext::fromEnvironment($allowExpensiveFallback);
+        $result = $this->resolveAiWebSearchService($provider)->search($trimmed, $apiKey, $runtime);
 
         if (($result['web_search_status'] ?? '') === 'no_web_search') {
             throw new RuntimeException('商品検索ではなく通常のAI推定をご利用ください。');
         }
 
         if (($result['web_search_status'] ?? '') === 'estimated_fallback') {
-            throw new RuntimeException('正確な商品情報を確認できませんでした。');
+            return $result;
         }
 
         if (($result['needs_confirmation'] ?? false) === true) {
@@ -919,7 +920,7 @@ PROMPT;
         $tool = [
             'type' => 'web_search_20250305',
             'name' => 'web_search',
-            'max_uses' => min(2, max(1, count($queryHints))),
+            'max_uses' => 1,
             'user_location' => [
                 'type' => 'approximate',
                 'country' => 'JP',
@@ -953,12 +954,24 @@ PROMPT;
         }
 
         $stopReason = (string) ($decoded['stop_reason'] ?? '');
+        $usage = is_array($decoded['usage'] ?? null) ? $decoded['usage'] : [];
+        $serverToolUse = is_array($usage['server_tool_use'] ?? null) ? $usage['server_tool_use'] : [];
         $this->lastClaudeWebSearchMeta = [
             'stop_reason' => $stopReason,
             'pause_turn_continuations' => $continuationCount,
             'pause_turn_limit_exceeded' => $stopReason === 'pause_turn',
             'allowed_domains' => $allowedDomains,
             'official_domain_pass' => $officialDomainPass,
+            'model' => (string) ($decoded['model'] ?? ''),
+            'tool_version' => 'web_search_20250305',
+            'max_uses' => 1,
+            'usage' => [
+                'input_tokens' => (int) ($usage['input_tokens'] ?? 0),
+                'output_tokens' => (int) ($usage['output_tokens'] ?? 0),
+                'cache_read_input_tokens' => (int) ($usage['cache_read_input_tokens'] ?? 0),
+                'cache_creation_input_tokens' => (int) ($usage['cache_creation_input_tokens'] ?? 0),
+                'web_search_requests' => (int) ($serverToolUse['web_search_requests'] ?? 0),
+            ],
         ];
 
         if ($stopReason === 'pause_turn') {

@@ -39,6 +39,16 @@ require_once __DIR__ . '/../src/EmbeddedJsonDiscoveryStrategy.php';
 require_once __DIR__ . '/../src/SearchEngineDiscoveryStrategy.php';
 require_once __DIR__ . '/../src/OfficialPageDiscoveryService.php';
 require_once __DIR__ . '/../src/FoodWebSearchPlanService.php';
+require_once __DIR__ . '/../src/SearchTiming.php';
+require_once __DIR__ . '/../src/SearchRuntimeContext.php';
+require_once __DIR__ . '/../src/ClaudeFallbackDecision.php';
+require_once __DIR__ . '/../src/ClaudeFallbackPolicy.php';
+require_once __DIR__ . '/../src/ParallelHttpClient.php';
+require_once __DIR__ . '/../src/HtmlExtractionCache.php';
+require_once __DIR__ . '/../src/ClaudeNotFoundCache.php';
+require_once __DIR__ . '/../src/ClaudeWebSearchGuard.php';
+require_once __DIR__ . '/../src/AnthropicPricingCalculator.php';
+require_once __DIR__ . '/../src/WebSearchMetricsStore.php';
 require_once __DIR__ . '/../src/AiWebSearchService.php';
 require_once __DIR__ . '/../src/CalorieEstimateService.php';
 
@@ -139,6 +149,16 @@ final class SequencePageExtractor extends NutritionPageExtractor
         $this->eventLog[] = 'html:' . $url;
 
         return $this->htmlByUrl[$url] ?? null;
+    }
+
+    public function fetchPagesHtml(array $urls, ?SearchRuntimeContext $runtime = null): array
+    {
+        $out = [];
+        foreach ($urls as $url) {
+            $out[$url] = $this->fetchPageHtml($url);
+        }
+
+        return $out;
     }
 }
 
@@ -275,32 +295,34 @@ $service = new AiWebSearchService(
     searchProvider: AiWebSearchProvider::BRAVE_ONLY,
     htmlFetchPlanBuilder: new HtmlFetchPlanBuilder(),
     officialPageDiscovery: $discoveryService,
+    htmlExtractionCache: new HtmlExtractionCache($cacheDir . '/html_ext'),
 );
 
 $result = $service->search($input, 'test-key');
 
-// --- testAllBraveQueriesRunBeforeAnyHtmlFetch ---
+// --- Fast lane: primary Brave completes before HTML; additional may be skipped on success ---
 $firstHtmlIndex = null;
-$lastBraveIndex = null;
+$lastPrimaryBraveIndex = null;
 foreach ($eventLog as $i => $event) {
-    if (str_starts_with($event, 'brave:')) {
-        $lastBraveIndex = $i;
+    if ($event === 'brave:0' || $event === 'brave:1') {
+        $lastPrimaryBraveIndex = $i;
     }
     if ($firstHtmlIndex === null && str_starts_with($event, 'html:')) {
         $firstHtmlIndex = $i;
     }
 }
-assertTrue($lastBraveIndex !== null && $firstHtmlIndex !== null, 'brave and html events exist');
-assertTrue($lastBraveIndex < $firstHtmlIndex, 'testAllBraveQueriesRunBeforeAnyHtmlFetch');
-echo "OK testAllBraveQueriesRunBeforeAnyHtmlFetch\n";
+assertTrue($lastPrimaryBraveIndex !== null && $firstHtmlIndex !== null, 'brave and html events exist');
+assertTrue($lastPrimaryBraveIndex < $firstHtmlIndex, 'testPrimaryBraveQueriesRunBeforeHtmlSelection');
+echo "OK testPrimaryBraveQueriesRunBeforeHtmlSelection\n";
 
-// --- testHtmlBudgetDoesNotStopRemainingBraveQueries ---
-assertSame(4, count($brave->executedQueries), 'testHtmlBudgetDoesNotStopRemainingBraveQueries');
-echo "OK testHtmlBudgetDoesNotStopRemainingBraveQueries\n";
+// Fast lane success may skip additional Brave (Slow Lane)
+assertTrue(count($brave->executedQueries) >= 2, 'at least primary brave queries');
+assertTrue(count($brave->executedQueries) <= 4, 'brave within budget');
+echo "OK testBraveQueriesWithinLaneBudget\n";
 
-// --- testFirstQueryCannotConsumeAllSearchOpportunities ---
-assertTrue(count($brave->executedQueries) >= 4, 'testFirstQueryCannotConsumeAllSearchOpportunities');
-echo "OK testFirstQueryCannotConsumeAllSearchOpportunities\n";
+// HTML should not exhaust 8 when strong candidate found early
+assertTrue(count($pages->fetchedUrls) < 8, 'testWaveEarlyExitLimitsHtmlFetches');
+echo "OK testWaveEarlyExitLimitsHtmlFetches\n";
 
 // --- Html fetch plan unit checks ---
 $planBuilder = new HtmlFetchPlanBuilder();
@@ -460,7 +482,8 @@ assertSame('confirmed', $result['web_search_status'] ?? null, 'web_search_status
 assertSame('high', $result['identity_confidence'] ?? null, 'identity_confidence');
 assertFalse(($result['needs_confirmation'] ?? false) === true, 'needs_confirmation false');
 assertContains('辛旨', (string) ($result['product_name'] ?? ''), 'product name exact');
-assertSame(4, count($brave->executedQueries), 'all 4 queries executed in integration');
+assertTrue(count($brave->executedQueries) >= 2, 'primary queries executed in integration');
+assertTrue(count($brave->executedQueries) <= 4, 'brave within max budget');
 echo "OK testNoshSpicyChiliSearchSucceedsWithoutBraveReturning1057\n";
 
 // --- shouldContinueBraveSearch no longer checks HTML budget ---

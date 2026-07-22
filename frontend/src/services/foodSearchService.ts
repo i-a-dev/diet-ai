@@ -1275,6 +1275,7 @@ export async function runClaudeEstimate(
 export async function runAiWebSearch(
   rawInput: string,
   onProgress?: ProgressListener,
+  options?: { deepWeb?: boolean },
 ): Promise<FoodSearchProgress> {
   const input = rawInput.trim();
   let steps = createSteps();
@@ -1293,7 +1294,9 @@ export async function runAiWebSearch(
       "web_searching",
       steps,
       null,
-      "商品情報を確認しています",
+      options?.deepWeb
+        ? "さらに詳しく検索しています"
+        : "商品情報を確認しています",
       undefined,
       undefined,
       undefined,
@@ -1318,7 +1321,11 @@ export async function runAiWebSearch(
       ),
     );
 
-    const webEstimate = await estimateCalories(input, "web");
+    const webEstimate = await estimateCalories(
+      input,
+      options?.deepWeb ? "deep_web" : "web",
+      options?.deepWeb ? { allowExpensiveFallback: true } : undefined,
+    );
     logAiWebSearchOrigin(input, webEstimate);
 
     emitProgress(
@@ -1366,6 +1373,34 @@ export async function runAiWebSearch(
         steps: updateStep(steps, "ai_web_searching", "done"),
         result,
         message: "商品情報が見つかりました",
+      });
+    }
+
+    if (webEstimate.web_search_status === "estimated_fallback") {
+      console.log("[食品検索] ヒット元: AI推定", {
+        input,
+        outcome: "estimated_fallback",
+        origin: "なし（AI推定フォールバック）",
+        category: "AI推定",
+      });
+      const fallbackEstimate = await estimateWithClaude(
+        input,
+        parseFoodInputByRegex(input),
+      );
+      logFoodSearchHit({
+        input,
+        source: fallbackEstimate.source,
+        outcome: "web_search_estimated_fallback",
+        name: fallbackEstimate.displayName,
+        calories: fallbackEstimate.calories,
+      });
+      return emitProgress(onProgress, {
+        state: "low_confidence_estimate",
+        steps: updateStep(steps, "ai_web_searching", "done"),
+        result: fallbackEstimate,
+        message: "正確な商品情報を確認できませんでした",
+        offerDeepWebSearch:
+          !options?.deepWeb && webEstimate.offer_deep_web_search !== false,
       });
     }
   } catch (error) {
@@ -1427,6 +1462,7 @@ export async function runAiWebSearch(
     steps: updateStep(steps, "ai_web_searching", "done"),
     result: fallbackEstimate,
     message: "正確な商品情報を確認できませんでした",
+    offerDeepWebSearch: !options?.deepWeb,
   });
 }
 

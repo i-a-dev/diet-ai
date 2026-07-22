@@ -40,6 +40,16 @@ require_once __DIR__ . '/../src/EmbeddedJsonDiscoveryStrategy.php';
 require_once __DIR__ . '/../src/SearchEngineDiscoveryStrategy.php';
 require_once __DIR__ . '/../src/OfficialPageDiscoveryService.php';
 require_once __DIR__ . '/../src/FoodWebSearchPlanService.php';
+require_once __DIR__ . '/../src/SearchTiming.php';
+require_once __DIR__ . '/../src/SearchRuntimeContext.php';
+require_once __DIR__ . '/../src/ClaudeFallbackDecision.php';
+require_once __DIR__ . '/../src/ClaudeFallbackPolicy.php';
+require_once __DIR__ . '/../src/ParallelHttpClient.php';
+require_once __DIR__ . '/../src/HtmlExtractionCache.php';
+require_once __DIR__ . '/../src/ClaudeNotFoundCache.php';
+require_once __DIR__ . '/../src/ClaudeWebSearchGuard.php';
+require_once __DIR__ . '/../src/AnthropicPricingCalculator.php';
+require_once __DIR__ . '/../src/WebSearchMetricsStore.php';
 require_once __DIR__ . '/../src/AiWebSearchService.php';
 require_once __DIR__ . '/../src/CalorieEstimateService.php';
 

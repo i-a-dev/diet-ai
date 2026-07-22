@@ -409,6 +409,37 @@ export function AddFoodModal({
     }
   }
 
+  async function handleDeepWebSearch() {
+    if (isSearching) return;
+    const token = Date.now();
+    activeSearchTokenRef.current = token;
+    setIsManualEditingFromConfirmation(false);
+    setShowManualEdit(false);
+    setIsPreSearchManual(false);
+    try {
+      const next = await runAiWebSearch(
+        inputValue,
+        (nextProgress) => {
+          if (activeSearchTokenRef.current !== token) return;
+          setProgress(nextProgress);
+        },
+        { deepWeb: true },
+      );
+      if (activeSearchTokenRef.current !== token) return;
+      setProgress(next);
+      registrationContextRef.current.webSearchCountDelta = 1;
+    } catch (error) {
+      if (activeSearchTokenRef.current !== token) return;
+      setProgress({
+        ...progress,
+        state: "error",
+        message:
+          error instanceof Error ? error.message : "詳しく調べ直すのに失敗しました",
+      });
+      openManualEntry({ fromIdle: false });
+    }
+  }
+
   function handleConfirmSingleWebCandidate(candidate: FoodConfirmationCandidate) {
     if (!candidate.webCandidate) return;
 
@@ -992,6 +1023,7 @@ export function AddFoodModal({
         <LowConfidenceEstimateCard
           result={selectedResult}
           onSearchWeb={() => void handleWebSearch()}
+          onDeepWebSearch={() => void handleDeepWebSearch()}
           onUseAiEstimate={handleAiOnly}
           onEdit={() =>
             openManualEntry({
@@ -999,6 +1031,9 @@ export function AddFoodModal({
             })
           }
           showSearchButton={canSearchWeb}
+          showDeepSearchButton={
+            isWebSearchFallback && progress.offerDeepWebSearch === true
+          }
           warningMessage={
             isWebSearchFallback
               ? (progress.message ??

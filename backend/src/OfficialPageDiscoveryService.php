@@ -92,10 +92,14 @@ final class OfficialPageDiscoveryService
      *   diagnostics: array<string, mixed>
      * }
      */
+    /**
+     * @param list<string>|null $strategyAllowlist null ならプロファイルの全有効戦略
+     */
     public function discoverWithDiagnostics(
         FoodSearchSubject $subject,
         DiscoveryEnvironment $environment = new DiscoveryEnvironment(),
         ?OfficialDiscoveryBudget $budget = null,
+        ?array $strategyAllowlist = null,
     ): array {
         $budget ??= new OfficialDiscoveryBudget();
         $domain = $this->brandResolver->resolveOfficialSite($subject->brandName, $subject->rawInput);
@@ -118,6 +122,9 @@ final class OfficialPageDiscoveryService
         }
 
         $enabled = $context->profile->enabledStrategies;
+        if ($strategyAllowlist !== null) {
+            $enabled = array_values(array_intersect($enabled, $strategyAllowlist));
+        }
         $executed = [];
         $robotsUrls = 0;
         $sitemapUrls = 0;

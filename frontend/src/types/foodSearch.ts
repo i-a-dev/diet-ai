@@ -174,4 +174,5 @@ export interface FoodSearchProgress {
   webSearchPhase?: "planning" | "searching_pages" | "extracting_variants";
   selectedCandidateKey?: string | null;
   message?: string;
+  offerDeepWebSearch?: boolean;
 }

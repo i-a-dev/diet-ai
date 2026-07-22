@@ -5,21 +5,23 @@ declare(strict_types=1);
 /**
  * AI Web 検索オーケストレーター。
  *
- * フロー:
- * 1. Claude Haiku で検索計画（1回）
- * 2. 目的の異なる Brave 検索をすべて実行（最大4回・HTML取得なし）
- * 3. 結果をマージして一度だけランキングし、HTML取得計画を作成
- * 4. 必要なら公式カタログ探索で詳細URLを補完
- * 5. HTML から複数バリアント抽出（最大8URL・枠分け）
- * 6. Brave を安全に自動確定できない場合のみ Claude Web Search（AI_WEB_SEARCH_PROVIDER=auto 時）
+ * Fast Lane: キャッシュ → Brave 主要2クエリ（並列）→ 安価な公式探索 → HTML Wave1
+ * Slow Lane: 追加 Brave → 追加公式探索 → HTML Wave2/3
+ * Deep Lane: ClaudeFallbackPolicy が許可した場合のみ Claude Web Search
  *
- * AI_WEB_SEARCH_PROVIDER:
- * - auto: 上記フロー
- * - brave_only: Claude フォールバックなし
- * - claude_only: 本クラスは使わず CalorieEstimateService が Claude Web Search 直
+ * AI_WEB_SEARCH_CLAUDE_FALLBACK_MODE: off | conditional | manual | always
+ * AI_WEB_SEARCH_PROVIDER: auto | brave_only | claude_only
  */
 final class AiWebSearchService
 {
+    private const FAST_DISCOVERY_STRATEGIES = ['listing_page', 'search_engine'];
+    private const SLOW_DISCOVERY_STRATEGIES = [
+        'robots_sitemap',
+        'sitemap',
+        'structured_data',
+        'embedded_json',
+    ];
+
     /**
      * @param callable(string, string): array<string, mixed>|null $claudeWebSearchFallback
      */
@@ -38,33 +40,55 @@ final class AiWebSearchService
         private readonly FoodSearchSubjectNormalizer $subjectNormalizer = new FoodSearchSubjectNormalizer(),
         private readonly HtmlFetchPlanBuilder $htmlFetchPlanBuilder = new HtmlFetchPlanBuilder(),
         private readonly OfficialPageDiscoveryService $officialPageDiscovery = new OfficialPageDiscoveryService(),
+        private readonly ClaudeFallbackPolicy $claudeFallbackPolicy = new ClaudeFallbackPolicy(),
+        private readonly ClaudeNotFoundCache $claudeNotFoundCache = new ClaudeNotFoundCache(),
+        private readonly ClaudeWebSearchGuard $claudeGuard = new ClaudeWebSearchGuard(),
+        private readonly HtmlExtractionCache $htmlExtractionCache = new HtmlExtractionCache(),
+        private readonly WebSearchMetricsStore $metricsStore = new WebSearchMetricsStore(),
+        private readonly AnthropicPricingCalculator $pricingCalculator = new AnthropicPricingCalculator(),
     ) {
     }
 
     /**
      * @return array<string, mixed>
      */
-    public function search(string $userInput, string $apiKey): array
+    public function search(string $userInput, string $apiKey, ?SearchRuntimeContext $runtime = null): array
     {
+        $runtime ??= SearchRuntimeContext::fromEnvironment();
+        $timing = $runtime->timing;
         $trimmed = trim($userInput);
         $budget = new WebSearchBudget();
         $diagnostics = new WebSearchDiagnostics($trimmed, $budget);
         $diagnostics->setSearchProvider($this->searchProvider);
 
-        $cached = $this->cache->get($trimmed, provider: $this->searchProvider);
+        $cached = $timing->measure('cache_lookup_ms', fn () => $this->cache->get($trimmed, provider: $this->searchProvider));
         if ($cached !== null && isset($cached['response']) && is_array($cached['response'])) {
             $diagnostics->setCacheHit(true);
             $diagnostics->addFallbackReason('cache_hit');
             $diagnostics->setStoppedReason('single_candidate_confirmed');
             $diagnostics->setFinalStatus((string) ($cached['response']['web_search_status'] ?? 'confirmed'));
+            $timing->recordHttp([
+                'request_type' => 'confirmed_cache',
+                'summary' => 'hit',
+                'duration_ms' => 0,
+                'cache_hit' => true,
+            ]);
+            $response = $cached['response'];
+            $response['search_timing'] = $timing->toArray();
             $diagnostics->log();
+            $this->metricsStore->record([
+                'deterministic_attempt' => true,
+                'deterministic_confirmed' => true,
+                'source_strategy' => 'cache',
+                'total_ms' => (int) round($timing->totalMs()),
+            ]);
 
-            return $cached['response'];
+            return $response;
         }
 
         $subject = $this->subjectNormalizer->normalize($trimmed);
 
-        $plan = $this->planService->createPlan($trimmed, $apiKey, $budget);
+        $plan = $timing->measure('plan_generation_ms', fn () => $this->planService->createPlan($trimmed, $apiKey, $budget));
         if ($plan === null) {
             $plan = FoodWebSearchPlan::fallbackFromSubject($subject, $this->variantAnalyzer);
             $diagnostics->addFallbackReason('plan_parse_failed');
@@ -100,7 +124,7 @@ final class AiWebSearchService
             $diagnostics->setPlan($plan);
         }
 
-        $braveOutcome = $this->collectSearchCandidates($trimmed, $plan, $budget, $diagnostics, $subject);
+        $braveOutcome = $this->collectSearchCandidates($trimmed, $plan, $budget, $diagnostics, $subject, $runtime);
         $acceptedCandidates = $braveOutcome['accepted'];
         $confirmationCandidates = $braveOutcome['confirmation'];
         $diagnostics->setCandidateCounts(
@@ -119,23 +143,51 @@ final class AiWebSearchService
             $diagnostics->setFinalStatus((string) ($response['web_search_status'] ?? 'confirmed'));
             $diagnostics->setClaudeFallbackSkipReason('brave_auto_confirmed');
             $diagnostics->setFinalSourceStrategy($this->inferSourceStrategy($acceptedCandidates) ?? 'brave_html');
+            $response['search_timing'] = $timing->toArray();
             $diagnostics->log();
+            $this->metricsStore->record([
+                'deterministic_attempt' => true,
+                'deterministic_confirmed' => true,
+                'source_strategy' => $this->inferSourceStrategy($acceptedCandidates) ?? 'brave_html',
+                'total_ms' => (int) round($timing->totalMs()),
+            ]);
 
             return $response;
         }
 
+        $claudeDecision = $this->decideClaudeFallback(
+            $subject,
+            $braveOutcome,
+            $runtime,
+            $budget,
+            $plan,
+            $this->hasStrongAcceptedCandidate($acceptedCandidates, $plan)
+                || $this->hasEvidenceConfirmation($confirmationCandidates),
+        );
         $claudeOutcome = null;
-        if ($this->shouldRunClaudeFallback($braveOutcome, $plan, $budget, $inputAnalysis)) {
+        if ($claudeDecision->shouldRun && $this->claudeWebSearchFallback !== null) {
             $budget->recordClaudeWebSearch();
             $diagnostics->setClaudeFallbackRan(true);
             $diagnostics->addFallbackReason('claude_web_search');
+            $diagnostics->addFallbackReason('claude_policy:' . $claudeDecision->reason);
             try {
-                $claudeOutcome = ($this->claudeWebSearchFallback)($trimmed, $apiKey);
+                $claudeOutcome = $timing->measure(
+                    'claude_web_search_ms',
+                    fn () => ($this->claudeWebSearchFallback)($trimmed, $apiKey),
+                );
                 if (!is_array($claudeOutcome) || $claudeOutcome === []) {
                     $claudeOutcome = null;
                     $diagnostics->addFallbackReason('claude_web_search_rejected');
+                    $this->claudeGuard->recordAttempt(false);
+                    $this->metricsStore->record([
+                        'deterministic_attempt' => true,
+                        'claude_attempt' => true,
+                        'claude_not_found' => true,
+                        'total_ms' => (int) round($timing->totalMs()),
+                    ]);
                 } else {
                     $claudeMeta = $claudeOutcome['_claude_meta'] ?? null;
+                    $estimatedCost = 0.0;
                     if (is_array($claudeMeta)) {
                         $diagnostics->setClaudeStopReason(
                             isset($claudeMeta['stop_reason']) ? (string) $claudeMeta['stop_reason'] : null,
@@ -152,24 +204,52 @@ final class AiWebSearchService
                             $diagnostics->setClaudeNotFoodContractViolation(true);
                             $diagnostics->addFallbackReason('claude_not_food_contract_violation');
                         }
+                        $usage = is_array($claudeMeta['usage'] ?? null) ? $claudeMeta['usage'] : [];
+                        $estimatedCost = $this->pricingCalculator->estimateUsd(
+                            (string) ($claudeMeta['model'] ?? ''),
+                            (int) ($usage['input_tokens'] ?? 0),
+                            (int) ($usage['output_tokens'] ?? 0),
+                            (int) ($usage['cache_read_input_tokens'] ?? 0),
+                            (int) ($usage['cache_creation_input_tokens'] ?? 0),
+                            (int) ($usage['web_search_requests'] ?? 0),
+                        );
+                        $claudeOutcome['claude_usage'] = [
+                            'input_tokens' => (int) ($usage['input_tokens'] ?? 0),
+                            'output_tokens' => (int) ($usage['output_tokens'] ?? 0),
+                            'cache_read_input_tokens' => (int) ($usage['cache_read_input_tokens'] ?? 0),
+                            'cache_creation_input_tokens' => (int) ($usage['cache_creation_input_tokens'] ?? 0),
+                            'web_search_requests' => (int) ($usage['web_search_requests'] ?? 0),
+                            'model' => (string) ($claudeMeta['model'] ?? ''),
+                            'tool_version' => (string) ($claudeMeta['tool_version'] ?? 'web_search_20250305'),
+                            'max_uses' => (int) ($claudeMeta['max_uses'] ?? 1),
+                            'estimated_cost_usd' => $estimatedCost,
+                        ];
                         unset($claudeOutcome['_claude_meta']);
                     }
                     if (($claudeOutcome['web_search_status'] ?? '') === 'not_found') {
                         $diagnostics->setClaudeStatus(
                             (string) ($claudeOutcome['claude_status'] ?? 'not_found'),
                         );
+                        $this->claudeNotFoundCache->put($trimmed);
+                        $this->claudeGuard->recordAttempt(false, $estimatedCost);
                         $claudeOutcome = null;
                         $diagnostics->addFallbackReason('claude_web_search_not_found');
+                        $this->metricsStore->record([
+                            'deterministic_attempt' => true,
+                            'claude_attempt' => true,
+                            'claude_not_found' => true,
+                            'estimated_cost_usd' => $estimatedCost,
+                            'total_ms' => (int) round($timing->totalMs()),
+                        ]);
                     }
                 }
             } catch (Throwable $exception) {
                 $claudeOutcome = null;
+                $this->claudeGuard->recordAttempt(false);
                 $diagnostics->recordClaudeFallbackFailure($exception);
             }
         } else {
-            $diagnostics->setClaudeFallbackSkipReason(
-                $this->explainClaudeFallbackSkip($braveOutcome, $plan, $budget),
-            );
+            $diagnostics->setClaudeFallbackSkipReason($claudeDecision->reason);
         }
 
         if ($claudeOutcome !== null && $this->canAutoConfirmClaudeOutcome($claudeOutcome)) {
@@ -181,7 +261,17 @@ final class AiWebSearchService
                 isset($claudeOutcome['source_url']) ? (string) $claudeOutcome['source_url'] : null,
             );
             $diagnostics->setFinalCandidateCount(1);
+            $cost = (float) (($claudeOutcome['claude_usage']['estimated_cost_usd'] ?? 0));
+            $this->claudeGuard->recordAttempt(true, $cost);
+            $response['search_timing'] = $timing->toArray();
             $diagnostics->log();
+            $this->metricsStore->record([
+                'deterministic_attempt' => true,
+                'claude_attempt' => true,
+                'claude_confirmed' => true,
+                'estimated_cost_usd' => $cost,
+                'total_ms' => (int) round($timing->totalMs()),
+            ]);
 
             return $response;
         }
@@ -196,7 +286,12 @@ final class AiWebSearchService
         if ($mergedConfirmationCandidates !== []) {
             $response = $this->formatConfirmationOnlyResponse($plan, $mergedConfirmationCandidates, $diagnostics);
             $diagnostics->setFinalStatus('needs_variant_confirmation');
+            $response['search_timing'] = $timing->toArray();
             $diagnostics->log();
+            $this->metricsStore->record([
+                'deterministic_attempt' => true,
+                'total_ms' => (int) round($timing->totalMs()),
+            ]);
 
             return $response;
         }
@@ -205,13 +300,71 @@ final class AiWebSearchService
             'web_search_status' => 'estimated_fallback',
             'message_code' => 'WEB_RESULT_NOT_FOUND',
             'allow_retry' => false,
+            'offer_deep_web_search' => $runtime->claudeFallbackMode !== 'off'
+                && !$runtime->allowExpensiveFallback,
+            'search_timing' => $timing->toArray(),
         ];
         $diagnostics->setFinalCandidateCount(0);
         $diagnostics->setStoppedReason('no_candidates');
         $diagnostics->setFinalStatus('not_found');
         $diagnostics->log();
+        $this->metricsStore->record([
+            'deterministic_attempt' => true,
+            'total_ms' => (int) round($timing->totalMs()),
+        ]);
 
         return $response;
+    }
+
+    /**
+     * @param array{accepted: list<array<string, mixed>>, confirmation: list<array<string, mixed>>} $deterministicOutcome
+     */
+    private function decideClaudeFallback(
+        FoodSearchSubject $subject,
+        array $deterministicOutcome,
+        SearchRuntimeContext $runtime,
+        WebSearchBudget $budget,
+        FoodWebSearchPlan $plan,
+        bool $hasStrongConfirmation,
+    ): ClaudeFallbackDecision {
+        if (!AiWebSearchProvider::allowsClaudeFallback($this->searchProvider)) {
+            return new ClaudeFallbackDecision(false, 'provider_disallows_claude');
+        }
+        if ($this->claudeWebSearchFallback === null) {
+            return new ClaudeFallbackDecision(false, 'claude_callback_missing');
+        }
+
+        return $this->claudeFallbackPolicy->decide(
+            $subject,
+            $deterministicOutcome,
+            $runtime,
+            $budget,
+            $plan,
+            $hasStrongConfirmation,
+            $this->claudeNotFoundCache->has($subject->rawInput),
+            $this->claudeGuard->isCircuitOpen(),
+            $this->claudeGuard->hasDailyBudgetRemaining(),
+        );
+    }
+
+    /**
+     * @param list<array<string, mixed>> $confirmation
+     */
+    private function hasEvidenceConfirmation(array $confirmation): bool
+    {
+        foreach ($confirmation as $candidate) {
+            if ((int) ($candidate['kcal'] ?? 0) <= 0) {
+                continue;
+            }
+            $score = (float) ($candidate['match_score'] ?? 0);
+            $normalizedScore = $score > 1.0 ? $score / 100.0 : $score;
+            $nameSim = (float) (($candidate['match_reasons']['name_similarity'] ?? 0));
+            if ($normalizedScore >= 0.72 || $nameSim >= 0.72) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -415,7 +568,7 @@ final class AiWebSearchService
     }
 
     /**
-     * @return array{accepted: list<array<string, mixed>>, confirmation: list<array<string, mixed>>, rejected_count?: int}
+     * @return array{accepted: list<array<string, mixed>>, confirmation: list<array<string, mixed>>, rejected_count?: int, lane?: string}
      */
     private function collectSearchCandidates(
         string $userInput,
@@ -423,12 +576,18 @@ final class AiWebSearchService
         WebSearchBudget $budget,
         WebSearchDiagnostics $diagnostics,
         ?FoodSearchSubject $subject = null,
+        ?SearchRuntimeContext $runtime = null,
     ): array {
+        $runtime ??= SearchRuntimeContext::fromEnvironment();
+        $timing = $runtime->timing;
         $subject ??= $this->subjectNormalizer->normalize(
             $userInput !== '' ? $userInput : trim(($plan->brandName ?? '') . ' ' . $plan->normalizedProductName),
         );
 
-        $queries = $this->queryBuilder->buildSearchQueries($userInput, $plan);
+        $queries = $timing->measure(
+            'query_build_ms',
+            fn () => $this->queryBuilder->buildSearchQueries($userInput, $plan),
+        );
         $diagnostics->setGeneratedQueries($queries);
 
         /** @var array<string, array{title: string, url: string, description: string, extra_snippets?: list<string>, fetch_source?: string}> $mergedResults */
@@ -436,75 +595,69 @@ final class AiWebSearchService
         $executed = [];
         $skipped = [];
 
-        // --- Phase 1: Brave 検索のみ（HTML取得しない） ---
-        foreach ($queries as $query) {
-            if (!$this->shouldContinueBraveSearch($budget, $plan, true)) {
-                break;
-            }
-            if (!$budget->shouldExecuteBraveQuery($query)) {
-                $skipped[] = $query;
-                continue;
-            }
+        $primaryQueries = array_slice($queries, 0, WebSearchBudget::INITIAL_BRAVE_SEARCHES);
+        $additionalQueries = array_slice($queries, WebSearchBudget::INITIAL_BRAVE_SEARCHES);
 
-            $search = $this->braveSearch->search($query, 10);
-            $budget->recordBraveSearch($query);
-            $executed[] = $query;
-            if (!$search['ok']) {
-                $diagnostics->setResultsPerQuery($query, 0);
-                continue;
-            }
-
-            $diagnostics->setResultsPerQuery($query, count($search['results']));
-            foreach ($search['results'] as $result) {
-                $url = $result['url'];
-                if (!isset($mergedResults[$url])) {
-                    $mergedResults[$url] = $result;
+        // --- Fast Lane: Brave 主要2クエリ（並列・HTMLなし） ---
+        $timing->measure('brave_primary_ms', function () use (
+            $primaryQueries,
+            &$mergedResults,
+            &$executed,
+            &$skipped,
+            $budget,
+            $diagnostics,
+            $runtime,
+        ): void {
+            $toRun = [];
+            foreach ($primaryQueries as $query) {
+                if (!$budget->shouldExecuteBraveQuery($query)) {
+                    $skipped[] = $query;
                     continue;
                 }
-                // extra_snippets を後続クエリから補完
-                $existingSnippets = $mergedResults[$url]['extra_snippets'] ?? [];
-                $incomingSnippets = $result['extra_snippets'] ?? [];
-                if (is_array($incomingSnippets) && $incomingSnippets !== []) {
-                    $mergedResults[$url]['extra_snippets'] = array_values(array_unique(array_merge(
-                        is_array($existingSnippets) ? $existingSnippets : [],
-                        $incomingSnippets,
-                    )));
-                }
-                if (trim((string) ($mergedResults[$url]['description'] ?? '')) === '' && trim((string) ($result['description'] ?? '')) !== '') {
-                    $mergedResults[$url]['description'] = $result['description'];
-                }
+                $toRun[] = $query;
             }
-        }
-
-        $diagnostics->setExecutedQueries($executed);
-        $diagnostics->setSkippedDuplicateQueries($skipped);
-        $diagnostics->setSearchPhaseCompleted(true);
-        $diagnostics->setMergedUrlCount(count($mergedResults));
-        $diagnostics->setBraveResultCount(count($mergedResults));
-        $this->recordExtraSnippetSignals($mergedResults, $plan, $diagnostics);
-
-        // --- Phase 1.5: 公式ページ探索（検索が公式詳細を逃した場合） ---
-        if ($this->officialPageDiscovery->shouldRun($subject, array_values($mergedResults))) {
-            $discoveryEnv = new DiscoveryEnvironment(searchResults: array_values($mergedResults));
-            $discovery = $this->officialPageDiscovery->discoverWithDiagnostics($subject, $discoveryEnv);
-            $diagnostics->applyOfficialDiscoveryDiagnostics($discovery['diagnostics']);
-            foreach ($discovery['candidates'] as $catalogCandidate) {
-                if ($catalogCandidate->hasDistinctCoreConflict) {
+            if ($toRun === []) {
+                return;
+            }
+            $batch = $this->braveSearch->searchMany($toRun, 10, $runtime);
+            foreach ($batch as $search) {
+                $query = (string) ($search['query'] ?? '');
+                if ($query === '') {
                     continue;
                 }
-                $result = $catalogCandidate->toSearchResult();
-                $url = $result['url'];
-                if (!isset($mergedResults[$url])) {
-                    $mergedResults[$url] = $result;
-                } else {
-                    $mergedResults[$url]['fetch_source'] = $result['fetch_source'] ?? 'official_catalog';
-                    if (trim((string) ($mergedResults[$url]['title'] ?? '')) === '' && ($result['title'] ?? '') !== '') {
-                        $mergedResults[$url]['title'] = $result['title'];
-                    }
+                $budget->recordBraveSearch($query);
+                $executed[] = $query;
+                if (!($search['ok'] ?? false)) {
+                    $diagnostics->setResultsPerQuery($query, 0);
+                    continue;
                 }
+                $results = is_array($search['results'] ?? null) ? $search['results'] : [];
+                $diagnostics->setResultsPerQuery($query, count($results));
+                $this->mergeBraveResults($mergedResults, $results);
             }
-            $diagnostics->setMergedUrlCount(count($mergedResults));
-            $diagnostics->setBraveResultCount(count($mergedResults));
+        });
+
+        // Fast Lane: 安価な公式探索
+        if (
+            $timing->hasDeadlineRemaining($runtime->totalDeadlineMs)
+            && $this->officialPageDiscovery->shouldRun($subject, array_values($mergedResults))
+        ) {
+            $timing->measure('official_discovery_ms', function () use (
+                $subject,
+                &$mergedResults,
+                $diagnostics,
+            ): void {
+                $discoveryEnv = new DiscoveryEnvironment(searchResults: array_values($mergedResults));
+                $discovery = $this->officialPageDiscovery->discoverWithDiagnostics(
+                    $subject,
+                    $discoveryEnv,
+                    strategyAllowlist: self::FAST_DISCOVERY_STRATEGIES,
+                );
+                $diagnostics->applyOfficialDiscoveryDiagnostics($discovery['diagnostics']);
+                $this->mergeOfficialCandidates($mergedResults, $discovery['candidates']);
+                $diagnostics->setMergedUrlCount(count($mergedResults));
+                $diagnostics->setBraveResultCount(count($mergedResults));
+            });
         } else {
             $diagnostics->applyOfficialDiscoveryDiagnostics([
                 'official_discovery_ran' => false,
@@ -519,21 +672,245 @@ final class AiWebSearchService
             ]);
         }
 
-        if ($mergedResults === []) {
-            $diagnostics->setStoppedReason('no_candidates');
-            $diagnostics->setHtmlBudgetRemaining($budget->remainingHtmlFetches());
+        $this->recordExtraSnippetSignals($mergedResults, $plan, $diagnostics);
 
-            return ['accepted' => [], 'confirmation' => [], 'rejected_count' => 0];
+        $lane = 'fast';
+        $extracted = ['accepted' => [], 'confirmation' => [], 'rejected_count' => 0];
+
+        if ($mergedResults !== []) {
+            $ranked = $timing->measure(
+                'candidate_ranking_ms',
+                fn () => $this->rankMergedResults($mergedResults, $plan, $userInput, $diagnostics),
+            );
+            $fetchPlan = $this->htmlFetchPlanBuilder->build(
+                $ranked,
+                $plan->normalizedProductName,
+                $plan->brandName,
+                $userInput,
+                WebSearchBudget::MAX_HTML_FETCHES,
+            );
+            $diagnostics->setHtmlFetchPlan($fetchPlan);
+            $diagnostics->setHtmlBudgetRemaining(max(0, WebSearchBudget::MAX_HTML_FETCHES - count($fetchPlan)));
+
+            // Fast: Wave 1 only
+            $waves = $this->htmlFetchPlanBuilder->splitIntoWaves($fetchPlan);
+            $fastWaves = $waves !== [] ? [array_slice($waves[0], 0, 2)] : [];
+            $extracted = $this->extractFromFetchPlanWaves(
+                $fastWaves,
+                $plan,
+                $budget,
+                $userInput,
+                $diagnostics,
+                $runtime,
+                1,
+            );
         }
 
-        // --- Phase 2: 一度だけランキング → HTML取得計画 → 取得 ---
+        $needsSlow = !$this->hasStrongAcceptedCandidate($extracted['accepted'], $plan)
+            && $timing->hasDeadlineRemaining($runtime->totalDeadlineMs);
+
+        // --- Slow Lane ---
+        if ($needsSlow) {
+            $lane = 'slow';
+            if ($additionalQueries !== [] && $budget->canBraveSearch()) {
+                $timing->measure('brave_additional_ms', function () use (
+                    $additionalQueries,
+                    &$mergedResults,
+                    &$executed,
+                    &$skipped,
+                    $budget,
+                    $diagnostics,
+                    $runtime,
+                ): void {
+                    $toRun = [];
+                    foreach ($additionalQueries as $query) {
+                        if (!$budget->canBraveSearch()) {
+                            break;
+                        }
+                        if (!$budget->shouldExecuteBraveQuery($query)) {
+                            $skipped[] = $query;
+                            continue;
+                        }
+                        $toRun[] = $query;
+                        if (count($toRun) >= WebSearchBudget::ADDITIONAL_BRAVE_SEARCHES) {
+                            break;
+                        }
+                    }
+                    if ($toRun === []) {
+                        return;
+                    }
+                    $batch = $this->braveSearch->searchMany($toRun, 10, $runtime);
+                    foreach ($batch as $search) {
+                        $query = (string) ($search['query'] ?? '');
+                        if ($query === '') {
+                            continue;
+                        }
+                        $budget->recordBraveSearch($query);
+                        $executed[] = $query;
+                        if (!($search['ok'] ?? false)) {
+                            $diagnostics->setResultsPerQuery($query, 0);
+                            continue;
+                        }
+                        $results = is_array($search['results'] ?? null) ? $search['results'] : [];
+                        $diagnostics->setResultsPerQuery($query, count($results));
+                        $this->mergeBraveResults($mergedResults, $results);
+                    }
+                });
+            }
+
+            if (
+                $timing->hasDeadlineRemaining($runtime->totalDeadlineMs)
+                && $this->officialPageDiscovery->shouldRun($subject, array_values($mergedResults))
+            ) {
+                $timing->measure('official_discovery_ms', function () use (
+                    $subject,
+                    &$mergedResults,
+                    $diagnostics,
+                ): void {
+                    $discoveryEnv = new DiscoveryEnvironment(searchResults: array_values($mergedResults));
+                    $discovery = $this->officialPageDiscovery->discoverWithDiagnostics(
+                        $subject,
+                        $discoveryEnv,
+                        strategyAllowlist: self::SLOW_DISCOVERY_STRATEGIES,
+                    );
+                    // merge diagnostics carefully: keep prior listing info if present
+                    $prev = [
+                        'official_discovery_ran' => true,
+                    ];
+                    $diagnostics->applyOfficialDiscoveryDiagnostics(array_merge($prev, $discovery['diagnostics']));
+                    $this->mergeOfficialCandidates($mergedResults, $discovery['candidates']);
+                    $diagnostics->setMergedUrlCount(count($mergedResults));
+                    $diagnostics->setBraveResultCount(count($mergedResults));
+                });
+            }
+
+            if ($mergedResults !== []) {
+                $ranked = $timing->measure(
+                    'candidate_ranking_ms',
+                    fn () => $this->rankMergedResults($mergedResults, $plan, $userInput, $diagnostics),
+                );
+                $fetchPlan = $this->htmlFetchPlanBuilder->build(
+                    $ranked,
+                    $plan->normalizedProductName,
+                    $plan->brandName,
+                    $userInput,
+                    WebSearchBudget::MAX_HTML_FETCHES,
+                );
+                $diagnostics->setHtmlFetchPlan($fetchPlan);
+                $waves = $this->htmlFetchPlanBuilder->splitIntoWaves($fetchPlan);
+                // Slow: remaining waves (skip wave1 URLs already fetched via budget)
+                $slowWaves = array_slice($waves, 0);
+                $extracted = $this->extractFromFetchPlanWaves(
+                    $slowWaves,
+                    $plan,
+                    $budget,
+                    $userInput,
+                    $diagnostics,
+                    $runtime,
+                    1,
+                    $extracted,
+                );
+            }
+        }
+
+        $diagnostics->setExecutedQueries($executed);
+        $diagnostics->setSkippedDuplicateQueries($skipped);
+        $diagnostics->setSearchPhaseCompleted(true);
+        $diagnostics->setMergedUrlCount(count($mergedResults));
+        $diagnostics->setBraveResultCount(count($mergedResults));
+
+        $accepted = $extracted['accepted'];
+        $confirmation = $this->finalizeConfirmationCandidates($extracted['confirmation']);
+        $rejectedCount = $extracted['rejected_count'];
+        $diagnostics->setHtmlExtractedCandidateCount(count($accepted) + count($confirmation));
+
+        if ($this->hasStrongAcceptedCandidate($accepted, $plan)) {
+            $diagnostics->setStoppedReason('sufficient_variants');
+            $diagnostics->setFinalSourceStrategy($this->inferSourceStrategy($accepted));
+        } else {
+            $diagnostics->setStoppedReason(
+                $accepted === [] && $confirmation === [] ? 'no_candidates' : 'search_budget_exhausted',
+            );
+            if ($confirmation !== []) {
+                $diagnostics->setFinalSourceStrategy($this->inferSourceStrategy($confirmation));
+            }
+        }
+
+        $diagnostics->setHtmlBudgetRemaining($budget->remainingHtmlFetches());
+
+        return [
+            'accepted' => $accepted,
+            'confirmation' => $confirmation,
+            'rejected_count' => $rejectedCount,
+            'lane' => $lane,
+        ];
+    }
+
+    /**
+     * @param array<string, array<string, mixed>> $mergedResults
+     * @param list<array{title: string, url: string, description: string, extra_snippets?: list<string>}> $results
+     */
+    private function mergeBraveResults(array &$mergedResults, array $results): void
+    {
+        foreach ($results as $result) {
+            $url = $result['url'];
+            if (!isset($mergedResults[$url])) {
+                $mergedResults[$url] = $result;
+                continue;
+            }
+            $existingSnippets = $mergedResults[$url]['extra_snippets'] ?? [];
+            $incomingSnippets = $result['extra_snippets'] ?? [];
+            if (is_array($incomingSnippets) && $incomingSnippets !== []) {
+                $mergedResults[$url]['extra_snippets'] = array_values(array_unique(array_merge(
+                    is_array($existingSnippets) ? $existingSnippets : [],
+                    $incomingSnippets,
+                )));
+            }
+            if (trim((string) ($mergedResults[$url]['description'] ?? '')) === '' && trim((string) ($result['description'] ?? '')) !== '') {
+                $mergedResults[$url]['description'] = $result['description'];
+            }
+        }
+    }
+
+    /**
+     * @param array<string, array<string, mixed>> $mergedResults
+     * @param list<DiscoveredPageCandidate> $candidates
+     */
+    private function mergeOfficialCandidates(array &$mergedResults, array $candidates): void
+    {
+        foreach ($candidates as $catalogCandidate) {
+            if ($catalogCandidate->hasDistinctCoreConflict) {
+                continue;
+            }
+            $result = $catalogCandidate->toSearchResult();
+            $url = $result['url'];
+            if (!isset($mergedResults[$url])) {
+                $mergedResults[$url] = $result;
+            } else {
+                $mergedResults[$url]['fetch_source'] = $result['fetch_source'] ?? 'official_catalog';
+                if (trim((string) ($mergedResults[$url]['title'] ?? '')) === '' && ($result['title'] ?? '') !== '') {
+                    $mergedResults[$url]['title'] = $result['title'];
+                }
+            }
+        }
+    }
+
+    /**
+     * @param array<string, array<string, mixed>> $mergedResults
+     * @return list<array<string, mixed>>
+     */
+    private function rankMergedResults(
+        array $mergedResults,
+        FoodWebSearchPlan $plan,
+        string $userInput,
+        WebSearchDiagnostics $diagnostics,
+    ): array {
         $ranked = $this->urlRanker->rank(
             array_values($mergedResults),
             $plan->normalizedProductName,
             $plan->brandName,
             $plan->searchMode,
         );
-        // fetch_source を ranked に引き継ぐ
         foreach ($ranked as $index => $entry) {
             $url = $entry['url'];
             if (isset($mergedResults[$url]['fetch_source'])) {
@@ -560,48 +937,7 @@ final class AiWebSearchService
         $diagnostics->setExactTitleCandidateCount($exactCount);
         $diagnostics->setOfficialCandidateCount($officialCount);
 
-        $fetchPlan = $this->htmlFetchPlanBuilder->build(
-            $ranked,
-            $plan->normalizedProductName,
-            $plan->brandName,
-            $userInput,
-            WebSearchBudget::MAX_HTML_FETCHES,
-        );
-        $diagnostics->setHtmlFetchPlan($fetchPlan);
-        $diagnostics->setHtmlBudgetRemaining(max(0, WebSearchBudget::MAX_HTML_FETCHES - count($fetchPlan)));
-
-        $extracted = $this->extractFromFetchPlan(
-            $fetchPlan,
-            $plan,
-            $budget,
-            $userInput,
-            $diagnostics,
-        );
-
-        $accepted = $extracted['accepted'];
-        $confirmation = $this->finalizeConfirmationCandidates($extracted['confirmation']);
-        $rejectedCount = $extracted['rejected_count'];
-        $diagnostics->setHtmlExtractedCandidateCount(count($accepted) + count($confirmation));
-
-        if ($this->hasStrongAcceptedCandidate($accepted, $plan)) {
-            $diagnostics->setStoppedReason('sufficient_variants');
-            $diagnostics->setFinalSourceStrategy($this->inferSourceStrategy($accepted));
-        } else {
-            $diagnostics->setStoppedReason(
-                $accepted === [] && $confirmation === [] ? 'no_candidates' : 'search_budget_exhausted',
-            );
-            if ($confirmation !== []) {
-                $diagnostics->setFinalSourceStrategy($this->inferSourceStrategy($confirmation));
-            }
-        }
-
-        $diagnostics->setHtmlBudgetRemaining($budget->remainingHtmlFetches());
-
-        return [
-            'accepted' => $accepted,
-            'confirmation' => $confirmation,
-            'rejected_count' => $rejectedCount,
-        ];
+        return $ranked;
     }
 
     /**
@@ -685,68 +1021,181 @@ final class AiWebSearchService
         WebSearchBudget $budget,
         string $userInput,
         ?WebSearchDiagnostics $diagnostics = null,
+        ?SearchRuntimeContext $runtime = null,
     ): array {
-        $accepted = [];
-        $confirmation = [];
-        $rejectedCount = 0;
+        $runtime ??= SearchRuntimeContext::fromEnvironment();
+        $waves = $this->htmlFetchPlanBuilder->splitIntoWaves($fetchPlan);
 
-        foreach ($fetchPlan as $entry) {
-            $url = $entry['url'];
-            if (!$budget->canFetchHtml($url)) {
-                continue;
+        return $this->extractFromFetchPlanWaves(
+            $waves,
+            $plan,
+            $budget,
+            $userInput,
+            $diagnostics,
+            $runtime,
+            1,
+        );
+    }
+
+    /**
+     * @param list<list<array<string, mixed>>> $waves
+     * @param array{accepted?: list<array<string, mixed>>, confirmation?: list<array<string, mixed>>, rejected_count?: int}|null $seed
+     * @return array{accepted: list<array<string, mixed>>, confirmation: list<array<string, mixed>>, rejected_count: int, waves_run: int}
+     */
+    private function extractFromFetchPlanWaves(
+        array $waves,
+        FoodWebSearchPlan $plan,
+        WebSearchBudget $budget,
+        string $userInput,
+        ?WebSearchDiagnostics $diagnostics,
+        SearchRuntimeContext $runtime,
+        int $waveNumberStart = 1,
+        ?array $seed = null,
+    ): array {
+        $accepted = $seed['accepted'] ?? [];
+        $confirmation = $seed['confirmation'] ?? [];
+        $rejectedCount = (int) ($seed['rejected_count'] ?? 0);
+        $wavesRun = 0;
+        $productKey = $plan->normalizedProductName;
+
+        foreach ($waves as $offset => $wave) {
+            if ($this->hasStrongAcceptedCandidate($accepted, $plan)) {
+                break;
+            }
+            if (!$runtime->timing->hasDeadlineRemaining($runtime->totalDeadlineMs)) {
+                break;
             }
 
-            $html = $this->pageExtractor->fetchPageHtml($url);
-            $budget->recordHtmlFetch($url);
-            if ($html === null) {
-                $diagnostics?->recordHtmlFetchFailure();
-                continue;
-            }
-            $diagnostics?->recordHtmlFetchSuccess();
+            $waveNumber = $waveNumberStart + $offset;
+            $stage = 'html_fetch_wave_' . min(3, $waveNumber) . '_ms';
+            $runtime->timing->measure($stage, function () use (
+                $wave,
+                $plan,
+                $budget,
+                $userInput,
+                $diagnostics,
+                $runtime,
+                $productKey,
+                &$accepted,
+                &$confirmation,
+                &$rejectedCount,
+            ): void {
+                $urls = [];
+                $entriesByUrl = [];
+                foreach ($wave as $entry) {
+                    $url = (string) ($entry['url'] ?? '');
+                    if ($url === '' || !$budget->canFetchHtml($url)) {
+                        continue;
+                    }
+                    $urls[] = $url;
+                    $entriesByUrl[$url] = $entry;
+                }
+                if ($urls === []) {
+                    return;
+                }
 
-            $extracted = $this->variantExtractor->extractFromHtml(
-                $html,
-                $plan->normalizedProductName,
-                $plan->brandName,
-                $plan->variantDimension,
-                $plan->expectedLabels,
-                $url,
-            );
+                $htmlByUrl = [];
+                foreach ($urls as $url) {
+                    $cachedItems = $this->htmlExtractionCache->get($url, $productKey);
+                    if ($cachedItems !== null) {
+                        $runtime->timing->recordHttp([
+                            'request_type' => 'html_cache',
+                            'summary' => mb_substr($url, 0, 80),
+                            'duration_ms' => 0,
+                            'cache_hit' => true,
+                        ]);
+                        $budget->recordHtmlFetch($url);
+                        $diagnostics?->recordHtmlFetchSuccess();
+                        $htmlByUrl[$url] = ['cache' => $cachedItems];
+                        continue;
+                    }
+                }
 
-            foreach ($extracted as $item) {
-                $candidate = $this->toVerifiedCandidate(
-                    $item,
-                    [
-                        'url' => $url,
-                        'title' => (string) ($entry['title'] ?? ''),
-                        'description' => (string) ($entry['description'] ?? ''),
-                    ],
-                    $userInput,
+                $toFetch = array_values(array_filter(
+                    $urls,
+                    static fn (string $url): bool => !isset($htmlByUrl[$url]),
+                ));
+                if ($toFetch !== []) {
+                    if (method_exists($this->pageExtractor, 'fetchPagesHtml')) {
+                        $fetched = $this->pageExtractor->fetchPagesHtml($toFetch, $runtime);
+                    } else {
+                        $fetched = [];
+                        foreach ($toFetch as $url) {
+                            $fetched[$url] = $this->pageExtractor->fetchPageHtml($url);
+                        }
+                    }
+                    foreach ($toFetch as $url) {
+                        $budget->recordHtmlFetch($url);
+                        $html = $fetched[$url] ?? null;
+                        if ($html === null) {
+                            $diagnostics?->recordHtmlFetchFailure();
+                            continue;
+                        }
+                        $diagnostics?->recordHtmlFetchSuccess();
+                        $htmlByUrl[$url] = ['html' => $html];
+                    }
+                }
+
+                $runtime->timing->measure('html_parse_ms', function () use (
+                    $htmlByUrl,
+                    $entriesByUrl,
                     $plan,
-                );
-                $candidate['fetch_reason'] = (string) ($entry['reason'] ?? 'overall_rank');
-                $this->logProductMatch($candidate);
+                    $userInput,
+                    $diagnostics,
+                    $productKey,
+                    &$accepted,
+                    &$confirmation,
+                    &$rejectedCount,
+                ): void {
+                    foreach ($htmlByUrl as $url => $payload) {
+                        $entry = $entriesByUrl[$url] ?? ['url' => $url, 'title' => '', 'description' => '', 'reason' => 'overall_rank'];
+                        if (isset($payload['cache']) && is_array($payload['cache'])) {
+                            $extracted = $payload['cache'];
+                        } else {
+                            $html = (string) ($payload['html'] ?? '');
+                            $extracted = $this->variantExtractor->extractFromHtml(
+                                $html,
+                                $plan->normalizedProductName,
+                                $plan->brandName,
+                                $plan->variantDimension,
+                                $plan->expectedLabels,
+                                $url,
+                            );
+                            $this->htmlExtractionCache->put($url, $productKey, $extracted);
+                        }
 
-                $decision = (string) ($item['matchDecision'] ?? ProductMatchResult::DECISION_ACCEPTED);
-                if ($decision === ProductMatchResult::DECISION_NEEDS_CONFIRMATION) {
-                    $confirmation[] = $candidate;
-                    continue;
-                }
+                        foreach ($extracted as $item) {
+                            $candidate = $this->toVerifiedCandidate(
+                                $item,
+                                [
+                                    'url' => $url,
+                                    'title' => (string) ($entry['title'] ?? ''),
+                                    'description' => (string) ($entry['description'] ?? ''),
+                                ],
+                                $userInput,
+                                $plan,
+                            );
+                            $candidate['fetch_reason'] = (string) ($entry['reason'] ?? 'overall_rank');
+                            $this->logProductMatch($candidate);
 
-                if ($decision === ProductMatchResult::DECISION_REJECTED) {
-                    $rejectedCount++;
-                    $diagnostics?->addRejectReason((string) (($item['matchReasons']['decision'] ?? null) ?: 'rejected'));
-                    continue;
-                }
+                            $decision = (string) ($item['matchDecision'] ?? ProductMatchResult::DECISION_ACCEPTED);
+                            if ($decision === ProductMatchResult::DECISION_NEEDS_CONFIRMATION) {
+                                $confirmation[] = $candidate;
+                                continue;
+                            }
+                            if ($decision === ProductMatchResult::DECISION_REJECTED) {
+                                $rejectedCount++;
+                                $diagnostics?->addRejectReason((string) (($item['matchReasons']['decision'] ?? null) ?: 'rejected'));
+                                continue;
+                            }
+                            $accepted[] = $candidate;
+                        }
+                    }
+                });
+            });
+            $wavesRun++;
 
-                $accepted[] = $candidate;
-            }
-
-            if ($plan->likelyHasVariants) {
-                if ($this->hasSufficientCandidates($accepted, $plan)) {
-                    break;
-                }
-            } elseif ($this->hasStrongAcceptedCandidate($accepted, $plan)) {
+            if ($this->hasStrongAcceptedCandidate($accepted, $plan)) {
                 break;
             }
         }
@@ -755,6 +1204,7 @@ final class AiWebSearchService
             'accepted' => $this->dedupeVerifiedCandidates($accepted),
             'confirmation' => $confirmation,
             'rejected_count' => $rejectedCount,
+            'waves_run' => $wavesRun,
         ];
     }
 

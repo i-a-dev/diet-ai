@@ -157,6 +157,55 @@ final class HtmlFetchPlanBuilder
     }
 
     /**
+     * Wave 1: 完全一致または公式上位2件
+     * Wave 2: 次の候補最大3件
+     * Wave 3: 残り最大3件
+     *
+     * @param list<array<string, mixed>> $fetchPlan
+     * @return list<list<array<string, mixed>>>
+     */
+    public function splitIntoWaves(array $fetchPlan): array
+    {
+        if ($fetchPlan === []) {
+            return [];
+        }
+
+        $wave1 = [];
+        $rest = [];
+        foreach ($fetchPlan as $entry) {
+            $reason = (string) ($entry['reason'] ?? '');
+            $isWave1 = in_array($reason, ['exact_name', 'official_domain', 'official_catalog'], true)
+                || (($entry['fetch_priority'] ?? '') === 'high');
+            if ($isWave1 && count($wave1) < 2) {
+                $wave1[] = $entry;
+            } else {
+                $rest[] = $entry;
+            }
+        }
+
+        // Wave1 が空なら先頭2件を Fast に使う
+        if ($wave1 === []) {
+            $wave1 = array_slice($fetchPlan, 0, 2);
+            $rest = array_slice($fetchPlan, 2);
+        }
+
+        $wave2 = array_slice($rest, 0, 3);
+        $wave3 = array_slice($rest, 3, 3);
+        $waves = [];
+        if ($wave1 !== []) {
+            $waves[] = $wave1;
+        }
+        if ($wave2 !== []) {
+            $waves[] = $wave2;
+        }
+        if ($wave3 !== []) {
+            $waves[] = $wave3;
+        }
+
+        return $waves;
+    }
+
+    /**
      * @param array<string, mixed> $titleMatch
      */
     public function isExactOrVeryHighMatch(array $titleMatch): bool

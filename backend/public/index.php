@@ -56,6 +56,16 @@ require_once __DIR__ . '/../src/EmbeddedJsonDiscoveryStrategy.php';
 require_once __DIR__ . '/../src/SearchEngineDiscoveryStrategy.php';
 require_once __DIR__ . '/../src/OfficialPageDiscoveryService.php';
 require_once __DIR__ . '/../src/FoodWebSearchPlanService.php';
+require_once __DIR__ . '/../src/SearchTiming.php';
+require_once __DIR__ . '/../src/SearchRuntimeContext.php';
+require_once __DIR__ . '/../src/ClaudeFallbackDecision.php';
+require_once __DIR__ . '/../src/ClaudeFallbackPolicy.php';
+require_once __DIR__ . '/../src/ParallelHttpClient.php';
+require_once __DIR__ . '/../src/HtmlExtractionCache.php';
+require_once __DIR__ . '/../src/ClaudeNotFoundCache.php';
+require_once __DIR__ . '/../src/ClaudeWebSearchGuard.php';
+require_once __DIR__ . '/../src/AnthropicPricingCalculator.php';
+require_once __DIR__ . '/../src/WebSearchMetricsStore.php';
 require_once __DIR__ . '/../src/AiWebSearchService.php';
 require_once __DIR__ . '/../src/ExerciseMetEstimateService.php';
 require_once __DIR__ . '/../src/UserProfileRepository.php';
@@ -1017,9 +1027,19 @@ if ($requestMethod === 'POST' && $requestPath === '/api/foods/estimate-calories'
     $body = json_decode(file_get_contents('php://input') ?: '{}', true);
     $foodName = trim((string) ($body['foodName'] ?? ''));
     $mode = trim((string) ($body['mode'] ?? 'auto'));
+    if (
+        $mode === 'web'
+        && (
+            ($body['allow_expensive_fallback'] ?? false) === true
+            || ($body['allow_expensive_fallback'] ?? '') === '1'
+            || ($body['allow_expensive_fallback'] ?? '') === 'true'
+        )
+    ) {
+        $mode = 'deep_web';
+    }
 
     try {
-        // 変更: no_web / web を切り替え可能にして検索フローに対応。
+        // 変更: no_web / web / deep_web を切り替え可能にして検索フローに対応。
         $result = $calorieEstimateService->estimate($foodName, $mode);
     } catch (InvalidArgumentException $exception) {
         json_response(['message' => $exception->getMessage()], 422);
