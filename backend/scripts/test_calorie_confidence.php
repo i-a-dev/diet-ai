@@ -44,7 +44,12 @@ $cases = [
         'expect_confidence' => ['medium', 'low'],
         'expect_web_search' => false,
     ],
-    ['input' => 'マクドナルド ビッグマック', 'expect_web_search' => true],
+    ['input' => 'マクドナルド ビッグマック', 'expect_confidence' => ['medium', 'low'], 'expect_web_search' => true],
+    [
+        'input' => 'ナッシュ たらと辛旨チリソース',
+        'expect_confidence' => ['medium'],
+        'expect_web_search' => true,
+    ],
     // 既存の安定性確認
     ['input' => 'ゆで卵 2個', 'expect_confidence' => ['high'], 'disallow_low' => true, 'expect_web_search' => false],
 ];
