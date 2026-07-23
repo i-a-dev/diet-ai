@@ -31,11 +31,13 @@ export function MealEntryDetailSheet({
     >
       {result && (
         <>
-          <FoodResultPreview
-            result={result}
-            mode="detail"
-            caloriesEdited={item?.caloriesEdited}
-          />
+          <div style={{ marginTop: 10 }}>
+            <FoodResultPreview
+              result={result}
+              mode="detail"
+              caloriesEdited={item?.caloriesEdited}
+            />
+          </div>
           <button
             type="button"
             onClick={onDelete}

@@ -1,23 +1,23 @@
 import type { CSSProperties } from "react";
 import type { FoodSearchResult } from "../types/foodSearch.ts";
-import { ORANGE } from "../constants.ts";
 import { CalorieSourceInfo } from "./CalorieSourceInfo.tsx";
 import { parseCaloriesEdited } from "../utils/calorieSource.ts";
 
 interface FoodEstimateCardProps {
   result: FoodSearchResult;
-  onEdit: () => void;
-  onAdd: () => void;
-  onSearchWeb?: () => void;
   variant?: "estimate" | "history" | "detail" | "found";
   caloriesEdited?: boolean;
+  /** @deprecated 操作はカード外へ分離。後方互換のため残す（描画しない） */
+  onEdit?: () => void;
+  /** @deprecated 操作はカード外へ分離。後方互換のため残す（描画しない） */
+  onAdd?: () => void;
+  /** @deprecated 操作はカード外へ分離。後方互換のため残す（描画しない） */
+  onSearchWeb?: () => void;
 }
 
+/** 検索結果・推定・履歴の情報表示のみ（操作ボタンなし） */
 export function FoodEstimateCard({
   result,
-  onEdit,
-  onAdd,
-  onSearchWeb,
   variant = "estimate",
   caloriesEdited,
 }: FoodEstimateCardProps) {
@@ -26,7 +26,6 @@ export function FoodEstimateCard({
   const isFound = variant === "found";
   const isEstimate = variant === "estimate";
   const isEdited = parseCaloriesEdited(caloriesEdited ?? result.caloriesEdited);
-  const showActions = !isDetail;
   const showApprox = isEstimate && !isEdited;
   const title = isHistory
     ? "過去の記録を選択しました"
@@ -59,21 +58,6 @@ export function FoodEstimateCard({
         isEstimated={result.isEstimated}
         confidence={result.confidence}
       />
-      {showActions && (
-        <div style={actionsStyle}>
-          <button type="button" onClick={onAdd} style={primaryButtonStyle}>
-            追加する
-          </button>
-          <button type="button" onClick={onEdit} style={textButtonStyle}>
-            編集
-          </button>
-          {isEstimate && onSearchWeb && (
-            <button type="button" onClick={onSearchWeb} style={textButtonStyle}>
-              より正確に調べる
-            </button>
-          )}
-        </div>
-      )}
     </div>
   );
 }
@@ -83,7 +67,8 @@ const cardStyle: CSSProperties = {
   border: "1px solid #E5E7EB",
   background: "#FFFFFF",
   padding: "12px 14px",
-  marginTop: 10,
+  boxSizing: "border-box",
+  width: "100%",
 };
 
 const titleStyle: CSSProperties = {
@@ -97,7 +82,7 @@ const badgeRowStyle: CSSProperties = {
   display: "flex",
   flexWrap: "wrap",
   alignItems: "center",
-  gap: 6,
+  gap: 8,
   marginBottom: 8,
 };
 
@@ -117,45 +102,14 @@ const nameStyle: CSSProperties = {
 };
 
 const calorieStyle: CSSProperties = {
-  marginTop: 6,
+  marginTop: 8,
   fontSize: 24,
   fontWeight: 800,
   color: "#111827",
 };
 
 const metaStyle: CSSProperties = {
-  marginTop: 4,
+  marginTop: 8,
   color: "#4B5563",
   fontSize: 12,
-};
-
-const actionsStyle: CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  gap: 4,
-  marginTop: 12,
-};
-
-const primaryButtonStyle: CSSProperties = {
-  width: "100%",
-  border: "none",
-  borderRadius: 10,
-  background: ORANGE,
-  color: "#fff",
-  fontWeight: 700,
-  fontSize: 14,
-  padding: "11px 12px",
-  cursor: "pointer",
-};
-
-const textButtonStyle: CSSProperties = {
-  width: "100%",
-  border: "none",
-  borderRadius: 10,
-  background: "transparent",
-  color: "#6B7280",
-  fontWeight: 600,
-  fontSize: 13,
-  padding: "8px 12px",
-  cursor: "pointer",
 };

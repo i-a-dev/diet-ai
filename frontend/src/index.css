@@ -251,3 +251,272 @@ body {
   text-align: left;
   white-space: nowrap;
 }
+
+/* 食事登録モーダル: SearchState 差し替え領域 */
+.modal-state-viewport {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.modal-state-viewport > * {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+}
+
+.modal-state-layout {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.modal-state-content {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.modal-state-content--top {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.modal-state-content--center {
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+.modal-state-content-center-inner {
+  flex: 1 1 auto;
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  width: 100%;
+}
+
+.modal-state-content--searching {
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+.modal-state-content-searching-inner {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  padding-top: clamp(32px, 7vh, 56px);
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.modal-state-content--fill {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.modal-state-content--fill > * {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: 100%;
+  width: 100%;
+}
+
+.modal-state-content--scroll {
+  display: flex;
+  flex-direction: column;
+}
+
+.modal-state-actions {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 12px 0 max(10px, env(safe-area-inset-bottom, 0px));
+  background: #fff;
+}
+
+.modal-state-actions--inline {
+  padding-top: 12px;
+  padding-bottom: 8px;
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.modal-result-actions {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.modal-result-actions--add-edit {
+  gap: 4px;
+}
+
+.modal-primary-action {
+  width: 100%;
+  min-height: 48px;
+}
+
+.modal-accurate-search-action {
+  width: 100%;
+  min-height: 44px;
+  border: 1px solid #d1d5db;
+  border-radius: 10px;
+  background: #fff;
+  color: #4b5563;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 11px 12px;
+  box-sizing: border-box;
+}
+
+.modal-edit-action {
+  align-self: center;
+  min-width: 88px;
+  min-height: 40px;
+  padding: 0 12px;
+  border: 0;
+  background: transparent;
+  color: #6b7280;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.modal-secondary-action-row {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 24px;
+  margin-top: 4px;
+}
+
+.modal-text-action {
+  min-height: 44px;
+  padding: 0 4px;
+  border: 0;
+  background: transparent;
+  color: #6b7280;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.modal-search-cancel-button {
+  min-width: 120px;
+  min-height: 44px;
+  margin: 0 auto;
+  padding: 0 16px;
+  border: 0;
+  background: transparent;
+  color: #4b5563;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.modal-state-layout button:focus {
+  outline: none;
+}
+
+.modal-state-layout button:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
+.food-search-status {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 0;
+}
+
+.food-search-query {
+  max-width: 300px;
+  margin-left: auto;
+  margin-right: auto;
+  font-size: 24px;
+  font-weight: 800;
+  line-height: 1.35;
+  letter-spacing: 0.4px;
+  text-align: center;
+  color: #111827;
+  text-wrap: balance;
+  overflow-wrap: anywhere;
+}
+
+.food-search-progress-track {
+  width: 100%;
+  height: 6px;
+  border-radius: 999px;
+  background: #e5e7eb;
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+
+.food-search-progress-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #f59e0b 0%, #f97316 100%);
+  transition: width 260ms ease;
+}
+
+.food-search-progress-indeterminate {
+  width: 36%;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #f59e0b 0%, #f97316 100%);
+  animation: diet-ai-progress-indeterminate 1.25s ease-in-out infinite;
+}
+
+@keyframes diet-ai-progress-indeterminate {
+  0% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(320%);
+  }
+}
+
+@media (max-width: 375px) {
+  .food-search-query {
+    font-size: 22px;
+  }
+}
+
+@media (max-height: 700px) {
+  .modal-state-content-center-inner {
+    justify-content: flex-start;
+    min-height: auto;
+  }
+
+  .modal-state-content-searching-inner {
+    padding-top: 24px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .food-search-progress-indeterminate {
+    animation: none;
+    width: 45%;
+    margin-left: 27.5%;
+  }
+}

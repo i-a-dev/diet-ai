@@ -1,4 +1,5 @@
 import type { CSSProperties } from "react";
+import { Globe, Search } from "lucide-react";
 import type { FoodSearchStep } from "../types/foodSearch.ts";
 
 interface FoodSearchStatusProps {
@@ -6,17 +7,22 @@ interface FoodSearchStatusProps {
   query: string;
   mode: "food" | "web";
   steps: FoodSearchStep[];
-  onCancel: () => void;
   showApiDebug?: boolean;
   webPhase?: "planning" | "searching_pages" | "extracting_variants";
+  /** @deprecated キャンセルはカード外。後方互換のため残す（描画しない） */
+  onCancel?: () => void;
 }
 
+/**
+ * 検索中ステータス表示のみ。
+ * - food: ステップ更新に連動した実進捗バー
+ * - web: 長時間ほぼ完了付近で止まるため indeterminate
+ */
 export function FoodSearchStatus({
   title,
   query,
   mode,
   steps,
-  onCancel,
   showApiDebug = false,
   webPhase,
 }: FoodSearchStatusProps) {
@@ -24,21 +30,45 @@ export function FoodSearchStatus({
   const progressRatio = calcProgressRatio(visibleSteps);
   const activeApiLabel = detectActiveApiLabel(steps, mode);
   const webSubText = resolveWebSubText(webPhase);
+  const useIndeterminateProgress = mode === "web";
 
   return (
-    <div style={cardStyle}>
+    <div className="food-search-status" style={statusStyle}>
       <div style={iconWrapStyle} aria-hidden>
-        <span style={iconStyle}>{mode === "web" ? "🌐" : "🔍"}</span>
+        {mode === "web" ? (
+          <Globe size={28} color="#4B5563" strokeWidth={2} />
+        ) : (
+          <Search size={28} color="#4B5563" strokeWidth={2} />
+        )}
       </div>
       <div style={headlineStyle}>{title}</div>
-      <div style={queryStyle}>{query}</div>
+      <div className="food-search-query">{query}</div>
       <div style={subTextStyle}>
         {mode === "web"
           ? webSubText
           : "数秒かかる場合があります"}
       </div>
-      <div style={progressTrackStyle}>
-        <div style={{ ...progressFillStyle, width: `${Math.max(progressRatio * 100, 12)}%` }} />
+      <div
+        className="food-search-progress-track"
+        role="progressbar"
+        aria-label="検索の進捗"
+        aria-valuemin={useIndeterminateProgress ? undefined : 0}
+        aria-valuemax={useIndeterminateProgress ? undefined : 100}
+        aria-valuenow={
+          useIndeterminateProgress
+            ? undefined
+            : Math.round(Math.max(progressRatio * 100, 12))
+        }
+        aria-valuetext={useIndeterminateProgress ? "検索中" : undefined}
+      >
+        {useIndeterminateProgress ? (
+          <div className="food-search-progress-indeterminate" />
+        ) : (
+          <div
+            className="food-search-progress-fill"
+            style={{ width: `${Math.max(progressRatio * 100, 12)}%` }}
+          />
+        )}
       </div>
 
       {showApiDebug && (
@@ -46,10 +76,6 @@ export function FoodSearchStatus({
           実行中検索: <strong>{activeApiLabel}</strong>
         </div>
       )}
-
-      <button type="button" onClick={onCancel} style={cancelButtonStyle}>
-        キャンセル
-      </button>
     </div>
   );
 }
@@ -100,22 +126,17 @@ function detectActiveApiLabel(steps: FoodSearchStep[], mode: "food" | "web"): st
   }
 }
 
-const cardStyle: CSSProperties = {
-  border: "1px solid #E5E7EB",
-  borderRadius: 12,
-  padding: "14px 14px 12px",
-  marginTop: 10,
-  background: "#fff",
+const statusStyle: CSSProperties = {
+  width: "100%",
+  maxWidth: 360,
+  marginLeft: "auto",
+  marginRight: "auto",
 };
 
 const iconWrapStyle: CSSProperties = {
   display: "flex",
   justifyContent: "center",
-  marginBottom: 6,
-};
-
-const iconStyle: CSSProperties = {
-  fontSize: 28,
+  marginBottom: 8,
 };
 
 const headlineStyle: CSSProperties = {
@@ -123,60 +144,23 @@ const headlineStyle: CSSProperties = {
   fontSize: 14,
   fontWeight: 700,
   color: "#111827",
-  marginBottom: 4,
-};
-
-const queryStyle: CSSProperties = {
-  textAlign: "center",
-  fontSize: 29,
-  fontWeight: 800,
-  letterSpacing: 0.4,
-  color: "#111827",
+  marginBottom: 8,
 };
 
 const subTextStyle: CSSProperties = {
-  marginTop: 4,
+  marginTop: 8,
   textAlign: "center",
   fontSize: 12,
   color: "#6B7280",
-  marginBottom: 10,
-};
-
-const progressTrackStyle: CSSProperties = {
-  width: "100%",
-  height: 6,
-  borderRadius: 999,
-  background: "#E5E7EB",
-  overflow: "hidden",
   marginBottom: 12,
 };
 
-const progressFillStyle: CSSProperties = {
-  height: "100%",
-  borderRadius: 999,
-  background: "linear-gradient(90deg, #F59E0B 0%, #F97316 100%)",
-  transition: "width 260ms ease",
-};
-
 const debugStyle: CSSProperties = {
-  marginBottom: 10,
+  marginTop: 8,
   padding: "8px 10px",
   background: "#EEF2FF",
   color: "#3730A3",
   border: "1px solid #C7D2FE",
   borderRadius: 8,
   fontSize: 12,
-};
-
-const cancelButtonStyle: CSSProperties = {
-  marginTop: 12,
-  width: "100%",
-  border: "1px solid #D1D5DB",
-  background: "#fff",
-  borderRadius: 10,
-  padding: "11px 12px",
-  color: "#374151",
-  fontWeight: 700,
-  fontSize: 14,
-  cursor: "pointer",
 };

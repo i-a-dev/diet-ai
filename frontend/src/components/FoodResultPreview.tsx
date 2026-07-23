@@ -11,8 +11,11 @@ interface FoodResultPreviewProps {
   result: FoodSearchResult;
   mode: FoodResultDisplayMode;
   caloriesEdited?: boolean;
+  /** @deprecated 操作はカード外。後方互換のため残す */
   onEdit?: () => void;
+  /** @deprecated 操作はカード外。後方互換のため残す */
   onAdd?: () => void;
+  /** @deprecated 操作はカード外。後方互換のため残す */
   onSearchWeb?: () => void;
 }
 
@@ -20,18 +23,12 @@ export function FoodResultPreview({
   result,
   mode,
   caloriesEdited,
-  onEdit,
-  onAdd,
-  onSearchWeb,
 }: FoodResultPreviewProps) {
   return (
     <FoodEstimateCard
       result={result}
       variant={getFoodEstimateCardVariant(result, mode)}
       caloriesEdited={caloriesEdited}
-      onEdit={onEdit ?? (() => {})}
-      onAdd={onAdd ?? (() => {})}
-      onSearchWeb={onSearchWeb}
     />
   );
 }

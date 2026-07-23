@@ -8,12 +8,20 @@ import {
 } from "react";
 import { Loader2 } from "lucide-react";
 import { BottomSheet } from "./BottomSheet.tsx";
-import { ORANGE } from "../constants.ts";
 import { FoodSearchStatus } from "./FoodSearchStatus.tsx";
 import { FoodResultPreview } from "./FoodResultPreview.tsx";
 import { LowConfidenceEstimateCard } from "./LowConfidenceEstimateCard.tsx";
 import { ProductConfirmationCard } from "./ProductConfirmationCard.tsx";
 import { WebSearchCandidateConfirmation } from "./WebSearchCandidateConfirmation.tsx";
+import { ModalStateViewport } from "./ModalStateViewport.tsx";
+import { ModalStateLayout } from "./ModalStateLayout.tsx";
+import {
+  modalLinkActionStyle,
+  modalOutlineActionStyle,
+  modalPrimaryActionStyle,
+  modalSecondaryActionStyle,
+  modalTextActionStyle,
+} from "./foodModalActionStyles.ts";
 import {
   buildResultFromSelectedAlias,
   buildResultFromSelectedCandidate,
@@ -852,128 +860,189 @@ export function AddFoodModal({
 
     const activeHistory = historyTab === "recent" ? recentHistory : mealHistory;
     return (
-      <>
-        <div style={hintTitleStyle}>履歴から選ぶ</div>
-        <div style={tabWrapStyle}>
-          <button
-            type="button"
-            onClick={() => setHistoryTab("recent")}
-            aria-pressed={historyTab === "recent"}
-            style={{
-              ...tabButtonStyle,
-              ...(historyTab === "recent"
-                ? activeTabButtonStyle
-                : inactiveTabButtonStyle),
-            }}
-          >
-            最近の履歴
-          </button>
-          <button
-            type="button"
-            onClick={() => setHistoryTab("meal")}
-            aria-pressed={historyTab === "meal"}
-            style={{
-              ...tabButtonStyle,
-              ...(historyTab === "meal"
-                ? activeTabButtonStyle
-                : inactiveTabButtonStyle),
-            }}
-          >
-            {mealTitle}の履歴
-          </button>
-        </div>
-        <div style={historyScrollAreaStyle}>
-          {isHistoryLoading ? (
-            <div style={historyLoadingStyle} aria-busy="true" aria-live="polite">
-              <Loader2 size={20} color="#9CA3AF" className="diet-ai-spin" />
-              <span>読み込み中...</span>
-            </div>
-          ) : (
-            <div style={chipWrapStyle}>
-              {activeHistory.map((item) => (
+      <ModalStateLayout
+        contentMode="fill"
+        content={
+          <div style={idleHistoryFillStyle}>
+            <div style={idleHistoryHeaderStyle}>
+              <div style={hintTitleStyle}>履歴から選ぶ</div>
+              <div style={tabWrapStyle}>
                 <button
-                  key={`${item.label}-${item.kcal}`}
                   type="button"
-                  onClick={() => handleHistorySelect(item)}
-                  style={chipStyle}
+                  onClick={() => setHistoryTab("recent")}
+                  aria-pressed={historyTab === "recent"}
+                  style={{
+                    ...tabButtonStyle,
+                    ...(historyTab === "recent"
+                      ? activeTabButtonStyle
+                      : inactiveTabButtonStyle),
+                  }}
                 >
-                  <span style={chipLabelStyle}>{item.label}</span>
-                  <span style={chipKcalStyle}>{item.kcal}</span>
+                  最近の履歴
                 </button>
-              ))}
-              {activeHistory.length === 0 && (
-                <span style={emptyHistoryStyle}>履歴がありません</span>
+                <button
+                  type="button"
+                  onClick={() => setHistoryTab("meal")}
+                  aria-pressed={historyTab === "meal"}
+                  style={{
+                    ...tabButtonStyle,
+                    ...(historyTab === "meal"
+                      ? activeTabButtonStyle
+                      : inactiveTabButtonStyle),
+                  }}
+                >
+                  {mealTitle}の履歴
+                </button>
+              </div>
+            </div>
+            <div style={historyScrollAreaStyle}>
+              {isHistoryLoading ? (
+                <div
+                  style={historyLoadingStyle}
+                  aria-busy="true"
+                  aria-live="polite"
+                >
+                  <Loader2 size={20} color="#9CA3AF" className="diet-ai-spin" />
+                  <span>読み込み中...</span>
+                </div>
+              ) : activeHistory.length === 0 ? (
+                <div style={emptyHistoryStyle}>履歴がありません</div>
+              ) : (
+                <div style={chipWrapStyle}>
+                  {activeHistory.map((item) => (
+                    <button
+                      key={`${item.label}-${item.kcal}`}
+                      type="button"
+                      onClick={() => handleHistorySelect(item)}
+                      style={chipStyle}
+                    >
+                      <span style={chipLabelStyle}>{item.label}</span>
+                      <span style={chipKcalStyle}>{item.kcal}</span>
+                    </button>
+                  ))}
+                </div>
               )}
             </div>
-          )}
-        </div>
+          </div>
+        }
+        actions={
+          <>
+            <button
+              type="button"
+              onClick={() => void handleSearch()}
+              disabled={!canSearch || isSubmitting}
+              style={{
+                ...modalPrimaryActionStyle,
+                opacity: canSearch && !isSubmitting ? 1 : 0.45,
+              }}
+            >
+              検索する
+            </button>
+            <button
+              type="button"
+              onClick={() => openManualEntry({ fromIdle: true })}
+              style={modalLinkActionStyle}
+            >
+              手動で入力
+            </button>
+          </>
+        }
+      />
+    );
+  }
+
+  function renderResultActions(options: {
+    onAdd: () => void;
+    onEdit: () => void;
+    onSearchWeb?: () => void;
+  }) {
+    const hasWebSearch = Boolean(options.onSearchWeb);
+
+    return (
+      <div
+        className={
+          hasWebSearch
+            ? "modal-result-actions"
+            : "modal-result-actions modal-result-actions--add-edit"
+        }
+      >
         <button
           type="button"
-          onClick={() => void handleSearch()}
-          disabled={!canSearch || isSubmitting}
-          style={{
-            ...primaryBtnStyle,
-            opacity: canSearch && !isSubmitting ? 1 : 0.45,
-          }}
+          onClick={options.onAdd}
+          className="modal-primary-action"
+          style={modalPrimaryActionStyle}
         >
-          検索する
+          追加する
         </button>
+        {options.onSearchWeb && (
+          <button
+            type="button"
+            onClick={options.onSearchWeb}
+            className="modal-accurate-search-action"
+          >
+            より正確に調べる
+          </button>
+        )}
         <button
           type="button"
-          onClick={() => openManualEntry({ fromIdle: true })}
-          style={manualEntryLinkStyle}
+          onClick={options.onEdit}
+          className="modal-edit-action"
         >
-          手動で入力
+          編集
         </button>
-      </>
+      </div>
     );
   }
 
   function renderSearchResult(state: SearchState) {
-    if (isEditingManually && (isPreSearchManual || state === "error")) {
-      return state === "error" ? (
-        <div style={errorTextStyle}>
-          {progress.message ?? "検索に失敗しました。手動で記録してください。"}
-        </div>
-      ) : null;
-    }
-
-    if (isEditingManually && !isPreSearchManual && state !== "error") {
-      return null;
-    }
-
     if (state === "searching" || state === "web_searching") {
       return (
-        <FoodSearchStatus
-          title={
-            state === "web_searching"
-              ? "より正確な情報を確認しています"
-              : "食品情報を探しています"
+        <ModalStateLayout
+          contentMode="searching"
+          content={
+            <FoodSearchStatus
+              title={
+                state === "web_searching"
+                  ? "より正確な情報を確認しています"
+                  : "食品情報を探しています"
+              }
+              query={inputValue.trim()}
+              mode={state === "web_searching" ? "web" : "food"}
+              steps={progress.steps}
+              webPhase={progress.webSearchPhase}
+              showApiDebug={showSearchApiDebug}
+            />
           }
-          query={inputValue.trim()}
-          mode={state === "web_searching" ? "web" : "food"}
-          steps={progress.steps}
-          webPhase={progress.webSearchPhase}
-          showApiDebug={showSearchApiDebug}
-          onCancel={() => {
-            activeSearchTokenRef.current = 0;
-            setProgress(makeInitialProgress());
-          }}
+          actions={
+            <button
+              type="button"
+              onClick={() => {
+                activeSearchTokenRef.current = 0;
+                setProgress(makeInitialProgress());
+              }}
+              className="modal-search-cancel-button"
+            >
+              キャンセル
+            </button>
+          }
         />
       );
     }
 
     if ((state === "found" || state === "web_found") && selectedResult) {
       return (
-        <FoodResultPreview
-          result={selectedResult}
-          mode="register"
-          onEdit={() =>
-            openManualEntry({
-              initialKcal: String(selectedResult.calories),
-            })
+        <ModalStateLayout
+          contentMode="top"
+          content={
+            <FoodResultPreview result={selectedResult} mode="register" />
           }
-          onAdd={() => void saveItem(selectedResult)}
+          actions={renderResultActions({
+            onAdd: () => void saveItem(selectedResult),
+            onEdit: () =>
+              openManualEntry({
+                initialKcal: String(selectedResult.calories),
+              }),
+          })}
         />
       );
     }
@@ -981,18 +1050,21 @@ export function AddFoodModal({
     if (state === "estimated" && selectedResult) {
       const canSearchWeb = selectedResult.shouldOfferWebSearch === true;
       return (
-        <FoodResultPreview
-          result={selectedResult}
-          mode="register"
-          onEdit={() =>
-            openManualEntry({
-              initialKcal: String(selectedResult.calories),
-            })
+        <ModalStateLayout
+          contentMode="top"
+          content={
+            <FoodResultPreview result={selectedResult} mode="register" />
           }
-          onAdd={() => void saveItem(selectedResult)}
-          onSearchWeb={
-            canSearchWeb ? () => void handleWebSearch() : undefined
-          }
+          actions={renderResultActions({
+            onAdd: () => void saveItem(selectedResult),
+            onEdit: () =>
+              openManualEntry({
+                initialKcal: String(selectedResult.calories),
+              }),
+            onSearchWeb: canSearchWeb
+              ? () => void handleWebSearch()
+              : undefined,
+          })}
         />
       );
     }
@@ -1002,16 +1074,22 @@ export function AddFoodModal({
         selectedHistoryItem?.caloriesEdited ?? selectedResult.caloriesEdited,
       );
       return (
-        <FoodResultPreview
-          result={selectedResult}
-          mode="history"
-          caloriesEdited={historyEdited}
-          onEdit={() =>
-            openManualEntry({
-              initialKcal: String(selectedResult.calories),
-            })
+        <ModalStateLayout
+          contentMode="top"
+          content={
+            <FoodResultPreview
+              result={selectedResult}
+              mode="history"
+              caloriesEdited={historyEdited}
+            />
           }
-          onAdd={() => void saveItem(selectedResult)}
+          actions={renderResultActions({
+            onAdd: () => void saveItem(selectedResult),
+            onEdit: () =>
+              openManualEntry({
+                initialKcal: String(selectedResult.calories),
+              }),
+          })}
         />
       );
     }
@@ -1019,26 +1097,64 @@ export function AddFoodModal({
     if (state === "low_confidence_estimate" && selectedResult) {
       const canSearchWeb =
         !isWebSearchFallback && selectedResult.shouldOfferWebSearch === true;
+      const showDeepSearchButton =
+        isWebSearchFallback && progress.offerDeepWebSearch === true;
+
       return (
-        <LowConfidenceEstimateCard
-          result={selectedResult}
-          onSearchWeb={() => void handleWebSearch()}
-          onDeepWebSearch={() => void handleDeepWebSearch()}
-          onUseAiEstimate={handleAiOnly}
-          onEdit={() =>
-            openManualEntry({
-              initialKcal: String(selectedResult.calories),
-            })
+        <ModalStateLayout
+          contentMode="scroll"
+          stickyActions={false}
+          content={
+            <LowConfidenceEstimateCard
+              result={selectedResult}
+              showDeepSearchButton={showDeepSearchButton}
+              warningMessage={
+                isWebSearchFallback
+                  ? (progress.message ??
+                    "正確な商品情報を確認できませんでした")
+                  : undefined
+              }
+            />
           }
-          showSearchButton={canSearchWeb}
-          showDeepSearchButton={
-            isWebSearchFallback && progress.offerDeepWebSearch === true
-          }
-          warningMessage={
-            isWebSearchFallback
-              ? (progress.message ??
-                "正確な商品情報を確認できませんでした")
-              : undefined
+          actions={
+            <>
+              <button
+                type="button"
+                onClick={handleAiOnly}
+                style={modalPrimaryActionStyle}
+              >
+                この内容で追加
+              </button>
+              {showDeepSearchButton && (
+                <button
+                  type="button"
+                  onClick={() => void handleDeepWebSearch()}
+                  style={modalSecondaryActionStyle}
+                >
+                  さらに詳しく検索
+                </button>
+              )}
+              {canSearchWeb && (
+                <button
+                  type="button"
+                  onClick={() => void handleWebSearch()}
+                  style={modalSecondaryActionStyle}
+                >
+                  より正確に調べる
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() =>
+                  openManualEntry({
+                    initialKcal: String(selectedResult.calories),
+                  })
+                }
+                style={modalTextActionStyle}
+              >
+                編集
+              </button>
+            </>
           }
         />
       );
@@ -1084,15 +1200,42 @@ export function AddFoodModal({
       (progress.aliasCandidates?.length ?? 0) > 0
     ) {
       return (
-        <ProductConfirmationCard
-          title="こちらの商品ですか？"
-          description="過去によく選ばれている候補です。該当する商品を選んでください。"
-          candidates={toAliasConfirmationCandidates(progress.aliasCandidates ?? [])}
-          onSelect={handleCandidateSelect}
-          onManualInput={handleCandidateManualInput}
-          showWebSearchButton
-          onSearchWeb={() => void handleWebSearch()}
-          searchWebDisabled={isSearching}
+        <ModalStateLayout
+          contentMode="fill"
+          content={
+            <ProductConfirmationCard
+              title="こちらの商品ですか？"
+              description="過去によく選ばれている候補です。該当する商品を選んでください。"
+              candidates={toAliasConfirmationCandidates(
+                progress.aliasCandidates ?? [],
+              )}
+              onSelect={handleCandidateSelect}
+              fillAvailableSpace
+            />
+          }
+          actions={
+            <>
+              <button
+                type="button"
+                onClick={handleCandidateManualInput}
+                style={modalTextActionStyle}
+              >
+                編集
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleWebSearch()}
+                disabled={isSearching}
+                style={{
+                  ...modalOutlineActionStyle,
+                  opacity: isSearching ? 0.45 : 1,
+                  cursor: isSearching ? "not-allowed" : "pointer",
+                }}
+              >
+                より正確に調べる
+              </button>
+            </>
+          }
         />
       );
     }
@@ -1107,59 +1250,83 @@ export function AddFoodModal({
         progress.localDbCandidates?.[0]?.baseProductName ?? inputValue.trim();
 
       return (
-        <ProductConfirmationCard
-          title={isVariantAmbiguous ? "サイズを選んでください" : "こちらの商品ですか？"}
-          description={
-            isVariantAmbiguous
-              ? `${baseName} のサイズ・容量が複数見つかりました。該当するものを選んでください。`
-              : "登録済みの候補です。該当する商品を選んでください。"
+        <ModalStateLayout
+          contentMode="fill"
+          content={
+            <ProductConfirmationCard
+              title={
+                isVariantAmbiguous
+                  ? "サイズを選んでください"
+                  : "こちらの商品ですか？"
+              }
+              description={
+                isVariantAmbiguous
+                  ? `${baseName} のサイズ・容量が複数見つかりました。該当するものを選んでください。`
+                  : "登録済みの候補です。該当する商品を選んでください。"
+              }
+              candidates={toLocalDbConfirmationCandidates(
+                progress.localDbCandidates ?? [],
+              )}
+              onSelect={handleCandidateSelect}
+              fillAvailableSpace
+            />
           }
-          candidates={toLocalDbConfirmationCandidates(
-            progress.localDbCandidates ?? [],
-          )}
-          onSelect={handleCandidateSelect}
-          onManualInput={handleCandidateManualInput}
-          showWebSearchButton
-          onSearchWeb={() => void handleWebSearch()}
-          searchWebDisabled={isSearching}
+          actions={
+            <>
+              <button
+                type="button"
+                onClick={handleCandidateManualInput}
+                style={modalTextActionStyle}
+              >
+                編集
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleWebSearch()}
+                disabled={isSearching}
+                style={{
+                  ...modalOutlineActionStyle,
+                  opacity: isSearching ? 0.45 : 1,
+                  cursor: isSearching ? "not-allowed" : "pointer",
+                }}
+              >
+                より正確に調べる
+              </button>
+            </>
+          }
         />
       );
     }
 
     if (state === "completed" && completedResult && completedSummary) {
       return (
-        <div style={completedCardStyle}>
-          <div style={completedTitleStyle}>追加しました</div>
-          <div style={completedFoodStyle}>
-            {completedResult.displayName} / {completedResult.calories}kcal
-          </div>
-          <div style={completedMetaStyle}>
-            {mealTitle} 合計: {completedSummary.nextMealTotal}kcal
-          </div>
-          <div style={completedMetaStyle}>
-            今日の合計: {completedSummary.nextTotal}kcal
-          </div>
-          {completedSummary.remaining !== null && (
-            <div style={completedMetaStyle}>
-              今日の残り: {completedSummary.remaining}kcal
+        <ModalStateLayout
+          contentMode="center"
+          content={
+            <div style={completedCardStyle}>
+              <div style={completedTitleStyle}>追加しました</div>
+              <div style={completedFoodStyle}>
+                {completedResult.displayName} / {completedResult.calories}kcal
+              </div>
+              <div style={completedMetaStyle}>
+                {mealTitle} 合計: {completedSummary.nextMealTotal}kcal
+              </div>
+              <div style={completedMetaStyle}>
+                今日の合計: {completedSummary.nextTotal}kcal
+              </div>
+              {completedSummary.remaining !== null && (
+                <div style={completedMetaStyle}>
+                  今日の残り: {completedSummary.remaining}kcal
+                </div>
+              )}
             </div>
-          )}
-          <button
-            type="button"
-            onClick={onClose}
-            style={{ ...primaryBtnStyle, marginTop: 10 }}
-          >
-            閉じる
-          </button>
-        </div>
-      );
-    }
-
-    if (state === "error") {
-      return (
-        <div style={errorTextStyle}>
-          {progress.message ?? "検索に失敗しました。手動で記録してください。"}
-        </div>
+          }
+          actions={
+            <button type="button" onClick={onClose} style={modalPrimaryActionStyle}>
+              閉じる
+            </button>
+          }
+        />
       );
     }
 
@@ -1175,126 +1342,155 @@ export function AddFoodModal({
       !isSubmitting;
 
     return (
-      <div style={manualFormStyle}>
-        {isPreSearchManual && (
-          <div style={manualFormTitleStyle}>手動で入力</div>
-        )}
-        {!isPreSearchManual && progress.state !== "error" && (
-          <div style={manualFormTitleStyle}>編集</div>
-        )}
-        <label style={{ ...fieldLabelStyle, marginTop: isPreSearchManual ? 0 : 4 }}>
-          カロリー
-        </label>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <input
-            type="number"
-            placeholder="例：234"
-            value={manualKcal}
-            onChange={(e) => setManualKcal(e.target.value)}
-            style={{ ...inputStyle, marginBottom: 0 }}
-          />
-          <span style={{ fontSize: 13, color: "#888" }}>kcal</span>
-        </div>
+      <ModalStateLayout
+        contentMode="scroll"
+        content={
+          <div style={manualFormStyle}>
+            {isPreSearchManual && (
+              <div style={manualFormTitleStyle}>手動で入力</div>
+            )}
+            {!isPreSearchManual && progress.state !== "error" && (
+              <div style={manualFormTitleStyle}>編集</div>
+            )}
+            {progress.state === "error" && (
+              <div style={errorTextStyle}>
+                {progress.message ??
+                  "検索に失敗しました。手動で記録してください。"}
+              </div>
+            )}
+            <label
+              style={{
+                ...fieldLabelStyle,
+                marginTop: isPreSearchManual ? 0 : 4,
+              }}
+            >
+              カロリー
+            </label>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <input
+                type="number"
+                placeholder="例：234"
+                value={manualKcal}
+                onChange={(e) => setManualKcal(e.target.value)}
+                style={{ ...inputStyle, marginBottom: 0 }}
+              />
+              <span style={{ fontSize: 13, color: "#888" }}>kcal</span>
+            </div>
 
-        <button
-          type="button"
-          onClick={() => setShowMacroDetails((prev) => !prev)}
-          style={macroToggleStyle}
-        >
-          {showMacroDetails
-            ? "詳細な栄養情報を閉じる"
-            : "詳細な栄養情報を入力（任意）"}
-        </button>
+            <button
+              type="button"
+              onClick={() => setShowMacroDetails((prev) => !prev)}
+              style={macroToggleStyle}
+            >
+              {showMacroDetails
+                ? "詳細な栄養情報を閉じる"
+                : "詳細な栄養情報を入力（任意）"}
+            </button>
 
-        {showMacroDetails && (
-          <div style={macroFieldsStyle}>
-            <label style={fieldLabelStyle}>たんぱく質 (g)</label>
-            <input
-              type="number"
-              placeholder="任意"
-              value={manualProtein}
-              onChange={(e) => setManualProtein(e.target.value)}
-              style={inputStyle}
-            />
-            <label style={fieldLabelStyle}>脂質 (g)</label>
-            <input
-              type="number"
-              placeholder="任意"
-              value={manualFat}
-              onChange={(e) => setManualFat(e.target.value)}
-              style={inputStyle}
-            />
-            <label style={fieldLabelStyle}>炭水化物 (g)</label>
-            <input
-              type="number"
-              placeholder="任意"
-              value={manualCarbs}
-              onChange={(e) => setManualCarbs(e.target.value)}
-              style={inputStyle}
-            />
+            {showMacroDetails && (
+              <div style={macroFieldsStyle}>
+                <label style={fieldLabelStyle}>たんぱく質 (g)</label>
+                <input
+                  type="number"
+                  placeholder="任意"
+                  value={manualProtein}
+                  onChange={(e) => setManualProtein(e.target.value)}
+                  style={inputStyle}
+                />
+                <label style={fieldLabelStyle}>脂質 (g)</label>
+                <input
+                  type="number"
+                  placeholder="任意"
+                  value={manualFat}
+                  onChange={(e) => setManualFat(e.target.value)}
+                  style={inputStyle}
+                />
+                <label style={fieldLabelStyle}>炭水化物 (g)</label>
+                <input
+                  type="number"
+                  placeholder="任意"
+                  value={manualCarbs}
+                  onChange={(e) => setManualCarbs(e.target.value)}
+                  style={inputStyle}
+                />
+              </div>
+            )}
           </div>
-        )}
-
-        <button
-          type="button"
-          disabled={!canSubmit}
-          onClick={() =>
-            void saveItem(
-              isPreSearchManual || progress.state === "error"
-                ? null
-                : selectedResult,
-            )
-          }
-          style={{
-            ...primaryBtnStyle,
-            marginTop: 10,
-            opacity: canSubmit ? 1 : 0.45,
-          }}
-        >
-          追加する
-        </button>
-        {isPreSearchManual && (
-          <button
-            type="button"
-            onClick={() => {
-              setShowManualEdit(false);
-              setIsPreSearchManual(false);
-              setManualKcal("");
-              setManualProtein("");
-              setManualFat("");
-              setManualCarbs("");
-              setShowMacroDetails(false);
-            }}
-            style={manualEntryLinkStyle}
-          >
-            検索に戻る
-          </button>
-        )}
-      </div>
+        }
+        actions={
+          <>
+            <button
+              type="button"
+              disabled={!canSubmit}
+              onClick={() =>
+                void saveItem(
+                  isPreSearchManual || progress.state === "error"
+                    ? null
+                    : selectedResult,
+                )
+              }
+              style={{
+                ...modalPrimaryActionStyle,
+                opacity: canSubmit ? 1 : 0.45,
+              }}
+            >
+              追加する
+            </button>
+            {isPreSearchManual && (
+              <button
+                type="button"
+                onClick={() => {
+                  setShowManualEdit(false);
+                  setIsPreSearchManual(false);
+                  setManualKcal("");
+                  setManualProtein("");
+                  setManualFat("");
+                  setManualCarbs("");
+                  setShowMacroDetails(false);
+                }}
+                style={modalLinkActionStyle}
+              >
+                検索に戻る
+              </button>
+            )}
+          </>
+        }
+      />
     );
   }
 
   return (
-    <BottomSheet open={open} title={`${mealTitle}を記録`} onClose={onClose}>
-      <label style={fieldLabelStyle}>食品名</label>
-      <input
-        type="text"
-        placeholder="例：白米150g / 焼き鮭定食"
-        value={inputValue}
-        onChange={(e) => setInputValue(e.target.value)}
-        readOnly={isFoodNameLocked}
-        aria-readonly={isFoodNameLocked}
-        style={{
-          ...inputStyle,
-          background: isFoodNameLocked ? "#F3F4F6" : "#fff",
-          color: isFoodNameLocked ? "#6B7280" : "#111",
-          cursor: isFoodNameLocked ? "not-allowed" : "text",
-        }}
-      />
+    <BottomSheet
+      open={open}
+      title={`${mealTitle}を記録`}
+      onClose={onClose}
+      fillMaxHeight
+    >
+      <div style={foodNameSectionStyle}>
+        <label style={fieldLabelStyle}>食品名</label>
+        <input
+          type="text"
+          placeholder="例：白米150g / 焼き鮭定食"
+          value={inputValue}
+          onChange={(e) => setInputValue(e.target.value)}
+          readOnly={isFoodNameLocked}
+          aria-readonly={isFoodNameLocked}
+          style={{
+            ...inputStyle,
+            background: isFoodNameLocked ? "#F3F4F6" : "#fff",
+            color: isFoodNameLocked ? "#6B7280" : "#111",
+            cursor: isFoodNameLocked ? "not-allowed" : "text",
+          }}
+        />
+      </div>
 
-      {renderSearchResult(progress.state)}
-      {progress.state === "idle" && renderIdleSection()}
-      {renderManualEntryForm()}
+      <ModalStateViewport>
+        {isEditingManually
+          ? renderManualEntryForm()
+          : progress.state === "idle"
+            ? renderIdleSection()
+            : renderSearchResult(progress.state)}
+      </ModalStateViewport>
     </BottomSheet>
   );
 }
@@ -1378,6 +1574,10 @@ const fieldLabelStyle: CSSProperties = {
   marginBottom: 6,
 };
 
+const foodNameSectionStyle: CSSProperties = {
+  flexShrink: 0,
+};
+
 const inputStyle: CSSProperties = {
   width: "100%",
   boxSizing: "border-box",
@@ -1390,8 +1590,7 @@ const inputStyle: CSSProperties = {
 };
 
 const hintTitleStyle: CSSProperties = {
-  marginTop: 10,
-  marginBottom: 6,
+  marginBottom: 8,
   fontSize: 13,
   fontWeight: 700,
   color: "#6B7280",
@@ -1400,27 +1599,41 @@ const hintTitleStyle: CSSProperties = {
 const chipWrapStyle: CSSProperties = {
   display: "flex",
   flexWrap: "wrap",
-  gap: 6,
+  gap: 8,
+  alignContent: "flex-start",
 };
 
-// シート全体を少し高くしつつ、履歴は枠内スクロールで多めに見せる
-const HISTORY_AREA_HEIGHT = 168;
+const HISTORY_AREA_MIN_HEIGHT = 176;
+
+const idleHistoryFillStyle: CSSProperties = {
+  height: "100%",
+  minHeight: 0,
+  display: "flex",
+  flexDirection: "column",
+  gap: 12,
+};
+
+const idleHistoryHeaderStyle: CSSProperties = {
+  flexShrink: 0,
+};
 
 const historyScrollAreaStyle: CSSProperties = {
-  height: HISTORY_AREA_HEIGHT,
-  maxHeight: HISTORY_AREA_HEIGHT,
+  flex: "1 1 auto",
+  minHeight: HISTORY_AREA_MIN_HEIGHT,
   boxSizing: "border-box",
+  overflowX: "hidden",
   overflowY: "auto",
+  overscrollBehavior: "contain",
+  WebkitOverflowScrolling: "touch",
   border: "1px solid #F1F5F9",
   borderRadius: 10,
-  padding: "8px",
-  marginBottom: 8,
+  padding: "8px 8px 16px",
   background: "#fff",
 };
 
 const historyLoadingStyle: CSSProperties = {
   height: "100%",
-  minHeight: HISTORY_AREA_HEIGHT - 16,
+  minHeight: HISTORY_AREA_MIN_HEIGHT - 16,
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
@@ -1433,7 +1646,6 @@ const tabWrapStyle: CSSProperties = {
   display: "grid",
   gridTemplateColumns: "1fr 1fr",
   gap: 6,
-  marginBottom: 8,
   padding: 3,
   borderRadius: 12,
   background: "#F3F4F6",
@@ -1493,24 +1705,17 @@ const chipKcalStyle: CSSProperties = {
 };
 
 const emptyHistoryStyle: CSSProperties = {
+  height: "100%",
+  minHeight: HISTORY_AREA_MIN_HEIGHT - 16,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
   fontSize: 12,
   color: "#9CA3AF",
 };
 
-const primaryBtnStyle: CSSProperties = {
-  width: "100%",
-  padding: "11px 0",
-  borderRadius: 10,
-  border: "none",
-  background: ORANGE,
-  fontSize: 14,
-  fontWeight: 700,
-  color: "#fff",
-  cursor: "pointer",
-};
-
 const errorTextStyle: CSSProperties = {
-  marginTop: 10,
+  marginBottom: 12,
   fontSize: 13,
   color: "#C0392B",
   background: "#FFF1F0",
@@ -1523,7 +1728,8 @@ const completedCardStyle: CSSProperties = {
   border: "1px solid #D1FAE5",
   background: "#ECFDF5",
   padding: "12px 14px",
-  marginTop: 10,
+  boxSizing: "border-box",
+  width: "100%",
 };
 
 const completedTitleStyle: CSSProperties = {
@@ -1545,22 +1751,9 @@ const completedMetaStyle: CSSProperties = {
   color: "#065F46",
 };
 
-const manualEntryLinkStyle: CSSProperties = {
-  width: "100%",
-  marginTop: 2,
-  border: "none",
-  background: "transparent",
-  color: "#6B7280",
-  fontSize: 13,
-  fontWeight: 600,
-  padding: "4px 4px 0",
-  cursor: "pointer",
-  textDecoration: "underline",
-  textUnderlineOffset: 2,
-};
-
 const manualFormStyle: CSSProperties = {
-  marginTop: 12,
+  width: "100%",
+  paddingBottom: 8,
 };
 
 const manualFormTitleStyle: CSSProperties = {
@@ -1579,7 +1772,7 @@ const macroToggleStyle: CSSProperties = {
   color: "#6B7280",
   fontSize: 12,
   fontWeight: 600,
-  padding: "6px 0",
+  padding: "8px 0",
   cursor: "pointer",
   textAlign: "left",
 };

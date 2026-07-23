@@ -10,14 +10,23 @@ interface ProductConfirmationCardProps {
   candidates: FoodConfirmationCandidate[];
   selectedKey?: string | null;
   onSelect: (candidate: FoodConfirmationCandidate) => void;
-  onManualInput: () => void;
+  /** 候補一覧型: ヘッダー固定・一覧のみ内部スクロール */
+  fillAvailableSpace?: boolean;
+  /** @deprecated 操作はカード外。後方互換のため残す */
+  onManualInput?: () => void;
+  /** @deprecated 操作はカード外。後方互換のため残す */
   onUnknown?: () => void;
+  /** @deprecated 操作はカード外。後方互換のため残す */
   onConfirmSelected?: () => void;
+  /** @deprecated 操作はカード外。後方互換のため残す */
   showWebSearchButton?: boolean;
+  /** @deprecated 操作はカード外。後方互換のため残す */
   onSearchWeb?: () => void;
+  /** @deprecated 操作はカード外。後方互換のため残す */
   searchWebDisabled?: boolean;
 }
 
+/** 候補一覧の情報表示のみ（編集・追加などの操作はカード外） */
 export function ProductConfirmationCard({
   title,
   description,
@@ -25,25 +34,32 @@ export function ProductConfirmationCard({
   candidates,
   selectedKey = null,
   onSelect,
-  onManualInput,
-  onUnknown,
-  onConfirmSelected,
-  showWebSearchButton = false,
-  onSearchWeb,
-  searchWebDisabled = false,
+  fillAvailableSpace = false,
 }: ProductConfirmationCardProps) {
   const resolvedTitle =
     title ?? getCandidateConfirmationHeading("unknown", candidates.length);
   const resolvedDescription = description ?? "";
 
   return (
-    <div style={cardStyle}>
-      {productName && <div style={productNameStyle}>{productName}</div>}
-      <div style={titleStyle}>{resolvedTitle}</div>
-      {resolvedDescription && (
-        <div style={descriptionStyle}>{resolvedDescription}</div>
-      )}
-      <div style={listStyle}>
+    <div
+      style={{
+        ...cardStyle,
+        ...(fillAvailableSpace ? fillCardStyle : null),
+      }}
+    >
+      <div style={headerStyle}>
+        {productName && <div style={productNameStyle}>{productName}</div>}
+        <div style={titleStyle}>{resolvedTitle}</div>
+        {resolvedDescription && (
+          <div style={descriptionStyle}>{resolvedDescription}</div>
+        )}
+      </div>
+      <div
+        style={{
+          ...listStyle,
+          ...(fillAvailableSpace ? fillListStyle : null),
+        }}
+      >
         {candidates.map((candidate) => {
           const isSelected = selectedKey === candidate.key;
           const sourceUrl =
@@ -93,33 +109,6 @@ export function ProductConfirmationCard({
           );
         })}
       </div>
-      <button type="button" onClick={onManualInput} style={textButtonStyle}>
-        編集
-      </button>
-      {onUnknown && (
-        <button type="button" onClick={onUnknown} style={secondaryButtonStyle}>
-          わからない
-        </button>
-      )}
-      {selectedKey && onConfirmSelected && (
-        <button type="button" onClick={onConfirmSelected} style={primaryButtonStyle}>
-          追加する
-        </button>
-      )}
-      {showWebSearchButton && onSearchWeb && (
-        <button
-          type="button"
-          onClick={onSearchWeb}
-          disabled={searchWebDisabled}
-          style={{
-            ...outlineButtonStyle,
-            opacity: searchWebDisabled ? 0.45 : 1,
-            cursor: searchWebDisabled ? "not-allowed" : "pointer",
-          }}
-        >
-          より正確に調べる
-        </button>
-      )}
     </div>
   );
 }
@@ -129,7 +118,20 @@ const cardStyle: CSSProperties = {
   border: "1px solid #BFDBFE",
   background: "#EFF6FF",
   padding: "12px 14px",
-  marginTop: 10,
+  boxSizing: "border-box",
+  width: "100%",
+};
+
+const fillCardStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  minHeight: 0,
+  maxHeight: "100%",
+  overflow: "hidden",
+};
+
+const headerStyle: CSSProperties = {
+  flexShrink: 0,
 };
 
 const productNameStyle: CSSProperties = {
@@ -146,7 +148,7 @@ const titleStyle: CSSProperties = {
 };
 
 const descriptionStyle: CSSProperties = {
-  marginTop: 6,
+  marginTop: 8,
   fontSize: 12,
   color: "#1E3A8A",
   lineHeight: 1.5,
@@ -156,6 +158,17 @@ const listStyle: CSSProperties = {
   display: "grid",
   gap: 8,
   marginTop: 12,
+};
+
+const fillListStyle: CSSProperties = {
+  flex: "1 1 auto",
+  minHeight: 0,
+  overflowX: "hidden",
+  overflowY: "auto",
+  overscrollBehavior: "contain",
+  WebkitOverflowScrolling: "touch",
+  alignContent: "start",
+  paddingBottom: 8,
 };
 
 const candidateButtonStyle: CSSProperties = {
@@ -219,56 +232,4 @@ const candidateKcalStyle: CSSProperties = {
   fontSize: 14,
   fontWeight: 800,
   color: "#111827",
-};
-
-const secondaryButtonStyle: CSSProperties = {
-  width: "100%",
-  marginTop: 10,
-  border: "1px solid #E5E7EB",
-  borderRadius: 10,
-  background: "#fff",
-  color: "#4B5563",
-  fontWeight: 600,
-  fontSize: 14,
-  padding: "11px 12px",
-  cursor: "pointer",
-};
-
-const outlineButtonStyle: CSSProperties = {
-  width: "100%",
-  marginTop: 8,
-  border: "1px solid #FDBA74",
-  borderRadius: 10,
-  background: "#fff",
-  color: "#C2410C",
-  fontWeight: 700,
-  fontSize: 14,
-  padding: "11px 12px",
-  cursor: "pointer",
-};
-
-const textButtonStyle: CSSProperties = {
-  width: "100%",
-  marginTop: 4,
-  border: "none",
-  borderRadius: 10,
-  background: "transparent",
-  color: "#6B7280",
-  fontWeight: 600,
-  fontSize: 13,
-  padding: "8px 12px",
-  cursor: "pointer",
-};
-
-const primaryButtonStyle: CSSProperties = {
-  width: "100%",
-  marginTop: 8,
-  border: "none",
-  borderRadius: 10,
-  background: ORANGE,
-  color: "#fff",
-  fontWeight: 700,
-  fontSize: 14,
-  padding: "11px 12px",
-  cursor: "pointer",
 };

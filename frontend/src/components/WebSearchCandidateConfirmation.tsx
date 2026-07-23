@@ -1,7 +1,13 @@
 import type { FoodConfirmationCandidate, VariantDimension } from "../types/foodSearch.ts";
 import { getCandidateConfirmationHeading } from "../utils/candidateConfirmationHeading.ts";
+import { ModalStateLayout } from "./ModalStateLayout.tsx";
 import { ProductConfirmationCard } from "./ProductConfirmationCard.tsx";
 import { SingleCandidateConfirmationCard } from "./SingleCandidateConfirmationCard.tsx";
+import {
+  modalNeutralActionStyle,
+  modalPrimaryActionStyle,
+  modalTextActionStyle,
+} from "./foodModalActionStyles.ts";
 
 interface WebSearchCandidateConfirmationProps {
   variantDimension?: VariantDimension | string;
@@ -36,28 +42,80 @@ export function WebSearchCandidateConfirmation({
   const heading = getCandidateConfirmationHeading(variantDimension, candidateCount);
 
   if (candidateCount === 1) {
+    const candidate = candidates[0];
     return (
-      <SingleCandidateConfirmationCard
-        heading={heading}
-        candidate={candidates[0]}
-        onConfirm={() => onConfirmSingle(candidates[0])}
-        onEdit={() => onEditSingle(candidates[0])}
-        isSubmitting={isSubmitting}
+      <ModalStateLayout
+        contentMode="top"
+        content={
+          <SingleCandidateConfirmationCard
+            heading={heading}
+            candidate={candidate}
+          />
+        }
+        actions={
+          <div className="modal-result-actions modal-result-actions--add-edit">
+            <button
+              type="button"
+              onClick={() => onConfirmSingle(candidate)}
+              disabled={isSubmitting}
+              className="modal-primary-action"
+              style={{
+                ...modalPrimaryActionStyle,
+                opacity: isSubmitting ? 0.6 : 1,
+              }}
+            >
+              追加する
+            </button>
+            <button
+              type="button"
+              onClick={() => onEditSingle(candidate)}
+              disabled={isSubmitting}
+              className="modal-edit-action"
+            >
+              編集
+            </button>
+          </div>
+        }
       />
     );
   }
 
   const isVariantAmbiguous = confirmationReason === "variant_ambiguous";
+  const showUnknown = allowEstimatedAdd !== false && onUnknown;
 
   return (
-    <ProductConfirmationCard
-      title={heading}
-      candidates={candidates}
-      selectedKey={selectedKey}
-      onSelect={onSelect}
-      onManualInput={onManualInput}
-      onUnknown={allowEstimatedAdd === false ? undefined : onUnknown}
-      onConfirmSelected={isVariantAmbiguous ? onConfirmSelected : undefined}
+    <ModalStateLayout
+      contentMode="fill"
+      content={
+        <ProductConfirmationCard
+          title={heading}
+          candidates={candidates}
+          selectedKey={selectedKey}
+          onSelect={onSelect}
+          fillAvailableSpace
+        />
+      }
+      actions={
+        <>
+          <button type="button" onClick={onManualInput} style={modalTextActionStyle}>
+            編集
+          </button>
+          {showUnknown && (
+            <button type="button" onClick={onUnknown} style={modalNeutralActionStyle}>
+              わからない
+            </button>
+          )}
+          {selectedKey && onConfirmSelected && isVariantAmbiguous && (
+            <button
+              type="button"
+              onClick={onConfirmSelected}
+              style={modalPrimaryActionStyle}
+            >
+              追加する
+            </button>
+          )}
+        </>
+      }
     />
   );
 }
