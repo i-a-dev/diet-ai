@@ -6,31 +6,45 @@ interface FoodSearchStatusProps {
   title: string;
   query: string;
   mode: "food" | "web";
-  steps: FoodSearchStep[];
+  /** 0–100。画面上に数値は出さないが ARIA とバー幅に使う */
+  progressPercent: number;
+  /** フェーズ／ステップに応じた待機文言 */
+  statusMessage: string;
+  /** 固定の補足文言 */
+  hintMessage: string;
+  steps?: FoodSearchStep[];
   showApiDebug?: boolean;
-  webPhase?: "planning" | "searching_pages" | "extracting_variants";
+  /** 完了アニメーション中（width トランジションを少し長く） */
+  isFinishing?: boolean;
   /** @deprecated キャンセルはカード外。後方互換のため残す（描画しない） */
   onCancel?: () => void;
 }
 
 /**
  * 検索中ステータス表示のみ。
- * - food: ステップ更新に連動した実進捗バー
- * - web: 長時間ほぼ完了付近で止まるため indeterminate
+ * - food / web とも determinate 風の進捗バー
+ * - 文言の読み上げは statusMessage 変更時のみ（aria-live=polite）
  */
 export function FoodSearchStatus({
   title,
   query,
   mode,
-  steps,
+  progressPercent,
+  statusMessage,
+  hintMessage,
+  steps = [],
   showApiDebug = false,
-  webPhase,
+  isFinishing = false,
 }: FoodSearchStatusProps) {
-  const visibleSteps = steps.filter((step) => step.key !== "waiting_user_choice");
-  const progressRatio = calcProgressRatio(visibleSteps);
+  const clampedPercent = clampProgressPercent(progressPercent);
   const activeApiLabel = detectActiveApiLabel(steps, mode);
-  const webSubText = resolveWebSubText(webPhase);
-  const useIndeterminateProgress = mode === "web";
+  const fillClassName = [
+    "food-search-progress-fill",
+    mode === "web" ? "food-search-progress-fill--soft" : "",
+    isFinishing ? "food-search-progress-fill--finishing" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   return (
     <div className="food-search-status" style={statusStyle}>
@@ -43,32 +57,27 @@ export function FoodSearchStatus({
       </div>
       <div style={headlineStyle}>{title}</div>
       <div className="food-search-query">{query}</div>
-      <div style={subTextStyle}>
-        {mode === "web"
-          ? webSubText
-          : "数秒かかる場合があります"}
+      <div
+        style={statusMessageStyle}
+        aria-live="polite"
+        aria-atomic="true"
+      >
+        {statusMessage}
       </div>
+      <div style={hintStyle}>{hintMessage}</div>
       <div
         className="food-search-progress-track"
         role="progressbar"
         aria-label="検索の進捗"
-        aria-valuemin={useIndeterminateProgress ? undefined : 0}
-        aria-valuemax={useIndeterminateProgress ? undefined : 100}
-        aria-valuenow={
-          useIndeterminateProgress
-            ? undefined
-            : Math.round(Math.max(progressRatio * 100, 12))
-        }
-        aria-valuetext={useIndeterminateProgress ? "検索中" : undefined}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={Math.round(clampedPercent)}
+        aria-valuetext={statusMessage}
       >
-        {useIndeterminateProgress ? (
-          <div className="food-search-progress-indeterminate" />
-        ) : (
-          <div
-            className="food-search-progress-fill"
-            style={{ width: `${Math.max(progressRatio * 100, 12)}%` }}
-          />
-        )}
+        <div
+          className={fillClassName}
+          style={{ width: `${clampedPercent}%` }}
+        />
       </div>
 
       {showApiDebug && (
@@ -80,29 +89,17 @@ export function FoodSearchStatus({
   );
 }
 
-function calcProgressRatio(steps: FoodSearchStep[]): number {
-  if (steps.length === 0) return 0;
-  const doneCount = steps.filter((step) => step.status === "done").length;
-  const activeCount = steps.filter((step) => step.status === "active").length;
-  return (doneCount + activeCount * 0.45) / steps.length;
+function clampProgressPercent(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  if (value < 0) return 0;
+  if (value > 100) return 100;
+  return value;
 }
 
-function resolveWebSubText(
-  phase?: "planning" | "searching_pages" | "extracting_variants",
+function detectActiveApiLabel(
+  steps: FoodSearchStep[],
+  mode: "food" | "web",
 ): string {
-  switch (phase) {
-    case "planning":
-      return "商品名を確認しています";
-    case "searching_pages":
-      return "公式サイトや栄養成分を探しています";
-    case "extracting_variants":
-      return "サイズ・栄養情報を確認しています";
-    default:
-      return "公式サイトや栄養成分を探しています。少し時間がかかる場合があります";
-  }
-}
-
-function detectActiveApiLabel(steps: FoodSearchStep[], mode: "food" | "web"): string {
   const activeStep = steps.find((step) => step.status === "active");
   if (!activeStep) {
     return mode === "web" ? "Brave Search / Claude API" : "待機中";
@@ -121,6 +118,8 @@ function detectActiveApiLabel(steps: FoodSearchStep[], mode: "food" | "web"): st
       return "Brave Search / Claude API";
     case "regex_extracting":
       return "入力解析（ローカル処理）";
+    case "alias_db_searching":
+      return "Alias DB";
     default:
       return "待機中";
   }
@@ -147,8 +146,16 @@ const headlineStyle: CSSProperties = {
   marginBottom: 8,
 };
 
-const subTextStyle: CSSProperties = {
+const statusMessageStyle: CSSProperties = {
   marginTop: 8,
+  textAlign: "center",
+  fontSize: 13,
+  fontWeight: 600,
+  color: "#374151",
+  marginBottom: 4,
+};
+
+const hintStyle: CSSProperties = {
   textAlign: "center",
   fontSize: 12,
   color: "#6B7280",

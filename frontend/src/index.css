@@ -476,24 +476,17 @@ body {
   height: 100%;
   border-radius: 999px;
   background: linear-gradient(90deg, #f59e0b 0%, #f97316 100%);
-  transition: width 260ms ease;
+  transition: width 300ms ease-out;
+  will-change: width;
 }
 
-.food-search-progress-indeterminate {
-  width: 36%;
-  height: 100%;
-  border-radius: 999px;
-  background: linear-gradient(90deg, #f59e0b 0%, #f97316 100%);
-  animation: diet-ai-progress-indeterminate 1.25s ease-in-out infinite;
+/* AI Web検索: 高頻度更新と競合しないよう短めの linear */
+.food-search-progress-fill--soft {
+  transition: width 120ms linear;
 }
 
-@keyframes diet-ai-progress-indeterminate {
-  0% {
-    transform: translateX(-120%);
-  }
-  100% {
-    transform: translateX(320%);
-  }
+.food-search-progress-fill--finishing {
+  transition: width 200ms ease-out;
 }
 
 @media (max-width: 375px) {
@@ -514,9 +507,9 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .food-search-progress-indeterminate {
-    animation: none;
-    width: 45%;
-    margin-left: 27.5%;
+  .food-search-progress-fill,
+  .food-search-progress-fill--soft,
+  .food-search-progress-fill--finishing {
+    transition: none;
   }
 }

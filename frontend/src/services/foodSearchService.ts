@@ -19,6 +19,7 @@ import type {
   SearchState,
 } from "../types/foodSearch.ts";
 import { isWebSearchSource } from "../utils/calorieSource.ts";
+import { isOpenFoodFactsNutritionPlausible } from "../utils/openFoodFactsNutritionGuard.ts";
 
 const FOOD_SEARCH_CACHE_KEY = "dietai.foodSearchCache.v2";
 const FATSECRET_ENDPOINT = import.meta.env.VITE_FATSECRET_SEARCH_ENDPOINT as
@@ -660,16 +661,22 @@ function resultFromOpenFoodFacts(
     nutriments?: {
       "energy-kcal_100g"?: number;
       "energy-kcal_serving"?: number;
+      "energy-kj_100g"?: number;
+      "energy-kj_serving"?: number;
       proteins_100g?: number;
+      proteins_serving?: number;
       fat_100g?: number;
+      fat_serving?: number;
       carbohydrates_100g?: number;
+      carbohydrates_serving?: number;
     };
   },
   parsed: ParsedFoodInput,
   rawInput: string,
 ): FoodSearchResult | null {
-  const kcal100 = product.nutriments?.["energy-kcal_100g"];
-  const kcalServing = product.nutriments?.["energy-kcal_serving"];
+  const nutriments = product.nutriments;
+  const kcal100 = nutriments?.["energy-kcal_100g"];
+  const kcalServing = nutriments?.["energy-kcal_serving"];
   const servingQuantity = Number(product.serving_quantity);
   const servingUnit = product.serving_quantity_unit?.trim();
   const hasKcal100 = Number.isFinite(kcal100) && (kcal100 ?? 0) > 0;
@@ -733,6 +740,50 @@ function resultFromOpenFoodFacts(
     return null;
   }
 
+  const protein =
+    nutriments?.proteins_100g == null || !canScaleMacroBy100g
+      ? null
+      : Number((nutriments.proteins_100g * ratio).toFixed(1));
+  const fat =
+    nutriments?.fat_100g == null || !canScaleMacroBy100g
+      ? null
+      : Number((nutriments.fat_100g * ratio).toFixed(1));
+  const carbs =
+    nutriments?.carbohydrates_100g == null || !canScaleMacroBy100g
+      ? null
+      : Number((nutriments.carbohydrates_100g * ratio).toFixed(1));
+
+  // 表示量に対応するマクロ（serving があれば優先、なければ 100g 換算値）
+  const proteinForCheck =
+    nutriments?.proteins_serving ?? protein ?? null;
+  const fatForCheck = nutriments?.fat_serving ?? fat ?? null;
+  const carbsForCheck =
+    nutriments?.carbohydrates_serving ?? carbs ?? null;
+
+  if (
+    !isOpenFoodFactsNutritionPlausible({
+      calories,
+      amount,
+      unit,
+      energyKcal100g: kcal100,
+      energyKcalServing: kcalServing,
+      energyKj100g: nutriments?.["energy-kj_100g"],
+      energyKjServing: nutriments?.["energy-kj_serving"],
+      proteinG: proteinForCheck,
+      fatG: fatForCheck,
+      carbsG: carbsForCheck,
+    })
+  ) {
+    console.warn("[食品検索] Open Food Facts の栄養値を棄却", {
+      name: product.product_name,
+      code: product.code,
+      calories,
+      amount,
+      unit,
+    });
+    return null;
+  }
+
   return {
     id: `off-${product.code ?? Date.now().toString()}`,
     name: product.product_name ?? parsed.name,
@@ -740,18 +791,9 @@ function resultFromOpenFoodFacts(
     amount,
     unit,
     calories,
-    protein:
-      product.nutriments?.proteins_100g == null || !canScaleMacroBy100g
-        ? null
-        : Number((product.nutriments.proteins_100g * ratio).toFixed(1)),
-    fat:
-      product.nutriments?.fat_100g == null || !canScaleMacroBy100g
-        ? null
-        : Number((product.nutriments.fat_100g * ratio).toFixed(1)),
-    carbs:
-      product.nutriments?.carbohydrates_100g == null || !canScaleMacroBy100g
-        ? null
-        : Number((product.nutriments.carbohydrates_100g * ratio).toFixed(1)),
+    protein,
+    fat,
+    carbs,
     source: "open_food_facts",
     confidence: "high",
     isEstimated: false,
@@ -807,11 +849,20 @@ async function searchOpenFoodFacts(
       code?: string;
       product_name?: string;
       brands?: string;
+      serving_size?: string;
+      serving_quantity?: number;
+      serving_quantity_unit?: string;
       nutriments?: {
         "energy-kcal_100g"?: number;
+        "energy-kcal_serving"?: number;
+        "energy-kj_100g"?: number;
+        "energy-kj_serving"?: number;
         proteins_100g?: number;
+        proteins_serving?: number;
         fat_100g?: number;
+        fat_serving?: number;
         carbohydrates_100g?: number;
+        carbohydrates_serving?: number;
       };
     }>;
   };

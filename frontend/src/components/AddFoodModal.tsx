@@ -62,6 +62,34 @@ import {
   parseCaloriesEdited,
   toPersistedCalorieSource,
 } from "../utils/calorieSource.ts";
+import {
+  AI_WEB_SEARCH_COMPLETE_ANIMATION_MS,
+  AI_WEB_SEARCH_LOADING_HINT,
+  AI_WEB_SEARCH_LOADING_PHASES,
+  resolveAiWebSearchLoadingState,
+  type AiWebSearchLoadingPhase,
+} from "../utils/aiWebSearchLoadingProgress.ts";
+import {
+  FOOD_SEARCH_LOADING_HINT,
+  resolveFoodSearchLoadingState,
+} from "../utils/foodSearchLoadingProgress.ts";
+
+interface AiWebSearchLoadingUi {
+  phase: AiWebSearchLoadingPhase;
+  progressPercent: number;
+  statusMessage: string;
+  isFinishing: boolean;
+}
+
+function createInitialAiWebSearchLoadingUi(): AiWebSearchLoadingUi {
+  const first = AI_WEB_SEARCH_LOADING_PHASES[0];
+  return {
+    phase: first.phase,
+    progressPercent: first.startProgress,
+    statusMessage: first.message,
+    isFinishing: false,
+  };
+}
 
 export interface MealItemInput {
   id?: number;
@@ -179,19 +207,60 @@ export function AddFoodModal({
   const [isHistoryLoading, setIsHistoryLoading] = useState(false);
   const [selectedHistoryItem, setSelectedHistoryItem] =
     useState<MealItemInput | null>(null);
+  const [aiWebSearchLoading, setAiWebSearchLoading] = useState(
+    createInitialAiWebSearchLoadingUi,
+  );
   const activeSearchTokenRef = useRef(0);
   const historyRequestTokenRef = useRef(0);
   const searchStartedAtRef = useRef<number | undefined>(undefined);
   const registrationContextRef = useRef<RegistrationContext>({});
   const aliasCandidateRankRef = useRef<number | null>(null);
+  const foodSearchPeakProgressRef = useRef(0);
+  const aiWebSearchStartedAtRef = useRef<number | null>(null);
+  const aiWebSearchProgressPeakRef = useRef(
+    AI_WEB_SEARCH_LOADING_PHASES[0].startProgress,
+  );
+  const aiWebSearchRafRef = useRef(0);
   const showSearchApiDebug =
     import.meta.env.VITE_FOOD_SEARCH_DEBUG_MODE === "true";
+
+  function resetAiWebSearchLoadingState() {
+    aiWebSearchStartedAtRef.current = Date.now();
+    aiWebSearchProgressPeakRef.current =
+      AI_WEB_SEARCH_LOADING_PHASES[0].startProgress;
+    setAiWebSearchLoading(createInitialAiWebSearchLoadingUi());
+  }
+
+  function clearAiWebSearchLoadingState() {
+    if (aiWebSearchRafRef.current !== 0) {
+      cancelAnimationFrame(aiWebSearchRafRef.current);
+      aiWebSearchRafRef.current = 0;
+    }
+    aiWebSearchStartedAtRef.current = null;
+    aiWebSearchProgressPeakRef.current =
+      AI_WEB_SEARCH_LOADING_PHASES[0].startProgress;
+    setAiWebSearchLoading(createInitialAiWebSearchLoadingUi());
+  }
+
+  async function finishAiWebSearchLoading(token: number): Promise<boolean> {
+    setAiWebSearchLoading((prev) => ({
+      ...prev,
+      progressPercent: 100,
+      isFinishing: true,
+    }));
+    await new Promise<void>((resolve) => {
+      window.setTimeout(resolve, AI_WEB_SEARCH_COMPLETE_ANIMATION_MS);
+    });
+    return activeSearchTokenRef.current === token;
+  }
 
   useLayoutEffect(() => {
     if (!open) {
       // 次回オープン時の初回描画で前回タブが見えないよう、閉じる時点で戻す。
       setHistoryTab("recent");
       activeSearchTokenRef.current = 0;
+      clearAiWebSearchLoadingState();
+      foodSearchPeakProgressRef.current = 0;
       return;
     }
     // 初回描画前に loading を立て、サジェスト差し替えや空表示のちらつきを防ぐ
@@ -213,7 +282,85 @@ export function AddFoodModal({
     searchStartedAtRef.current = undefined;
     registrationContextRef.current = {};
     aliasCandidateRankRef.current = null;
+    clearAiWebSearchLoadingState();
+    foodSearchPeakProgressRef.current = 0;
   }, [open]);
+
+  // AI Web検索: 経過時間ベースのソフト進捗（実バックエンド進捗とは非連動）
+  useEffect(() => {
+    const shouldRunSoftProgress =
+      open &&
+      progress.state === "web_searching" &&
+      !aiWebSearchLoading.isFinishing;
+
+    if (!shouldRunSoftProgress) {
+      if (aiWebSearchRafRef.current !== 0) {
+        cancelAnimationFrame(aiWebSearchRafRef.current);
+        aiWebSearchRafRef.current = 0;
+      }
+      return;
+    }
+
+    if (aiWebSearchStartedAtRef.current == null) {
+      aiWebSearchStartedAtRef.current = Date.now();
+    }
+
+    let cancelled = false;
+    let lastTickAt = 0;
+
+    const updateAiWebSearchLoadingState = (frameTime: number) => {
+      if (cancelled) return;
+
+      if (lastTickAt !== 0 && frameTime - lastTickAt < 100) {
+        aiWebSearchRafRef.current = requestAnimationFrame(
+          updateAiWebSearchLoadingState,
+        );
+        return;
+      }
+      lastTickAt = frameTime;
+
+      const aiWebSearchElapsedMs =
+        Date.now() - (aiWebSearchStartedAtRef.current ?? Date.now());
+      const next = resolveAiWebSearchLoadingState(
+        aiWebSearchElapsedMs,
+        aiWebSearchProgressPeakRef.current,
+      );
+      aiWebSearchProgressPeakRef.current = next.progressPercent;
+
+      setAiWebSearchLoading((prev) => {
+        if (prev.isFinishing) return prev;
+        if (
+          prev.phase === next.phase &&
+          prev.statusMessage === next.statusMessage &&
+          Math.abs(prev.progressPercent - next.progressPercent) < 0.08
+        ) {
+          return prev;
+        }
+        return {
+          phase: next.phase,
+          progressPercent: next.progressPercent,
+          statusMessage: next.statusMessage,
+          isFinishing: false,
+        };
+      });
+
+      aiWebSearchRafRef.current = requestAnimationFrame(
+        updateAiWebSearchLoadingState,
+      );
+    };
+
+    aiWebSearchRafRef.current = requestAnimationFrame(
+      updateAiWebSearchLoadingState,
+    );
+
+    return () => {
+      cancelled = true;
+      if (aiWebSearchRafRef.current !== 0) {
+        cancelAnimationFrame(aiWebSearchRafRef.current);
+        aiWebSearchRafRef.current = 0;
+      }
+    };
+  }, [open, progress.state, aiWebSearchLoading.isFinishing]);
 
   useEffect(() => {
     if (!open) return;
@@ -362,6 +509,7 @@ export function AddFoodModal({
     searchStartedAtRef.current = Date.now();
     registrationContextRef.current = {};
     aliasCandidateRankRef.current = null;
+    foodSearchPeakProgressRef.current = 0;
     setShowManualEdit(false);
     setIsPreSearchManual(false);
     setManualKcal("");
@@ -389,38 +537,11 @@ export function AddFoodModal({
     }
   }
 
-  async function handleWebSearch() {
+  async function runWebSearchFlow(options?: { deepWeb?: boolean }) {
     if (isSearching) return;
     const token = Date.now();
     activeSearchTokenRef.current = token;
-    setIsManualEditingFromConfirmation(false);
-    setShowManualEdit(false);
-    setIsPreSearchManual(false);
-    try {
-      // 変更: 低信頼度時のみ、ユーザー操作で AI Web検索を実行する。
-      const next = await runAiWebSearch(inputValue, (nextProgress) => {
-        if (activeSearchTokenRef.current !== token) return;
-        setProgress(nextProgress);
-      });
-      if (activeSearchTokenRef.current !== token) return;
-      setProgress(next);
-      registrationContextRef.current.webSearchCountDelta = 1;
-    } catch (error) {
-      if (activeSearchTokenRef.current !== token) return;
-      setProgress({
-        ...progress,
-        state: "error",
-        message:
-          error instanceof Error ? error.message : "調べ直すのに失敗しました",
-      });
-      openManualEntry({ fromIdle: false });
-    }
-  }
-
-  async function handleDeepWebSearch() {
-    if (isSearching) return;
-    const token = Date.now();
-    activeSearchTokenRef.current = token;
+    resetAiWebSearchLoadingState();
     setIsManualEditingFromConfirmation(false);
     setShowManualEdit(false);
     setIsPreSearchManual(false);
@@ -429,23 +550,43 @@ export function AddFoodModal({
         inputValue,
         (nextProgress) => {
           if (activeSearchTokenRef.current !== token) return;
-          setProgress(nextProgress);
+          // 完了 state は 100% アニメ後に適用（コールバックでは待機中のみ）
+          if (nextProgress.state === "web_searching") {
+            setProgress(nextProgress);
+          }
         },
-        { deepWeb: true },
+        options,
       );
       if (activeSearchTokenRef.current !== token) return;
+      const stillActive = await finishAiWebSearchLoading(token);
+      if (!stillActive) return;
       setProgress(next);
+      clearAiWebSearchLoadingState();
       registrationContextRef.current.webSearchCountDelta = 1;
     } catch (error) {
       if (activeSearchTokenRef.current !== token) return;
+      clearAiWebSearchLoadingState();
       setProgress({
         ...progress,
         state: "error",
         message:
-          error instanceof Error ? error.message : "詳しく調べ直すのに失敗しました",
+          error instanceof Error
+            ? error.message
+            : options?.deepWeb
+              ? "詳しく調べ直すのに失敗しました"
+              : "調べ直すのに失敗しました",
       });
       openManualEntry({ fromIdle: false });
     }
+  }
+
+  async function handleWebSearch() {
+    // 変更: 低信頼度時のみ、ユーザー操作で AI Web検索を実行する。
+    await runWebSearchFlow();
+  }
+
+  async function handleDeepWebSearch() {
+    await runWebSearchFlow({ deepWeb: true });
   }
 
   function handleConfirmSingleWebCandidate(candidate: FoodConfirmationCandidate) {
@@ -996,20 +1137,42 @@ export function AddFoodModal({
 
   function renderSearchResult(state: SearchState) {
     if (state === "searching" || state === "web_searching") {
+      const isWebSearching = state === "web_searching";
+      const foodLoadingState = resolveFoodSearchLoadingState(
+        progress.steps,
+        foodSearchPeakProgressRef.current,
+      );
+      if (!isWebSearching) {
+        foodSearchPeakProgressRef.current = foodLoadingState.progressPercent;
+      }
+
+      const progressPercent = isWebSearching
+        ? aiWebSearchLoading.progressPercent
+        : foodLoadingState.progressPercent;
+      const statusMessage = isWebSearching
+        ? aiWebSearchLoading.statusMessage
+        : foodLoadingState.statusMessage;
+      const hintMessage = isWebSearching
+        ? AI_WEB_SEARCH_LOADING_HINT
+        : FOOD_SEARCH_LOADING_HINT;
+
       return (
         <ModalStateLayout
           contentMode="searching"
           content={
             <FoodSearchStatus
               title={
-                state === "web_searching"
+                isWebSearching
                   ? "より正確な情報を確認しています"
                   : "食品情報を探しています"
               }
               query={inputValue.trim()}
-              mode={state === "web_searching" ? "web" : "food"}
+              mode={isWebSearching ? "web" : "food"}
+              progressPercent={progressPercent}
+              statusMessage={statusMessage}
+              hintMessage={hintMessage}
               steps={progress.steps}
-              webPhase={progress.webSearchPhase}
+              isFinishing={isWebSearching && aiWebSearchLoading.isFinishing}
               showApiDebug={showSearchApiDebug}
             />
           }
@@ -1018,6 +1181,8 @@ export function AddFoodModal({
               type="button"
               onClick={() => {
                 activeSearchTokenRef.current = 0;
+                clearAiWebSearchLoadingState();
+                foodSearchPeakProgressRef.current = 0;
                 setProgress(makeInitialProgress());
               }}
               className="modal-search-cancel-button"
