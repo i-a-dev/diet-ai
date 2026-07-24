@@ -756,6 +756,7 @@ function ChartGrid({
           y2={y}
           stroke={CHART_GRID_COLOR}
           strokeWidth="1"
+          vectorEffect="non-scaling-stroke"
         />
       ))}
       {verticalLines.map((x) => (
@@ -767,6 +768,7 @@ function ChartGrid({
           y2={CHART_HEIGHT}
           stroke={CHART_GRID_COLOR}
           strokeWidth="1"
+          vectorEffect="non-scaling-stroke"
         />
       ))}
     </>
@@ -1805,6 +1807,7 @@ function WeightGraphCard({
                       strokeWidth="1"
                       strokeDasharray="4 3"
                       opacity="0.5"
+                      vectorEffect="non-scaling-stroke"
                     />
                   )}
                   {chart.lineSegments.map((segment, index) => (
